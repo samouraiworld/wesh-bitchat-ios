@@ -8,12 +8,36 @@ import UIKit
 @Suite("Wesh native palette contrast")
 @MainActor
 struct WeshDesignSystemTests {
-    @Test func nightCanvasIsOpaquePureBlack() throws {
-        let canvas = try rgba(WeshTheme(appearance: .night).canvas, appearance: .night)
+    @Test(arguments: WeshAppearance.allCases)
+    func everyMetalCanvasIsOpaquePureBlack(_ appearance: WeshAppearance) throws {
+        let canvas = try rgba(WeshTheme(appearance: appearance).canvas, appearance: appearance)
         #expect(canvas.red == 0)
         #expect(canvas.green == 0)
         #expect(canvas.blue == 0)
         #expect(canvas.alpha == 1)
+    }
+
+    @Test func silverDefaultRetainsExistingStoredAppearanceIDs() {
+        #expect(WeshTheme().appearance == .night)
+        #expect(WeshAppearance(rawValue: "night")?.title == "Argent")
+        #expect(WeshAppearance(rawValue: "day")?.title == "Or")
+    }
+
+    @Test(arguments: WeshAppearance.allCases)
+    func metallicStopsKeepBlackLabelsReadable(_ appearance: WeshAppearance) throws {
+        let theme = WeshTheme(appearance: appearance)
+        let canvas = try rgba(theme.canvas, appearance: appearance)
+        let label = try rgba(theme.onAccent, appearance: appearance)
+        #expect(label.red == 0 && label.green == 0 && label.blue == 0 && label.alpha == 1)
+        for (index, color) in theme.metallicStops.enumerated() {
+            let stop = try rgba(color, appearance: appearance)
+            // Primary-button press applies 0.8 opacity to the complete rendered button.
+            for opacity in [1.0, 0.8] {
+                let background = RGBA(red: stop.red, green: stop.green, blue: stop.blue, alpha: stop.alpha * opacity).over(canvas)
+                let ratio = contrast(label.over(background), background)
+                #expect(ratio >= 4.5, "\(appearance.title) stop \(index), opacity \(opacity): black label contrast \(ratio):1; needs 4.5:1")
+            }
+        }
     }
 
     @Test(arguments: WeshAppearance.allCases)
@@ -46,7 +70,7 @@ struct WeshDesignSystemTests {
     }
 
     private func rgba(_ color: Color, appearance: WeshAppearance) throws -> RGBA {
-        let traits = UITraitCollection(userInterfaceStyle: appearance == .night ? .dark : .light)
+        let traits = UITraitCollection(userInterfaceStyle: WeshTheme(appearance: appearance).scheme == .dark ? .dark : .light)
         let resolved = UIColor(color).resolvedColor(with: traits)
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
         try #require(resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha), "Palette color must resolve to RGB")

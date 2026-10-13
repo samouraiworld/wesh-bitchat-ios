@@ -272,7 +272,7 @@ private struct WeshConversation: View {
                         Image(systemName: "arrow.up").font(.body.weight(.semibold))
                             .frame(width: 48, height: 48)
                             .foregroundStyle(canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? theme.onAccent : theme.secondary)
-                            .background(canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? theme.accent : theme.canvas, in: Circle())
+                            .background(canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AnyShapeStyle(theme.metalFill) : AnyShapeStyle(theme.canvas), in: Circle())
                             .overlay(Circle().strokeBorder(theme.line, lineWidth: canSend ? 0 : 1))
                     }
                     .accessibilityLabel(isPrivate ? "Envoyer le message privé" : "Envoyer publiquement")
@@ -442,7 +442,7 @@ private struct WeshContactSheet: View {
         Button { selectMode(scanner: scanner) } label: {
             Text(title).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
                 .foregroundStyle(showingScanner == scanner ? theme.onAccent : theme.secondary)
-                .background(showingScanner == scanner ? theme.accent : theme.canvas, in: RoundedRectangle(cornerRadius: theme.radius))
+                .background(showingScanner == scanner ? AnyShapeStyle(theme.metalFill) : AnyShapeStyle(theme.canvas), in: RoundedRectangle(cornerRadius: theme.radius))
         }.buttonStyle(.plain).accessibilityAddTraits(showingScanner == scanner ? .isSelected : [])
     }
 
@@ -598,14 +598,14 @@ private struct WeshAppearanceSettings: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Wesh, à votre lumière.").font(.title2.weight(.semibold))
+                Text("Une touche de métal.").font(.title2.weight(.semibold))
                 ForEach(WeshAppearance.allCases) { choice in
                     let palette = WeshTheme(appearance: choice)
                     Button { appearance = choice } label: {
                         HStack(spacing: 20) {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("wesh").font(.system(.title2, design: .rounded).weight(.bold))
-                                Capsule().fill(palette.accent).frame(width: 44, height: 8)
+                                Capsule().fill(palette.metalFill).frame(width: 44, height: 8)
                                 Capsule().fill(palette.ink).frame(width: 30, height: 4)
                             }.foregroundStyle(palette.ink).frame(width: 96, height: 108)
                                 .background(palette.canvas, in: RoundedRectangle(cornerRadius: palette.radius))
@@ -621,7 +621,7 @@ private struct WeshAppearanceSettings: View {
                         }.foregroundStyle(theme.ink).padding(.vertical, 8)
                     }.buttonStyle(.plain).accessibilityAddTraits(appearance == choice ? .isSelected : [])
                 }
-                Text("Nuit utilise un fond entièrement noir. Le QR reste noir sur blanc pour être facile à scanner.")
+                Text("Argent ou or, sur noir pur. Le QR reste noir sur blanc pour être facile à scanner.")
                     .font(.subheadline).foregroundStyle(theme.secondary)
             }.padding(theme.contentInset)
         }.navigationTitle("Apparence").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Apparence")
