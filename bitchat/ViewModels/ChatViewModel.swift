@@ -1340,9 +1340,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                       let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex)?.sha256Fingerprint() == fingerprint }),
                       canSendWeshPrivate(to: contact.peerID) else { return }
                 sendPrivateMessage(content, to: contact.peerID)
-            } else if UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") {
-                switchLocationChannel(to: .mesh)
-                outgoingCoordinator.sendMessage(content, allowCommands: false)
+            } else {
+                _ = sendWeshText(content, to: nil)
             }
             return
         }
@@ -1362,12 +1361,28 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             sendPrivateMessage(content, to: peerID)
             return true
         } else {
-            guard UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return false }
+            guard canSendWeshPublic,
+                  UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return false }
             endPrivateChat()
             switchLocationChannel(to: .mesh)
         }
         outgoingCoordinator.sendMessage(content, allowCommands: false)
         return true
+    }
+
+    /// Radio availability only; it does not promise a peer or a recipient receipt.
+    var canSendWeshPublic: Bool { bluetoothState == .poweredOn }
+
+    /// Composer drafts are cleared only after the explicit route accepts the send.
+    @discardableResult
+    func sendWeshDraft(_ draft: inout String, to peerID: PeerID?) -> Bool {
+        guard sendWeshText(draft, to: peerID) else { return false }
+        draft = ""
+        return true
+    }
+
+    func weshQRProgress(for noiseKey: Data) -> ChatVerificationCoordinator.QRProgress {
+        verificationCoordinator.qrProgress(for: noiseKey)
     }
 
     /// Sends a 👋 to the mesh channel regardless of the active channel.

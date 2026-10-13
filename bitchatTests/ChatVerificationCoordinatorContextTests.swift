@@ -238,17 +238,29 @@ struct ChatVerificationCoordinatorContextTests {
         let coordinator = ChatVerificationCoordinator(context: context, weshMode: true, now: { clock })
         let original = makeVerificationQR(noiseKeyHex: key.hexEncodedString())
         #expect(coordinator.beginQRVerification(with: original))
+        #expect(coordinator.qrProgress(for: key) == .pending)
         let nonce = context.sentChallenges.first?.nonceA
         #expect(coordinator.beginQRVerification(with: original))
         #expect(context.sentChallenges.count == 1)
-        clock = clock.addingTimeInterval(61)
+        clock = clock.addingTimeInterval(60)
+        #expect(coordinator.qrProgress(for: key) == .pending)
+        clock = clock.addingTimeInterval(1)
+        #expect(coordinator.qrProgress(for: key) == .expired)
+        #expect(context.identityVerifiedCalls.isEmpty)
         #expect(coordinator.beginQRVerification(with: original))
+        #expect(coordinator.qrProgress(for: key) == .pending)
         #expect(context.sentChallenges.count == 2)
         #expect(context.sentChallenges.last?.nonceA != nonce)
         let changed = VerificationService.VerificationQR(v: 1, noiseKeyHex: original.noiseKeyHex,
             signKeyHex: String(repeating: "ff", count: 32), npub: nil, nickname: "Nora", ts: 0, nonceB64: "", sigHex: "")
         #expect(coordinator.beginQRVerification(with: changed))
         #expect(context.sentChallenges.count == 3)
+        #expect(coordinator.qrProgress(for: Data(repeating: 3, count: 32)) == .unavailable)
+        context.verifiedFingerprints.insert(key.sha256Fingerprint())
+        WeshQRTrust.shared.record(sessionKey: key)
+        defer { WeshQRTrust.shared.clear() }
+        clock = clock.addingTimeInterval(61)
+        #expect(coordinator.qrProgress(for: key) == .verified)
     }
 
     @Test @MainActor

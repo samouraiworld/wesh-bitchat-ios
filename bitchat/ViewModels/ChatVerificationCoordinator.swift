@@ -151,6 +151,9 @@ extension ChatVerificationContext {
 
 @MainActor
 final class ChatVerificationCoordinator {
+    enum QRProgress: Equatable {
+        case pending, verified, expired, unavailable
+    }
     struct PendingVerification {
         let noiseKeyHex: String
         let signKeyHex: String
@@ -172,6 +175,19 @@ final class ChatVerificationCoordinator {
         self.now = now
         self.weshMode = weshMode
         self.context = context
+    }
+
+    /// Uses the same injected clock and 60-second lifetime as challenge completion.
+    /// A completed local proof wins over expiration; this never extends a pending attempt.
+    func qrProgress(for noiseKey: Data) -> QRProgress {
+        guard noiseKey.count == 32 else { return .unavailable }
+        let fingerprint = noiseKey.sha256Fingerprint()
+        if context.isVerifiedFingerprint(fingerprint),
+           !weshMode || WeshQRTrust.shared.fingerprints.contains(fingerprint) { return .verified }
+        guard let pending = pendingQRVerifications.values.first(where: {
+            $0.noiseKeyHex.lowercased() == noiseKey.hexEncodedString().lowercased()
+        }) else { return .unavailable }
+        return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
     }
 
     func verifyFingerprint(for peerID: PeerID) {

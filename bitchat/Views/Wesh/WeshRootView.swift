@@ -132,9 +132,13 @@ private struct WeshConversation: View {
     @AppStorage("wesh.publicMuted") private var publicMuted = false
     @EnvironmentObject private var actions: ConversationUIModel
     @AppStorage("wesh.publicDisclosureAccepted.v1") private var publicAccepted = false
+    @EnvironmentObject private var chrome: AppChromeModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var composerFocused: Bool
 
     private var isPrivate: Bool { peerID != nil }
-    private var canSend: Bool { peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? true }
+    private var canSend: Bool { peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic }
     private var messages: [BitchatMessage] {
         if let peerID {
             let stableMessages = inbox.messages(for: peerID)
@@ -152,20 +156,27 @@ private struct WeshConversation: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(isPrivate ? (canSend ? "Identité vérifiée sur ce téléphone" : "Écriture suspendue · connexion ou QR requis") : "Public · Bluetooth à proximité",
-                      systemImage: isPrivate ? "lock" : "antenna.radiowaves.left.and.right").font(.subheadline.weight(.medium))
-                Text(isPrivate ? "Pour échanger, chacun doit scanner le QR de l’autre sur son téléphone." : "Les participants peuvent voir, conserver et relayer vos messages. Les surnoms ne sont pas des identités vérifiées.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if isPrivate && !canSend {
-                    Button("Vérifier ou reconnecter le contact") { contactSheet = true }.frame(minHeight: 44)
-                    Text("Connexion sécurisée et QR du contact requis. Aucun message ne sera envoyé avant cette vérification.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(WeshColor.surface)
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(isPrivate ? (canSend ? "Identité vérifiée sur ce téléphone" : "Écriture suspendue · connexion ou QR requis") : "Public · Bluetooth à proximité",
+                                  systemImage: isPrivate ? "lock" : "antenna.radiowaves.left.and.right").font(.subheadline.weight(.medium))
+                            Text(isPrivate ? "Pour échanger, chacun doit scanner le QR de l’autre sur son téléphone." : "Les participants peuvent voir, conserver et relayer vos messages. Les surnoms ne sont pas des identités vérifiées.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            if isPrivate && !canSend {
+                                Button("Vérifier ou reconnecter le contact") { contactSheet = true }.frame(minHeight: 44)
+                                Text("Connexion sécurisée et QR du contact requis. Aucun message ne sera envoyé avant cette vérification.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            } else if !isPrivate && !canSend {
+                                Text(bluetoothSummary(chrome.bluetoothState)).font(.subheadline)
+                                Text("Votre brouillon reste sur ce téléphone tant que le Bluetooth est indisponible.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                if chrome.bluetoothState == .unauthorized {
+                                    Button("Ouvrir les réglages de Wesh", action: openWeshSystemSettings).frame(minHeight: 44)
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding().background(WeshColor.surface)
                         if messages.isEmpty {
                             VStack(spacing: 12) {
                                 Image(systemName: isPrivate ? "bubble.left.and.bubble.right" : "antenna.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(.secondary)
@@ -186,8 +197,12 @@ private struct WeshConversation: View {
                         }
                     }.padding()
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: messages.count) { _ in
-                    if let id = messages.last?.id { withAnimation { scroll.scrollTo(id, anchor: .bottom) } }
+                    if let id = messages.last?.id {
+                        if reduceMotion { scroll.scrollTo(id, anchor: .bottom) }
+                        else { withAnimation { scroll.scrollTo(id, anchor: .bottom) } }
+                    }
                 }
             }
         }
@@ -196,11 +211,14 @@ private struct WeshConversation: View {
         .safeAreaInset(edge: .bottom) {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(isPrivate ? "Message privé" : "Message public", text: $draft, axis: .vertical)
-                    .lineLimit(1...6).padding(12).background(WeshColor.surface, in: RoundedRectangle(cornerRadius: 16))
+                    .lineLimit(1...(dynamicTypeSize.isAccessibilitySize ? 3 : 6))
+                    .focused($composerFocused)
+                    .padding(12).background(WeshColor.surface, in: RoundedRectangle(cornerRadius: 16))
                     .accessibilityLabel(isPrivate ? "Message privé" : "Message public")
                 Button {
                     if !isPrivate && !publicAccepted { publicWarning = true } else { send() }
-                } label: { Label("Envoyer", systemImage: "arrow.up").font(.body.weight(.semibold)).frame(minHeight: 44) }
+                } label: { Image(systemName: "arrow.up").font(.body.weight(.semibold)).frame(width: 44, height: 44) }
+                    .accessibilityLabel(isPrivate ? "Envoyer le message privé" : "Envoyer publiquement")
                     .disabled(!canSend || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }.padding().background(WeshColor.canvas)
         }
@@ -223,7 +241,7 @@ private struct WeshConversation: View {
     }
 
     private func send() {
-        if runtime.chatViewModel.sendWeshText(draft, to: peerID) { draft = "" }
+        if runtime.chatViewModel.sendWeshDraft(&draft, to: peerID) { composerFocused = false }
     }
 }
 
@@ -284,13 +302,12 @@ private struct WeshContactSheet: View {
     @State private var scannedKey: Data?
     @State private var qr = ""
     @State private var pastedQR = ""
+    @State private var progress: ChatVerificationCoordinator.QRProgress = .unavailable
     private let renewal = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
+    private let progressRefresh = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var completed: Bool {
-        guard let scannedKey else { return false }
-        return trust.fingerprints.contains(scannedKey.sha256Fingerprint()) && runtime.peerListModel.allPeers.contains {
-            $0.noisePublicKey == scannedKey && runtime.chatViewModel.canSendWeshPrivate(to: $0.peerID)
-        }
+        progress == .verified
     }
 
     var body: some View {
@@ -328,6 +345,10 @@ private struct WeshContactSheet: View {
                     if completed {
                         Label("Identité vérifiée sur ce téléphone", systemImage: "checkmark.shield").foregroundStyle(.green)
                         Text("Demandez au contact de scanner votre QR sur son téléphone pour qu’il puisse vous écrire.").font(.subheadline)
+                    } else if scannedKey != nil && (progress == .expired || progress == .unavailable) {
+                        Text("Aucune confirmation reçue. Gardez Wesh ouvert sur les deux téléphones, puis scannez à nouveau.")
+                            .font(.subheadline)
+                        Button("Réessayer le scan") { scannedKey = nil; scanning = true; status = "" }.frame(minHeight: 44)
                     } else if !status.isEmpty { Text(status).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
                 }.padding()
             }
@@ -335,19 +356,28 @@ private struct WeshContactSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
             .onAppear { qr = verification.myQRString() }
             .onReceive(renewal) { _ in qr = verification.myQRString() }
+            .onReceive(progressRefresh) { _ in refreshProgress() }
+            .onChange(of: trust.fingerprints) { _ in refreshProgress() }
         }
     }
 
     private func scan(_ value: String) {
         scanning = false
         scannedKey = nil
+        progress = .unavailable
         switch verification.verifyScannedPayload(value) {
         case .invalid: status = "QR invalide ou expiré. Demandez un nouveau QR à votre contact."
         case .notFound: status = "Contact introuvable à proximité ou identité différente. Rapprochez les téléphones et réessayez."
         case .requested(let name):
             if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) { scannedKey = Data(hexString: parsed.noiseKeyHex) }
             status = "Vérification de \(name) en cours sur la connexion sécurisée. Gardez les deux applications ouvertes."
+            refreshProgress()
         }
+    }
+
+    private func refreshProgress() {
+        guard let scannedKey else { return }
+        progress = runtime.chatViewModel.weshQRProgress(for: scannedKey)
     }
 }
 

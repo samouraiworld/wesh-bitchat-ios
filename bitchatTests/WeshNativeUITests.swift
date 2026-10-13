@@ -1,11 +1,42 @@
 import BitFoundation
 import CryptoKit
+import CoreBluetooth
 import Foundation
 import Testing
 @testable import bitchat
 
-@Suite("Wesh native trust and public separation")
+@Suite("Wesh native trust and public separation", .serialized)
 struct WeshNativeUITests {
+    @Test @MainActor func unavailableBluetoothPreservesPublicDraftAndPreventsDispatch() {
+        let consentKey = "wesh.publicDisclosureAccepted.v1"
+        let previous = UserDefaults.standard.object(forKey: consentKey)
+        UserDefaults.standard.set(true, forKey: consentKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+            else { UserDefaults.standard.removeObject(forKey: consentKey) }
+        }
+        let keychain = MockKeychain()
+        let transport = MockTransport()
+        let vm = ChatViewModel(keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: MockIdentityManager(keychain), transport: transport,
+            weshPrivatePolicyEnabled: true)
+        let unavailableStates: [CBManagerState] = [.unknown, .resetting, .poweredOff, .unauthorized, .unsupported]
+        for state in unavailableStates {
+            vm.bluetoothState = state
+            var draft = "Essai local — brouillon"
+            #expect(!vm.canSendWeshPublic)
+            #expect(!vm.sendWeshDraft(&draft, to: nil))
+            #expect(draft == "Essai local — brouillon")
+            #expect(transport.sentMessages.isEmpty)
+        }
+        vm.bluetoothState = .poweredOn
+        var draft = "Essai local — brouillon"
+        #expect(vm.canSendWeshPublic)
+        #expect(vm.sendWeshDraft(&draft, to: nil))
+        #expect(draft.isEmpty)
+        #expect(transport.sentMessages.count == 1)
+    }
     private var vector: VerificationService.VerificationQR {
         .init(v: 1, noiseKeyHex: "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
               signKeyHex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
