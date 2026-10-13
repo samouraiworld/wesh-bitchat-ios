@@ -94,10 +94,10 @@ final class ChatOutgoingCoordinator {
         geohashMiningTask?.cancel()
     }
 
-    func sendMessage(_ content: String) {
+    func sendMessage(_ content: String, allowCommands: Bool = true) {
         guard let trimmed = content.trimmedOrNilIfEmpty else { return }
 
-        if content.hasPrefix("/") {
+        if allowCommands && content.hasPrefix("/") {
             Task { @MainActor [weak context = self.context] in
                 context?.handleCommand(content)
             }

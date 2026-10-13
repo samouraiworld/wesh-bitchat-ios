@@ -34,6 +34,17 @@ struct CourierDirectory {
 final class MessageRouter {
     typealias QueuedMessage = MessageOutboxStore.QueuedMessage
 
+    /// Optional application policy; upstream consumers retain their original behavior.
+    /// An authorized first send returns the authenticated recipient key. Every retry must
+    /// retain that key, even if a short BLE address is reused by another verified person.
+    var privateSendPolicy: ((PeerID, Data?) -> Data?)?
+
+    private func authorized(_ message: QueuedMessage, for recipient: PeerID) -> Bool {
+        guard let privateSendPolicy else { return true }
+        guard let pinnedKey = message.recipientNoiseKey else { return false }
+        return privateSendPolicy(recipient, pinnedKey) == pinnedKey
+    }
+
     private struct PeerMessageKey: Hashable {
         // periphery:ignore - read only via the synthesized Hashable
         // conformance (dictionary-key identity), which the indexer
@@ -90,6 +101,7 @@ final class MessageRouter {
             }
             guard !promptlyDeliverable else { continue }
             for message in queue where now().timeIntervalSince(message.timestamp) <= Self.messageTTLSeconds {
+                guard authorized(message, for: peerID), privateSendPolicy == nil || message.recipientNoiseKey == recipientKey else { continue }
                 requestBridgeCourierDeposit(message, for: peerID, recipientKey: recipientKey)
             }
         }
@@ -190,12 +202,15 @@ final class MessageRouter {
     // MARK: - Message Sending
 
     func sendPrivate(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
+        let pinnedKey = privateSendPolicy?(peerID, nil)
+        guard privateSendPolicy == nil || pinnedKey != nil else { return }
         let message = QueuedMessage(
             content: content,
             nickname: recipientNickname,
             messageID: messageID,
             timestamp: now(),
-            sendAttempts: 1
+            sendAttempts: 1,
+            recipientNoiseKey: pinnedKey
         )
 
         if let transport = connectedTransport(for: peerID), transport.canDeliverSecurely(to: peerID) {
@@ -273,7 +288,8 @@ final class MessageRouter {
     /// wins if the peer reappears first (receivers dedup by message ID).
     private func attemptCourierDeposit(messageID: String, for peerID: PeerID) {
         guard let recipientKey = courierDirectory.noiseKey(peerID),
-              let entry = queuedMessage(messageID, for: peerID) else { return }
+              let entry = queuedMessage(messageID, for: peerID), authorized(entry, for: peerID),
+              privateSendPolicy == nil || entry.recipientNoiseKey == recipientKey else { return }
         // The bridge drop needs no connected courier — only the recipient
         // key — so it runs before the courier-slot bookkeeping.
         requestBridgeCourierDeposit(entry, for: peerID, recipientKey: recipientKey)
@@ -318,6 +334,7 @@ final class MessageRouter {
                       let recipientKey = courierDirectory.noiseKey(recipient),
                       recipientKey != courierKey else { continue }
                 for message in queue {
+                    guard authorized(message, for: recipient), privateSendPolicy == nil || message.recipientNoiseKey == recipientKey else { continue }
                     guard message.depositedCourierKeys.count < Self.maxCouriersPerMessage,
                           !message.depositedCourierKeys.contains(courierKey),
                           currentDate.timeIntervalSince(message.timestamp) <= Self.messageTTLSeconds else { continue }
@@ -368,6 +385,7 @@ final class MessageRouter {
         for peerID: PeerID,
         recipientKey: Data
     ) {
+        guard authorized(message, for: peerID), privateSendPolicy == nil || message.recipientNoiseKey == recipientKey else { return }
         let inFlightKey = PeerMessageKey(peerID: peerID, messageID: message.messageID)
         guard let bridgeCourierDeposit,
               bridgeDepositsInFlight.insert(inFlightKey).inserted else { return }
@@ -643,6 +661,7 @@ final class MessageRouter {
         for candidate in candidates {
             let peerID = candidate.peerID
             let message = candidate.message
+            guard authorized(message, for: peerID) else { continue }
             let key = PeerMessageKey(peerID: peerID, messageID: message.messageID)
             guard retriedMessageIDs.insert(message.messageID).inserted,
                   secureTransmissions.contains(key),
@@ -699,6 +718,7 @@ final class MessageRouter {
         var outboxChanged = false
 
         for message in queued {
+            guard authorized(message, for: peerID) else { continue }
             // A synchronous ack from an earlier send in this flush may have
             // removed an entry from the live outbox. The snapshot is only an
             // iteration order; never use it to recreate removed messages.

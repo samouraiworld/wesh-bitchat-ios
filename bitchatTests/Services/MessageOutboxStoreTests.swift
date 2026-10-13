@@ -24,7 +24,8 @@ struct MessageOutboxStoreTests {
             messageID: id,
             timestamp: Date(timeIntervalSince1970: 1_750_000_000),
             sendAttempts: 2,
-            depositedCourierKeys: [Data(repeating: 0xC1, count: 32)]
+            depositedCourierKeys: [Data(repeating: 0xC1, count: 32)],
+            recipientNoiseKey: Data(repeating: 0xA1, count: 32)
         )
     }
 
@@ -42,6 +43,7 @@ struct MessageOutboxStoreTests {
         #expect(reloaded[peerID]?.count == 1)
         #expect(reloaded[peerID]?.first?.messageID == "m1")
         #expect(reloaded[peerID]?.first?.sendAttempts == 2)
+        #expect(reloaded[peerID]?.first?.recipientNoiseKey == Data(repeating: 0xA1, count: 32))
         #expect(reloaded[peerID]?.first?.depositedCourierKeys.count == 1)
     }
 

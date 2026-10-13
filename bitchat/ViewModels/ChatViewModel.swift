@@ -215,7 +215,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         context: self,
         sweepsOnInit: !TestEnvironment.isRunningTests
     )
-    lazy var verificationCoordinator = ChatVerificationCoordinator(context: self)
+    let weshPrivatePolicyEnabled: Bool
+    lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
     lazy var groupCoordinator = ChatGroupCoordinator(context: self)
     lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
 
@@ -1151,7 +1152,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             outboxStore: MessageOutboxStore(keychain: keychain),
             sfMetrics: .shared,
             panicRecoveryOperations: panicRecoveryOperations,
-            panicNetworkLifecycle: .live
+            panicNetworkLifecycle: .live,
+            weshPrivatePolicyEnabled: WeshMode.isActive
         )
     }
 
@@ -1172,8 +1174,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         sfMetrics: StoreAndForwardMetrics? = nil,
         panicMediaWipe: (() throws -> Void)? = nil,
         panicRecoveryOperations: PanicRecoveryOperations? = nil,
-        panicNetworkLifecycle: PanicNetworkLifecycle = .noop
+        panicNetworkLifecycle: PanicNetworkLifecycle = .noop,
+        weshPrivatePolicyEnabled: Bool = false
     ) {
+        self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
         let peerIdentityStore = peerIdentityStore ?? PeerIdentityStore()
         let locationPresenceStore = locationPresenceStore ?? LocationPresenceStore()
@@ -1224,6 +1228,15 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 self.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        if weshPrivatePolicyEnabled {
+            messageRouter.privateSendPolicy = { [weak self] recipient, pinnedKey in
+                guard let self, self.canSendWeshPrivate(to: recipient),
+                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(recipient)),
+                      pinnedKey == nil || pinnedKey == actualKey else { return nil }
+                return actualKey
+            }
+        }
 
         let recoveryRequired: Bool
         do {
@@ -1321,7 +1334,40 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     ///         Routes to private chat if one is selected, otherwise broadcasts
     @MainActor
     func sendMessage(_ content: String) {
+        if weshPrivatePolicyEnabled {
+            if selectedPrivateChatPeer != nil {
+                guard let fingerprint = selectedPrivateChatFingerprint,
+                      let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex)?.sha256Fingerprint() == fingerprint }),
+                      canSendWeshPrivate(to: contact.peerID) else { return }
+                sendPrivateMessage(content, to: contact.peerID)
+            } else if UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") {
+                switchLocationChannel(to: .mesh)
+                outgoingCoordinator.sendMessage(content, allowCommands: false)
+            }
+            return
+        }
         outgoingCoordinator.sendMessage(content)
+    }
+
+    /// Explicit text API: preserves the current send pipeline while preventing a slash command
+    /// from changing the recipient after the composer checked its QR authorization.
+    @MainActor
+    @discardableResult
+    func sendWeshText(_ content: String, to peerID: PeerID?) -> Bool {
+        guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return false }
+        if let peerID {
+            guard canSendWeshPrivate(to: peerID) else { return false }
+            startPrivateChat(with: peerID)
+            // Route to the checked full Noise-key identity, never mutable global selection.
+            sendPrivateMessage(content, to: peerID)
+            return true
+        } else {
+            guard UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return false }
+            endPrivateChat()
+            switchLocationChannel(to: .mesh)
+        }
+        outgoingCoordinator.sendMessage(content, allowCommands: false)
+        return true
     }
 
     /// Sends a 👋 to the mesh channel regardless of the active channel.
@@ -1620,6 +1666,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Clear through SecureIdentityStateManager instead of directly
         identityManager.clearAllIdentityData()
         peerIdentityStore.clearAll()
+        WeshQRTrust.shared.clear()
+        ["wesh.publicDisclosureAccepted.v1", "wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
         locationPresenceStore.reset()
         publicRateLimiter.reset()
 

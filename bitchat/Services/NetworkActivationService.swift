@@ -36,6 +36,13 @@ final class NetworkActivationService: ObservableObject {
 
     @Published private(set) var activationAllowed: Bool = false
     @Published private(set) var userTorEnabled: Bool = true
+    @Published private(set) var userInternetEnabled: Bool = true
+
+    /// BLE does not depend on this opt-in. Wesh nearby mode disables all relay activation.
+    func setUserInternetEnabled(_ enabled: Bool) {
+        userInternetEnabled = enabled
+        if started { reevaluate() }
+    }
     /// Coarse, debounced network reachability. `false` only when the OS reports
     /// no usable interface at all. Surfaced for UI ("offline" vs "connecting").
     @Published private(set) var isNetworkReachable: Bool = true
@@ -262,7 +269,7 @@ final class NetworkActivationService: ObservableObject {
     /// Effective gate: base policy AND a usable network path. When there is
     /// provably no network, Tor bootstrap and relay reconnects are suppressed.
     private func effectiveAllowed() -> Bool {
-        basePolicyAllowed() && reachabilityMonitor.isReachable
+        userInternetEnabled && basePolicyAllowed() && reachabilityMonitor.isReachable
     }
 
     private func applyTorState(torDesired: Bool) {

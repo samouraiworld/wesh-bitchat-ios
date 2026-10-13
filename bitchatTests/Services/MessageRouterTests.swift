@@ -13,6 +13,46 @@ import BitFoundation
 struct MessageRouterTests {
 
     @Test @MainActor
+    func weshQueuedRetryRetainsOriginalRecipientEvenIfBothKeysVerified() {
+        let peerID = PeerID(str: "0000000000000001")
+        let transport = MockTransport()
+        transport.connectedPeers.insert(peerID)
+        let router = MessageRouter(transports: [transport])
+        let original = Data(repeating: 1, count: 32)
+        var actual = original
+        var enabled = true
+        router.privateSendPolicy = { _, pinned in
+            guard enabled, pinned == nil || pinned == actual else { return nil }
+            return actual
+        }
+        router.sendPrivate("For A only", to: peerID, recipientNickname: "A", messageID: "pinned")
+        #expect(transport.sentPrivateMessages.count == 1)
+        actual = Data(repeating: 2, count: 32)
+        router.flushOutbox(for: peerID)
+        router.retrySecurePrivateMessagesAfterAuthentication(for: [peerID])
+        #expect(transport.sentPrivateMessages.count == 1)
+        actual = original
+        enabled = false
+        router.flushOutbox(for: peerID)
+        #expect(transport.sentPrivateMessages.count == 1)
+        enabled = true
+        router.flushOutbox(for: peerID)
+        #expect(transport.sentPrivateMessages.count == 2)
+    }
+
+    @Test @MainActor
+    func weshPolicyDenialCannotBecomePublicOrPrivateTransmission() {
+        let peerID = PeerID(str: "0000000000000001")
+        let transport = MockTransport()
+        transport.connectedPeers.insert(peerID)
+        let router = MessageRouter(transports: [transport])
+        router.privateSendPolicy = { _, _ in nil }
+        router.sendPrivate("Blocked", to: peerID, recipientNickname: "A", messageID: "denied")
+        router.flushAllOutbox()
+        #expect(transport.sentPrivateMessages.isEmpty)
+    }
+
+    @Test @MainActor
     func sendPrivate_usesReachableTransport() async {
         let peerID = PeerID(str: "0000000000000001")
         let transportA = MockTransport()

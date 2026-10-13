@@ -171,6 +171,7 @@ private func makeVerificationQR(noiseKeyHex: String) -> VerificationService.Veri
 
 /// Exercises `ChatVerificationCoordinator` against
 /// `MockChatVerificationContext` with no `ChatViewModel`.
+@Suite(.serialized)
 struct ChatVerificationCoordinatorContextTests {
 
     @Test @MainActor
@@ -192,6 +193,76 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(context.storedVerifiedCalls.map(\.verified) == [true, false])
         #expect(context.saveIdentityStateCount == 2)
         #expect(context.updatedEncryptionStatusPeers == [peerID, peerID])
+    }
+
+    @Test @MainActor
+    func signedQRResponseMustMatchActualSessionAndSuppressesMutualClaims() throws {
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        let peerID = PeerID(str: "1122334455667788")
+        let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+            signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+            nickname: "Nora", ts: 0, nonceB64: "", sigHex: "")
+        for matching in [false, true] {
+            let context = MockChatVerificationContext()
+            context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Nora")]
+            context.establishedNoiseSessions = [peerID]
+            context.noiseSessionKeysByPeerID[peerID] = key
+            context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+            let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+            #expect(coordinator.beginQRVerification(with: qr))
+            let nonce = try #require(context.sentChallenges.first?.nonceA)
+            if !matching { context.noiseSessionKeysByPeerID[peerID] = Data(repeating: 2, count: 32) }
+            let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: qr.noiseKeyHex, nonceA: nonce))
+            let response = try #require(NoisePayload.decode(encoded))
+            coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
+            #expect(context.identityVerifiedCalls.count == (matching ? 1 : 0))
+            #expect(context.vouchToConnectedVerifiedPeersCount == 0)
+            #expect(!context.postedLocalNotifications.contains { $0.title == "Mutual verification" })
+            coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
+            #expect(context.identityVerifiedCalls.count == (matching ? 1 : 0))
+        }
+        WeshQRTrust.shared.clear()
+    }
+
+    @Test @MainActor
+    func expiredOrChangedSigningIdentityReplacesPendingChallenge() {
+        let context = MockChatVerificationContext()
+        let key = Data(repeating: 1, count: 32)
+        let peer = PeerID(str: "1122334455667788")
+        context.unifiedPeers = [BitchatPeer(peerID: peer, noisePublicKey: key, nickname: "Nora")]
+        context.establishedNoiseSessions = [peer]
+        context.noiseSessionKeysByPeerID[peer] = key
+        var clock = Date(timeIntervalSince1970: 1700000000)
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true, now: { clock })
+        let original = makeVerificationQR(noiseKeyHex: key.hexEncodedString())
+        #expect(coordinator.beginQRVerification(with: original))
+        let nonce = context.sentChallenges.first?.nonceA
+        #expect(coordinator.beginQRVerification(with: original))
+        #expect(context.sentChallenges.count == 1)
+        clock = clock.addingTimeInterval(61)
+        #expect(coordinator.beginQRVerification(with: original))
+        #expect(context.sentChallenges.count == 2)
+        #expect(context.sentChallenges.last?.nonceA != nonce)
+        let changed = VerificationService.VerificationQR(v: 1, noiseKeyHex: original.noiseKeyHex,
+            signKeyHex: String(repeating: "ff", count: 32), npub: nil, nickname: "Nora", ts: 0, nonceB64: "", sigHex: "")
+        #expect(coordinator.beginQRVerification(with: changed))
+        #expect(context.sentChallenges.count == 3)
+    }
+
+    @Test @MainActor
+    func qrAnnouncementCannotAuthorizeDifferentSession() {
+        let context = MockChatVerificationContext()
+        let peerID = PeerID(str: "1122334455667788")
+        let scanned = Data(repeating: 1, count: 32)
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: scanned, nickname: "Nora")]
+        context.establishedNoiseSessions = [peerID]
+        context.noiseSessionKeysByPeerID[peerID] = Data(repeating: 2, count: 32)
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        #expect(!coordinator.beginQRVerification(with: makeVerificationQR(noiseKeyHex: scanned.hexEncodedString())))
+        #expect(context.sentChallenges.isEmpty)
+        #expect(context.identityVerifiedCalls.isEmpty)
     }
 
     @Test @MainActor
@@ -219,6 +290,7 @@ struct ChatVerificationCoordinatorContextTests {
         let context2 = MockChatVerificationContext()
         context2.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: noiseKey, nickname: "alice")]
         context2.establishedNoiseSessions = [peerID]
+        context2.noiseSessionKeysByPeerID[peerID] = noiseKey
         let coordinator2 = ChatVerificationCoordinator(context: context2)
         #expect(coordinator2.beginQRVerification(with: qr))
         #expect(context2.sentChallenges.count == 1)

@@ -229,6 +229,7 @@ final class NotificationService {
     }
     
     func sendMentionNotification(from sender: String, message: String) {
+        if UserDefaults.standard.bool(forKey: "wesh.publicMuted") { return }
         let title = hidePreviews ? Redacted.mentionTitle : "🫵 you were mentioned by \(sender)"
         let body = hidePreviews ? Redacted.body : message
         let identifier = "mention-\(UUID().uuidString)"

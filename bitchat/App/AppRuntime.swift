@@ -119,7 +119,7 @@ final class AppRuntime: ObservableObject {
                 }
             )
         )
-        if chatViewModel.networkActivationAllowed {
+        if chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
             GeoRelayDirectory.shared.prefetchIfNeeded()
         }
         bindRuntimeObservers()
@@ -150,7 +150,7 @@ final class AppRuntime: ObservableObject {
         }
 
         NetworkActivationService.shared.start()
-        GeohashPresenceService.shared.start()
+        if NetworkActivationService.shared.userInternetEnabled { GeohashPresenceService.shared.start() }
         checkForSharedContent()
         performMediaMaintenance()
 

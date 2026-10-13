@@ -154,17 +154,23 @@ final class ChatVerificationCoordinator {
     struct PendingVerification {
         let noiseKeyHex: String
         let signKeyHex: String
+        let nickname: String
         let nonceA: Data
+        let createdAt: Date
         var sent: Bool
     }
 
     private unowned let context: any ChatVerificationContext
+    private let weshMode: Bool
+    private let now: () -> Date
     private var pendingQRVerifications: [PeerID: PendingVerification] = [:]
     private var lastVerifyNonceByPeer: [PeerID: Data] = [:]
     private var lastInboundVerifyChallengeAt: [String: Date] = [:]
     private var lastMutualToastAt: [String: Date] = [:]
 
-    init(context: any ChatVerificationContext) {
+    init(context: any ChatVerificationContext, weshMode: Bool = false, now: @escaping () -> Date = Date.init) {
+        self.now = now
+        self.weshMode = weshMode
         self.context = context
     }
 
@@ -177,7 +183,7 @@ final class ChatVerificationCoordinator {
         context.updateEncryptionStatus(for: peerID)
         // Verifying a peer is a vouch trigger: push attestations to my other
         // connected verified peers (and to this one if already connected).
-        context.vouchToConnectedVerifiedPeers()
+        if !weshMode { context.vouchToConnectedVerifiedPeers() }
     }
 
     func unverifyFingerprint(for peerID: PeerID) {
@@ -259,6 +265,14 @@ final class ChatVerificationCoordinator {
                     self.context.retrySecurePrivateMessagesAfterAuthentication(for: peerIDAliases)
 
                     if var pending = self.pendingQRVerifications[peerID], pending.sent == false {
+                        guard (0...60).contains(self.now().timeIntervalSince(pending.createdAt)) else {
+                            self.pendingQRVerifications.removeValue(forKey: peerID)
+                            return
+                        }
+                        guard self.context.noiseSessionPublicKeyData(for: peerID)?.hexEncodedString().lowercased() == pending.noiseKeyHex.lowercased() else {
+                            self.pendingQRVerifications.removeValue(forKey: peerID)
+                            return
+                        }
                         self.context.sendVerifyChallenge(
                             to: peerID,
                             noiseKeyHex: pending.noiseKeyHex,
@@ -289,9 +303,11 @@ final class ChatVerificationCoordinator {
         }
 
         let peerID = peer.peerID
-        if pendingQRVerifications[peerID] != nil {
-            return true
-        }
+        if let pending = pendingQRVerifications[peerID],
+           pending.noiseKeyHex.lowercased() == targetNoise,
+           pending.signKeyHex.lowercased() == qr.signKeyHex.lowercased(),
+           (0...60).contains(now().timeIntervalSince(pending.createdAt)) { return true }
+        pendingQRVerifications.removeValue(forKey: peerID)
 
         var nonce = Data(count: 16)
         let status = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
@@ -299,12 +315,18 @@ final class ChatVerificationCoordinator {
         var pending = PendingVerification(
             noiseKeyHex: qr.noiseKeyHex,
             signKeyHex: qr.signKeyHex,
+            nickname: qr.nickname,
             nonceA: nonce,
+            createdAt: now(),
             sent: false
         )
         pendingQRVerifications[peerID] = pending
 
         if context.hasEstablishedNoiseSession(with: peerID) {
+            guard context.noiseSessionPublicKeyData(for: peerID)?.hexEncodedString().lowercased() == targetNoise else {
+                pendingQRVerifications.removeValue(forKey: peerID)
+                return false
+            }
             context.sendVerifyChallenge(to: peerID, noiseKeyHex: qr.noiseKeyHex, nonceA: nonce)
             pending.sent = true
             pendingQRVerifications[peerID] = pending
@@ -354,6 +376,10 @@ final class ChatVerificationCoordinator {
               response.noiseKeyHex.lowercased() == pending.noiseKeyHex.lowercased(),
               response.nonceA == pending.nonceA else { return }
 
+        guard (0...60).contains(now().timeIntervalSince(pending.createdAt)) else {
+            pendingQRVerifications.removeValue(forKey: peerID)
+            return
+        }
         let isValid = VerificationService.shared.verifyResponseSignature(
             noiseKeyHex: response.noiseKeyHex,
             nonceA: response.nonceA,
@@ -364,7 +390,10 @@ final class ChatVerificationCoordinator {
 
         pendingQRVerifications.removeValue(forKey: peerID)
 
-        guard let fingerprint = context.getFingerprint(for: peerID) else { return }
+        guard let sessionKey = context.noiseSessionPublicKeyData(for: peerID),
+              sessionKey.count == 32, sessionKey.hexEncodedString().lowercased() == pending.noiseKeyHex.lowercased(),
+              let fingerprint = context.getFingerprint(for: peerID), fingerprint == sessionKey.sha256Fingerprint() else { return }
+        if weshMode { WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname) }
 
         let shortFingerprint = fingerprint.prefix(8)
         SecureLogger.info("🔐 Marking verified fingerprint: \(shortFingerprint)", category: .security)
@@ -393,7 +422,7 @@ final class ChatVerificationCoordinator {
 
         context.updateEncryptionStatus(for: peerID)
         // QR verification just completed — same vouch trigger as manual verify.
-        context.vouchToConnectedVerifiedPeers()
+        if !weshMode { context.vouchToConnectedVerifiedPeers() }
     }
 }
 
@@ -405,6 +434,7 @@ private extension ChatVerificationCoordinator {
         bodyName: String,
         notificationPrefix: String
     ) {
+        guard !weshMode else { return }
         let now = Date()
         let lastToast = lastMutualToastAt[fingerprint] ?? .distantPast
         guard now.timeIntervalSince(lastToast) > 60 else { return }

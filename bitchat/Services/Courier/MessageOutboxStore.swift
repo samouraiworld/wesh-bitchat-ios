@@ -28,6 +28,7 @@ final class MessageOutboxStore {
         let nickname: String
         let messageID: String
         let timestamp: Date
+        let recipientNoiseKey: Data?
         var sendAttempts: Int
         /// Noise keys of couriers already carrying this message, so deposit
         /// retries add couriers instead of re-burning the same ones.
@@ -39,8 +40,10 @@ final class MessageOutboxStore {
             messageID: String,
             timestamp: Date,
             sendAttempts: Int = 0,
-            depositedCourierKeys: Set<Data> = []
+            depositedCourierKeys: Set<Data> = [],
+            recipientNoiseKey: Data? = nil
         ) {
+            self.recipientNoiseKey = recipientNoiseKey
             self.content = content
             self.nickname = nickname
             self.messageID = messageID
@@ -51,6 +54,7 @@ final class MessageOutboxStore {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            recipientNoiseKey = try container.decodeIfPresent(Data.self, forKey: .recipientNoiseKey)
             content = try container.decode(String.self, forKey: .content)
             nickname = try container.decode(String.self, forKey: .nickname)
             messageID = try container.decode(String.self, forKey: .messageID)

@@ -110,6 +110,29 @@ final class VerificationServiceTests: XCTestCase {
         )
     }
 
+    func test_freshnessBoundariesAreSymmetric() throws {
+        let (service, noise) = makeService()
+        for offset: Int64 in [-301, -300, 300, 301] {
+            let qr = try makeSignedQR(noise: noise, nickname: "Nora", npub: nil, ts: 1700000000 + offset)
+            XCTAssertEqual(service.verifyScannedQR(qr, now: 1700000000) != nil, abs(offset) <= 300)
+        }
+    }
+
+    func test_cacheIsBoundToLocalIdentity() throws {
+        let (first, _) = makeService()
+        let (second, _) = makeService()
+        let name = "rotation-\(UUID().uuidString)"
+        let before = try XCTUnwrap(first.buildMyQRString(nickname: name, npub: nil))
+        let after = try XCTUnwrap(second.buildMyQRString(nickname: name, npub: nil))
+        XCTAssertNotEqual(before, after)
+    }
+
+    func test_builderRejectsOversizeUTF8Fields() {
+        let (service, _) = makeService()
+        XCTAssertNil(service.buildMyQRString(nickname: String(repeating: "é", count: 128), npub: nil))
+        XCTAssertNil(service.buildMyQRString(nickname: "Nora", npub: String(repeating: "a", count: 256)))
+    }
+
     private func makeService() -> (VerificationService, NoiseEncryptionService) {
         // The service consumes Noise identity operations through the
         // Transport's narrow noise* wrappers; the mock transport's backing
@@ -134,7 +157,7 @@ final class VerificationServiceTests: XCTestCase {
             npub: npub,
             nickname: nickname,
             ts: ts,
-            nonceB64: Data((0..<16).map(UInt8.init)).base64EncodedString(),
+            nonceB64: Data((0..<16).map(UInt8.init)).base64EncodedString().replacingOccurrences(of: "=", with: ""),
             sigHex: ""
         )
         let signature = try XCTUnwrap(signatureOverride ?? noise.signData(payload.canonicalBytes()))
