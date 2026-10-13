@@ -193,6 +193,7 @@ private struct WeshConversation: View {
     }
 
     var body: some View {
+        let displayedMessages = messages
         VStack(spacing: 0) {
             ScrollViewReader { scroll in
                 ScrollView {
@@ -217,17 +218,20 @@ private struct WeshConversation: View {
                                 Button("Vérifier le contact") { contactSheet = true }.frame(minHeight: 44)
                             }
                         }.padding(.bottom, 16)
-                        if messages.isEmpty {
+                        if displayedMessages.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: isPrivate ? "bubble.left.and.bubble.right" : "antenna.radiowaves.left.and.right")
                                     .font(.system(size: 40, weight: .light)).foregroundStyle(theme.accent).accessibilityHidden(true)
-                                Text(isPrivate ? "Votre discussion commence ici." : "Un premier salut ?")
+                                Text(isPrivate ? "Votre discussion commence ici." : (canSend ? "Un premier salut ?" : "Le salon est prêt."))
                                     .font(.title2.weight(.semibold))
-                                Text(isPrivate ? "Écrivez quand votre contact est connecté." : "Entrez dans la conversation.\nAucun contact à ajouter.")
+                                Text(isPrivate ? "Écrivez quand votre contact est connecté." : (canSend ? "Entrez dans la conversation.\nAucun contact à ajouter." : "Préparez un message. Il restera ici tant que l’envoi est indisponible."))
                                     .font(.body).foregroundStyle(theme.secondary)
                             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 64)
                         }
-                        ForEach(messages, id: \.id) { message in
+                        ForEach(Array(displayedMessages.enumerated()), id: \.element.id) { index, message in
+                            if WeshTimeline.startsDay(at: message.timestamp, after: index > 0 ? displayedMessages[index - 1].timestamp : nil) {
+                                WeshDayDivider(date: message.timestamp)
+                            }
                             WeshMessageBubble(message: message,
                                 own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender),
                                 privateChat: isPrivate).id(message.id)
@@ -240,8 +244,8 @@ private struct WeshConversation: View {
                     }.padding()
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: messages.count) { _ in
-                    if let id = messages.last?.id {
+                .onChange(of: displayedMessages.count) { _ in
+                    if let id = displayedMessages.last?.id {
                         if reduceMotion { scroll.scrollTo(id, anchor: .bottom) }
                         else { withAnimation { scroll.scrollTo(id, anchor: .bottom) } }
                     }
@@ -260,7 +264,8 @@ private struct WeshConversation: View {
                     }
                 }
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField(isPrivate ? "Message privé" : "Message public", text: $draft, axis: .vertical)
+                    TextField(isPrivate ? "Message privé" : "Message public", text: $draft,
+                              prompt: Text(isPrivate ? "Message privé" : "Message public").foregroundColor(theme.secondary), axis: .vertical)
                         .lineLimit(1...(dynamicTypeSize.isAccessibilitySize ? 3 : 6))
                         .focused($composerFocused)
                         .padding(14)
@@ -308,22 +313,47 @@ private struct WeshConversation: View {
     }
 }
 
+enum WeshTimeline {
+    static func startsDay(at date: Date, after previous: Date?, calendar: Calendar = .current) -> Bool {
+        guard let previous else { return true }
+        return !calendar.isDate(date, inSameDayAs: previous)
+    }
+}
+
+private struct WeshDayDivider: View {
+    let date: Date
+    @Environment(\.weshTheme) private var theme
+    var body: some View {
+        Group {
+            if Calendar.current.isDateInToday(date) { Text("Aujourd’hui") }
+            else if Calendar.current.isDateInYesterday(date) { Text("Hier") }
+            else { Text(date, format: .dateTime.day().month(.wide).year().locale(Locale(identifier: "fr_FR"))) }
+        }.font(.caption.weight(.medium)).foregroundStyle(theme.secondary)
+            .frame(maxWidth: .infinity).padding(.vertical, 8)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 private struct WeshMessageBubble: View {
     let message: BitchatMessage
     let own: Bool
     let privateChat: Bool
     @Environment(\.weshTheme) private var theme
     private var filled: Bool { own && !theme.isDark }
+    @ViewBuilder private var metadata: some View {
+        Text(message.timestamp, style: .time)
+        if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
+        else if own { Text(WeshDelivery.publicLabel(message.deliveryStatus)) }
+    }
     var body: some View {
         HStack {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
-                if !own { Text(message.sender == "system" ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
+                if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
                 Text(message.content).font(.body).textSelection(.enabled)
-                HStack(spacing: 6) {
-                    Text(message.timestamp, style: .time)
-                    if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
-                    else if own { Text(WeshDelivery.publicLabel(message.deliveryStatus)) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }
+                    VStack(alignment: .leading, spacing: 4) { metadata }
                 }.font(.caption).foregroundStyle(filled ? theme.onAccent : theme.secondary)
             }.padding(14)
                 .foregroundStyle(filled ? theme.onAccent : theme.ink)

@@ -7,6 +7,20 @@ import Testing
 
 @Suite("Wesh native trust and public separation", .serialized)
 struct WeshNativeUITests {
+    @Test func timelineUsesCalendarDaysAcrossMidnightAndDaylightSaving() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Europe/Paris"))
+        func date(_ day: Int, _ hour: Int, _ minute: Int = 0) throws -> Date {
+            try #require(calendar.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour, minute: minute)))
+        }
+        let beforeMidnight = try date(28, 23, 59)
+        let afterMidnight = try date(29, 0, 1)
+        #expect(WeshTimeline.startsDay(at: beforeMidnight, after: nil, calendar: calendar))
+        #expect(WeshTimeline.startsDay(at: afterMidnight, after: beforeMidnight, calendar: calendar))
+        #expect(!WeshTimeline.startsDay(at: try date(29, 23), after: afterMidnight, calendar: calendar))
+        #expect(!WeshTimeline.startsDay(at: try date(29, 3), after: try date(29, 1), calendar: calendar))
+    }
+
     @Test @MainActor func unavailableBluetoothPreservesPublicDraftAndPreventsDispatch() {
         let consentKey = "wesh.publicDisclosureAccepted.v1"
         let previous = UserDefaults.standard.object(forKey: consentKey)
