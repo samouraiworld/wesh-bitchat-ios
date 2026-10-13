@@ -932,10 +932,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		B8C407587481BBB190741C93 /* XCRemoteSwiftPackageReference "swift-secp256k1" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/21-DOT-DEV/swift-secp256k1";
+			repositoryURL = "https://github.com/samouraiworld/swift-secp256k1";
 			requirement = {
-				kind = exactVersion;
-				version = 0.21.1;
+				kind = revision;
+				revision = 0a1a9f9031b6f86f92eb9b66ef8a6882af531e6f;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

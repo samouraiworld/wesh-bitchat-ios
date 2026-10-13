@@ -3,10 +3,9 @@
     {
       "identity" : "swift-secp256k1",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/21-DOT-DEV/swift-secp256k1",
+      "location" : "https://github.com/samouraiworld/swift-secp256k1",
       "state" : {
-        "revision" : "8c62aba8a3011c9bcea232e5ee007fb0b34a15e2",
-        "version" : "0.21.1"
+        "revision" : "0a1a9f9031b6f86f92eb9b66ef8a6882af531e6f"
       }
     }
   ],

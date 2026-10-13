@@ -6,94 +6,110 @@ This fork is a validation experiment for Wesh (temporary project name: Weshalor)
 - Experiment: https://github.com/samouraiworld/wesh-bitchat-ios
 - Pinned upstream SHA: `5e9287fae1e5fea80ca741d4ea669829dc16f144`
 - Branch: `chore/validation-foundations`
+- Compatibility dependency: `samouraiworld/swift-secp256k1` pinned to `0a1a9f9031b6f86f92eb9b66ef8a6882af531e6f` (upstream 0.21.1 plus compiler disambiguation and regression vectors).
+- Patch review: https://github.com/samouraiworld/swift-secp256k1/pull/1
 - Toolchain tested: Xcode 27.0 (`27A266a`), Apple Swift 6.4 (`swiftlang-6.4.0.34.1`), Apple Silicon host.
 - Deployment floor: iOS 16.0 (`Configs/Release.xcconfig`, `Package.swift`); macOS support remains upstream scope.
 
 ## Results
 
+The original clean upstream baseline failed under the installed toolchain. The narrow compatibility fix now clears full app compilation; signing, installation and physical radio validation remain separate gates.
+
 | Check | Result | Meaning |
 | --- | --- | --- |
-| Public Swift dependency resolution using clean DerivedData | PASS | `swift-secp256k1` resolves to pinned 0.21.1; three local packages resolve |
-| Unsigned Debug simulator app build, generic simulator destination | FAIL, exit 65 | `P256K/UInt256.swift:215`: ambiguous use of `words` under Swift 6.4 |
-| Existing app SwiftPM messaging/Noise test selection | BLOCKED, exit 1 | Same dependency compilation failure; no selected app tests ran |
+| Original unsigned upstream simulator build | FAIL, exit 65 | Unmodified `swift-secp256k1` 0.21.1 had an ambiguous `words` lookup at `P256K/UInt256.swift:215` under Swift 6.4 |
+| Published dependency fix, full existing suite | PASS | 12 XCTest integer tests, 8 library tests and 37 tests in 10 cryptography suites; ECDSA, Schnorr and ECDH included |
+| Final-pin unsigned Debug generic simulator app build | PASS | Full app/share extension; arm64 and x86_64 simulator compilation |
+| Unsigned Debug generic iOS-device app build | PASS | Full arm64 device app/share extension at final dependency pin; an unsigned app cannot yet be installed on the iPhone |
+| Selected existing iOS simulator app suites | PASS | 146 tests in 9 suites: Nostr/frozen Android private-envelope fixtures, Noise, DM E2E, outbox, read receipts and delivery states |
 | Existing BitFoundation SwiftPM suite | PASS | 184 tests in 14 suites |
 | Existing BitLogger SwiftPM suite | PASS | 13 tests in one suite |
-| Simulator availability | PASS with access to simulator services | iOS 18.6 and iOS 26.5 runtimes available |
-| Physical device inventory | No physical devices listed | Pair/unlock real test devices before field validation |
+| Simulator availability | PASS with simulator-service access | iOS 18.6 and iOS 26.5 runtimes available; selected app tests used iPhone 17/iOS 26.5 |
+| Physical device inventory | No physical devices listed | Founder has an iPhone 15 and a Samsung Android; OS/Android model and pairing remain to record |
 | Physical Bluetooth, background, mixed-platform delivery | NOT RUN | Requires signed devices; simulator tests cannot establish radio reliability |
 
-The first build used custom package cache options and reported all package products missing. Explicit resolution in that configuration returned an empty package graph. Retrying standard Xcode dependency options with clean DerivedData resolved the graph. That first error is an environment/configuration diagnostic, not a confirmed upstream source defect. The subsequent compiler error is a reproducible compatibility blocker between the pinned upstream dependency and this installed toolchain. No crypto, routing, app configuration, or dependency source was changed to mask it.
+The fix preserves upstream 0.21.1, its cryptographic algorithms and its three vendored submodule SHAs. `trailingZeroBitCount` explicitly constructs the same `SIMDWrapper<Vector>(wrappedValue: vector)` returned by the existing `words` getter; it does not change the arithmetic or word order. Added 256-bit zero/max and word-boundary vectors. One existing Schnorr test constructs the same UTF-8 bytes with `Array(literal.utf8)` to avoid a second Swift 6.4 accessor ambiguity. No BitChat crypto/routing/branding source was changed. Both the Xcode project and tracked SwiftPM manifest/lockfile consume an exact published Git revision, with fresh remote resolution verified.
 
-Next: reproduce with an upstream-compatible Xcode 26 toolchain on another machine/CI; this host has only Xcode 27 installed. If that passes, pin the sprint toolchain. Otherwise prepare a narrowly reviewed upstream dependency compatibility fix and rerun the app build plus cryptography/interoperability suites before claiming the baseline works.
+The 146 selected app tests ran on dependency commit `4be3a9373b55bdcf62cb4c810241bc9eb99bb290`; the final `0a1a9f9` adds only the dependency's test-input disambiguation. Production dependency source is identical between those commits. Both complete app builds subsequently passed on the final pin. This is targeted app verification, not a claim that every upstream app test was run.
+
+Earlier environment-only attempts are preserved in local logs: custom Xcode package-cache options yielded an empty package graph, and dependency dev-tool artifact resolution exhausted disk before compilation. Standard Xcode resolution recovered the graph; clearing only generated validation caches recovered enough disk for the completed checks. These failures are distinct from the original dependency compiler error. Large disposable build caches were removed after preserving logs, xcresults and app artifacts.
 
 ## Reproduce
 
-Run from the fork root. Network access is needed on a cold dependency cache. Build products and evidence stay in ignored `.validation/`; raw logs contain host paths and must remain local.
+Run from the fork root. Network access is needed on a cold dependency cache. Build products and raw evidence use ignored `.validation/`; raw logs contain host paths and remain local. Use a fresh result bundle path for each run because Xcode refuses to overwrite one.
 
 ```sh
-xcodebuild -resolvePackageDependencies \
-  -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
-  -derivedDataPath .validation/DerivedData-pristine \
-  -clonedSourcePackagesDirPath .validation/SourcePackages-pristine
-
 xcodebuild -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
   -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath .validation/DerivedData-pristine \
-  -clonedSourcePackagesDirPath .validation/SourcePackages-pristine \
-  -resultBundlePath .validation/ios-build-pristine.xcresult \
+  -derivedDataPath .validation/DerivedData-swift64 \
+  -clonedSourcePackagesDirPath .validation/SourcePackages-swift64 \
+  -resultBundlePath .validation/ios-build-final-pin.xcresult \
+  CODE_SIGNING_ALLOWED=NO build
+
+xcodebuild -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
+  -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+  -derivedDataPath .validation/DerivedData-swift64 \
+  -clonedSourcePackagesDirPath .validation/SourcePackages-swift64 \
+  -resultBundlePath .validation/ios-device-build-swift64.xcresult \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-Choose a new result bundle path for each run; Xcode refuses to overwrite one. The build attempted both generic simulator architectures; the recorded compiler failure occurred compiling x86_64. SwiftPM separately reproduced it on arm64.
-
-Exact app test command attempted:
-
-```sh
-TMPDIR="$PWD/.validation/tmp" \
-CLANG_MODULE_CACHE_PATH="$PWD/.validation/SwiftModuleCache" \
-swift test --scratch-path .validation/swift-build \
-  --cache-path .validation/swift-cache \
-  --config-path .validation/swift-config \
-  --security-path .validation/swift-security --disable-sandbox \
-  --filter 'NoiseTest|ReadReceiptTests|FragmentationTests|MessageOutboxStoreTests|Delivery'
-```
-
-The independent suite commands used the same Swift cache/config/security options and `--disable-sandbox`, plus `--package-path localPackages/BitFoundation --scratch-path .validation/BitFoundation-build` or `--package-path localPackages/BitLogger --scratch-path .validation/BitLogger-build`. Their environment set `TMPDIR="$PWD/.validation/tmp"`. Swift's package build sandbox was disabled for this local validation run; this flag does not bypass the host's tool permissions.
-
-After the app compilation blocker clears, run the existing iOS suite:
+Selected app test command:
 
 ```sh
 xcodebuild -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
-  -sdk iphonesimulator \
+  -configuration Debug -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
-  -derivedDataPath .validation/DerivedData-pristine \
-  -clonedSourcePackagesDirPath .validation/SourcePackages-pristine \
-  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+  -derivedDataPath .validation/DerivedData-swift64 \
+  -clonedSourcePackagesDirPath .validation/SourcePackages-swift64 \
+  -resultBundlePath .validation/ios-tests-swift64.xcresult \
+  -parallel-testing-enabled NO \
+  -only-testing:bitchatTests_iOS/NostrProtocolTests \
+  -only-testing:bitchatTests_iOS/NoiseEncryptionTests \
+  -only-testing:bitchatTests_iOS/NoiseProtocolTests \
+  -only-testing:bitchatTests_iOS/NoiseCoverageTests \
+  -only-testing:bitchatTests_iOS/NoiseEncryptionServiceTests \
+  -only-testing:bitchatTests_iOS/ReadReceiptTests \
+  -only-testing:bitchatTests_iOS/MessageOutboxStoreTests \
+  -only-testing:bitchatTests_iOS/ChatViewModelDeliveryStatusTests \
+  -only-testing:bitchatTests_iOS/PrivateChatE2ETests \
+  CODE_SIGNING_ALLOWED=NO test
 ```
 
-This simulator test command is a next step, not a completed check. Upstream disables parallel iOS test execution because integration fixtures share process-global stores.
+Upstream disables parallel iOS test execution because integration fixtures share process-global stores. This selection covers the crypto compatibility and first-DM/delivery foundation; broader CI remains a separate check.
+
+From the compatibility dependency fork at the pinned revision, the passing full suite command was:
+
+```sh
+swift test --skip-update --scratch-path .validation/Build \
+  --cache-path .validation/Cache --config-path .validation/Config \
+  --security-path .validation/Security --disable-sandbox
+```
+
+The first run resolves upstream's development tools and requires additional disk/network; `--skip-update` was used after that successful resolution. Swift's package build sandbox was disabled for local validation, independently of the host's tool permissions. The earlier independent BitFoundation/BitLogger runs used analogous scratch/cache/config/security options with `--package-path localPackages/BitFoundation` or `localPackages/BitLogger`.
 
 ## Local evidence index
 
-All paths are relative to the fork root; evidence is excluded from version control.
+All paths are relative to the iOS fork root; evidence is excluded from version control.
 
-- `.validation/logs/ios-build.log`: initial missing-package environment failure.
-- `.validation/logs/pristine-resolution.log`: successful dependency resolution.
-- `.validation/logs/ios-build-pristine.log` and `.validation/ios-build-pristine.xcresult`: definitive simulator compiler failure.
-- `.validation/logs/swift-targeted-tests.log`: independent arm64 reproduction while compiling app tests.
-- `.validation/logs/BitFoundation-tests.log`: passing protocol/model tests.
-- `.validation/logs/BitLogger-tests.log`: passing logger sanitization tests.
-- `.validation/SourcePackages-pristine/` and `.validation/DerivedData-pristine/`: dependency checkout and compiler artifacts.
+- `.validation/logs/ios-build-pristine.log` and `.validation/ios-build-pristine.xcresult`: original unmodified dependency compiler failure.
+- `.validation/logs/ios-build-final-pin.log` and `.validation/ios-build-final-pin.xcresult`: passing final-pin full simulator build.
+- `.validation/logs/ios-device-build-swift64.log` and `.validation/ios-device-build-swift64.xcresult`: passing unsigned device build.
+- `.validation/logs/ios-tests-swift64.log` and `.validation/ios-tests-swift64.xcresult`: passing 146 selected app tests.
+- `.validation/logs/spm-pin-resolution.log`: tracked SwiftPM lockfile regenerated from final remote revision.
+- `.validation/artifacts/iphoneos/bitchat.app` and `.validation/artifacts/simulator/bitchat.app`: preserved unsigned products.
+- `.validation/logs/BitFoundation-tests.log` and `.validation/logs/BitLogger-tests.log`: passing independent baseline suites.
+- Dependency fork's `.validation/logs/dependency-tests-swift64.log`: passing full dependency suite; earlier diagnostic logs remain alongside it.
 
-Publish only sanitized summaries. Keep device identifiers, identities, keys, signed installation artifacts, screenshots with personal content, and raw logs out of public PRs.
+Publish only sanitized summaries. Keep device identifiers, identities, keys, signed installation artifacts, screenshots with personal content, and raw logs out of public PRs. Disposable DerivedData and dependency-test caches were cleaned after verification; reproduce commands recreate them.
 
 ## Real-device prerequisites
 
-1. Clear the compiler blocker and record exact iOS and Android source SHAs/build variants. Freeze both for a comparable test session.
+1. The compiler blocker is cleared. Record exact iOS and Android source SHAs/build variants and the pinned compatibility revision; freeze both for a comparable test session.
 2. Start direct mixed-platform smoke testing with the founder’s one iPhone and one Android after recording their models/OS versions. Borrow at least one additional iPhone and Android for same-platform controls and mixed multi-hop checks, then expand to the proposed 8–12-device field matrix. Include an iOS 16 device to verify the declared floor rather than assuming the latest simulator proves it.
 3. Pair/unlock the iPhones with Xcode, enable Developer Mode where required, and obtain a signing team with capabilities needed by the app and share extension. Copy `Configs/Local.xcconfig.example` to ignored `Configs/Local.xcconfig`; set your own team, unique bundle ID, and registered App Group. Do not use upstream signing identities or commit local signing settings.
-4. Build the Debug device variant with the local configuration, install through Xcode, and confirm Bluetooth permission prompts. Device installation, signing, and radio tests were not performed in this run.
+4. The unsigned Debug device variant compiles. Select the founder’s development team in Xcode and confirm its app, extension and App Group registration/profiles; a matching team was found locally, but no matching Wesh/BitChat provisioning profile was present. Do not guess provisioning identifiers or publish account metadata. Then build with signing, install through Xcode on the iPhone 15, and confirm Bluetooth permission prompts. Device installation, signing, and radio tests were not performed in this run.
 5. Use disposable tester identities and synthetic messages. Record pseudonymous handset labels, model/OS, battery level, permissions, app lifecycle, transport, message attempt number, observed receipt state, and timestamps in private evidence.
 6. Disable cellular and Wi-Fi for offline scenarios. With airplane mode enabled, explicitly re-enable Bluetooth and verify its state in Settings on both platforms. Keep internet-enabled/Nostr scenarios separate so fallback cannot create a false Bluetooth pass.
 
