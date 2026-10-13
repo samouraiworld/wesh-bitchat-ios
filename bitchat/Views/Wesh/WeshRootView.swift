@@ -59,9 +59,14 @@ private struct WeshInbox: View {
     @Environment(\.weshTheme) private var theme
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var addingContact = false
+    @EnvironmentObject private var peers: PeerListModel
 
     private var contacts: [WeshQRTrust.Contact] {
-        trust.contacts.filter { !runtime.chatViewModel.isPeerBlocked(runtime.chatViewModel.getShortIDForNoiseKey($0.peerID)) }
+        let _ = peers.renderID
+        return trust.contacts.filter { row in
+            guard let key = row.peerID.noiseKey else { return false }
+            return !runtime.chatViewModel.identityManager.isBlocked(fingerprint: key.sha256Fingerprint())
+        }
     }
 
     var body: some View {
@@ -164,6 +169,10 @@ private struct WeshConversation: View {
     @State private var information = false
     @Environment(\.weshTheme) private var theme
     @State private var contactSheet = false
+    @State private var contactDetails = false
+    @State private var blockTarget: PeerID?
+    @State private var blockName = ""
+    @State private var showingParticipants = false
     @AppStorage("wesh.publicMuted") private var publicMuted = false
     @EnvironmentObject private var actions: ConversationUIModel
     @AppStorage("wesh.publicDisclosureAccepted.v1") private var publicAccepted = false
@@ -172,11 +181,16 @@ private struct WeshConversation: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composerFocused: Bool
 
+    @EnvironmentObject private var peers: PeerListModel
+
     private var isPrivate: Bool { peerID != nil }
     private var draftKey: ComposerDraftStore.Key {
         .from(peerID: peerID, fingerprint: peerID?.noiseKey?.sha256Fingerprint(), channel: .mesh)
     }
-    private var canSend: Bool { peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic }
+    private var canSend: Bool {
+        let _ = peers.renderID
+        return peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic
+    }
     private var messages: [BitchatMessage] {
         if let peerID {
             let stableMessages = inbox.messages(for: peerID)
@@ -235,9 +249,13 @@ private struct WeshConversation: View {
                             WeshMessageBubble(message: message,
                                 own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender),
                                 privateChat: isPrivate).id(message.id)
+                                .accessibilityAction(named: "Copier le message") { UIPasteboard.general.string = message.content }
                                 .contextMenu {
-                                    if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let sender = message.senderPeerID {
-                                        Button("Bloquer sur ce téléphone", role: .destructive) { actions.block(peerID: sender, displayName: message.sender) }
+                                    Button { UIPasteboard.general.string = message.content } label: {
+                                        Label("Copier", systemImage: "doc.on.doc")
+                                    }
+                                    if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
+                                        Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = isPrivate ? title : message.sender }
                                     }
                                 }
                         }
@@ -257,7 +275,7 @@ private struct WeshConversation: View {
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
                 if !canSend {
-                    Text(isPrivate ? "Votre brouillon reste ici en attendant la connexion." : bluetoothSummary(chrome.bluetoothState))
+                    Text(isPrivate ? "Votre brouillon reste ici. Vérifiez le contact et la connexion pour envoyer." : bluetoothSummary(chrome.bluetoothState))
                         .font(.footnote).foregroundStyle(theme.secondary)
                     if !isPrivate && chrome.bluetoothState == .unauthorized {
                         Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44)
@@ -286,10 +304,20 @@ private struct WeshConversation: View {
             }.padding(16).background(theme.canvas)
         }
         .toolbar {
-            if !isPrivate {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { publicMuted.toggle() } label: { Label(publicMuted ? "Réactiver" : "Sourdine", systemImage: publicMuted ? "bell.slash" : "bell").frame(minHeight: 44) }
-                }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    if let peerID, trust.contacts.contains(where: { $0.peerID == peerID }) {
+                        Button { contactDetails = true } label: { Label("Voir le contact", systemImage: "person.crop.circle") }
+                    }
+                    Button { information = true } label: { Label("À propos", systemImage: "info.circle") }
+                    if !isPrivate {
+                        Button { showingParticipants = true } label: { Label("Participants connus", systemImage: "person.2") }
+                        Button { publicMuted.toggle() } label: {
+                            Label(publicMuted ? "Réactiver les mentions" : "Mettre les mentions en sourdine", systemImage: publicMuted ? "bell.slash" : "bell")
+                        }
+                    }
+                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                .accessibilityLabel("Actions de conversation")
             }
         }
         .alert("Envoyer dans un salon public ?", isPresented: $publicWarning) {
@@ -297,6 +325,19 @@ private struct WeshConversation: View {
             Button("Envoyer publiquement") { publicAccepted = true; send() }
         } message: { Text("Tout participant au salon peut voir, conserver ou relayer ce message. Le Bluetooth ne garantit aucune frontière géographique. Un surnom ne prouve pas une identité. Votre brouillon reste ici si vous annulez.") }
         .sheet(isPresented: $contactSheet) { WeshContactSheet(runtime: runtime) }
+        .alert("Bloquer cette personne ?", isPresented: Binding(get: { blockTarget != nil }, set: { if !$0 { blockTarget = nil } })) {
+            Button("Annuler", role: .cancel) { blockTarget = nil }
+            Button("Bloquer", role: .destructive) {
+                if let target = blockTarget { actions.block(peerID: target, displayName: blockName) }
+                blockTarget = nil
+            }
+        } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
+        .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
+        .sheet(isPresented: $contactDetails) {
+            if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
+                NavigationStack { WeshContactDetails(runtime: runtime, contact: contact, inSheet: true) }.weshSheetBackground()
+            }
+        }
         .sheet(isPresented: $information) {
             WeshInformationSheet(isPrivate: isPrivate)
         }
@@ -638,7 +679,7 @@ private struct WeshInformationSheet: View {
                     Text(isPrivate ? "Pour échanger, chacun doit scanner le QR de l’autre. L’identité vérifiée ici est liée à la connexion chiffrée de ce contact." : "Les participants peuvent voir, conserver et relayer vos messages. Un surnom ne prouve pas une identité.")
                     Text(isPrivate ? "La vérification sur ce téléphone ne prouve pas que votre contact vous a vérifié. En cas de changement d’identité ou de connexion, l’écriture est suspendue et votre brouillon est conservé." : "Le Bluetooth ne garantit aucune frontière géographique : un message peut être relayé au-delà des personnes proches. La diffusion ne confirme pas sa réception.")
                         .foregroundStyle(theme.secondary)
-                    Text(isPrivate ? "Une réception confirmée concerne ce message et son destinataire. Une connexion disponible ou un relais ne suffit pas." : "La sourdine coupe les notifications de mentions. Pour bloquer quelqu’un sur ce téléphone, maintenez son message appuyé.")
+                    Text(isPrivate ? "Une réception confirmée concerne ce message et son destinataire. Une connexion disponible ou un relais ne suffit pas." : "La sourdine coupe les notifications de mentions. Pour bloquer quelqu’un sur ce téléphone, ouvrez le menu de conversation puis Participants connus.")
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(theme.contentInset)
             }
@@ -694,10 +735,19 @@ private struct WeshSettings: View {
             } header: { WeshSectionLabel(text: "À votre façon") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
+                NavigationLink { WeshContacts(runtime: runtime) } label: {
+                    Label("Contacts", systemImage: "person.2").frame(minHeight: 48)
+                }
+                NavigationLink { WeshBlockedContacts(runtime: runtime) } label: {
+                    Label("Contacts bloqués", systemImage: "hand.raised.slash").frame(minHeight: 48)
+                }
+            } header: { WeshSectionLabel(text: "Vos contacts") }
+            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+            Section {
                 NavigationLink { WeshConnectionSettings() } label: {
                     Label("Connexion à proximité", systemImage: "antenna.radiowaves.left.and.right").frame(minHeight: 48)
                 }
-                NavigationLink { WeshPrivacySettings() } label: {
+                NavigationLink { WeshPrivacySettings(runtime: runtime) } label: {
                     Label("Confidentialité", systemImage: "hand.raised").frame(minHeight: 48)
                 }
             } header: { WeshSectionLabel(text: "Pour échanger") }
@@ -706,6 +756,245 @@ private struct WeshSettings: View {
         .listStyle(.plain).scrollContentBackground(.hidden)
         .navigationTitle("Réglages").weshCanvas(title: "Réglages")
         .sheet(isPresented: $showQR) { WeshContactSheet(runtime: runtime) }
+    }
+}
+
+private struct WeshContacts: View {
+    let runtime: AppRuntime
+    @ObservedObject private var trust = WeshQRTrust.shared
+    @ObservedObject private var service: UnifiedPeerService
+    @Environment(\.weshTheme) private var theme
+    @State private var addingContact = false
+
+    init(runtime: AppRuntime) {
+        self.runtime = runtime
+        _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if trust.contacts.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Vos contacts, en personne.").font(.title2.weight(.semibold))
+                        Text("Scannez le QR de quelqu’un pour commencer une discussion privée.").foregroundStyle(theme.secondary)
+                        Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "qrcode.viewfinder") }
+                            .buttonStyle(WeshPrimaryButtonStyle())
+                    }.padding(.vertical, 24).listRowSeparator(.hidden)
+                } else {
+                    ForEach(trust.contacts) { contact in
+                        NavigationLink { WeshContactDetails(runtime: runtime, contact: contact) } label: {
+                            HStack(spacing: 16) {
+                                WeshAvatar(symbol: "person")
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(contact.nickname).font(.headline)
+                                    Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8))).font(.caption).foregroundStyle(theme.secondary)
+                                    Text(isBlocked(contact) ? "Bloqué sur ce téléphone" : "Identité vérifiée ici")
+                                        .font(.subheadline).foregroundStyle(theme.secondary)
+                                }
+                            }.padding(.vertical, 12)
+                        }
+                    }
+                }
+            } footer: { Text("Un surnom ne prouve pas une identité. Les vérifications et les blocages concernent ce téléphone.") }
+            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+            .navigationTitle("Contacts").weshCanvas(title: "Contacts")
+            .toolbar { ToolbarItem(placement: .primaryAction) {
+                Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "plus").frame(width: 44, height: 44) }
+            } }
+            .sheet(isPresented: $addingContact) { WeshContactSheet(runtime: runtime) }
+    }
+
+    private func isBlocked(_ contact: WeshQRTrust.Contact) -> Bool {
+        guard let key = contact.peerID.noiseKey else { return false }
+        return runtime.chatViewModel.identityManager.isBlocked(fingerprint: key.sha256Fingerprint())
+    }
+}
+
+private struct WeshContactDetails: View {
+    let runtime: AppRuntime
+    let contact: WeshQRTrust.Contact
+    var inSheet = false
+    @ObservedObject private var service: UnifiedPeerService
+    @ObservedObject private var trust = WeshQRTrust.shared
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.weshTheme) private var theme
+    @State private var removing = false
+    @State private var blocking = false
+    @State private var feedback = ""
+
+    init(runtime: AppRuntime, contact: WeshQRTrust.Contact, inSheet: Bool = false) {
+        self.runtime = runtime
+        self.contact = contact
+        self.inSheet = inSheet
+        _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+    }
+
+    private var blocked: Bool {
+        contact.peerID.noiseKey.map { runtime.chatViewModel.identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) } ?? false
+    }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 16) {
+                    WeshAvatar(symbol: "person")
+                    Text(contact.nickname).font(.title2.weight(.semibold))
+                    Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                    Label(blocked ? "Bloqué sur ce téléphone" : "Identité vérifiée ici", systemImage: blocked ? "hand.raised" : "lock")
+                        .font(.subheadline).foregroundStyle(theme.secondary)
+                    Text("Ce surnom vient du QR. La vérification concerne l’identité de connexion, sur ce téléphone seulement.")
+                        .font(.subheadline).foregroundStyle(theme.secondary)
+                }.padding(.vertical, 16)
+            }.listRowBackground(theme.canvas)
+            Section {
+                if blocked {
+                    Button("Débloquer") {
+                        if let key = contact.peerID.noiseKey, runtime.chatViewModel.unblockWeshIdentity(key.sha256Fingerprint()) {
+                            feedback = "Contact débloqué."
+                        } else { feedback = "Ce contact n’est plus bloqué." }
+                    }.frame(minHeight: 48)
+                } else {
+                    Button("Bloquer sur ce téléphone", role: .destructive) { blocking = true }.frame(minHeight: 48)
+                }
+                Button("Retirer ce contact", role: .destructive) { removing = true }.frame(minHeight: 48)
+                if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
+            } footer: {
+                Text("Le blocage ignore ses prochains messages ici et conserve l’historique existant. Retirer le contact suspend les prochains envois privés ; un nouveau scan sera nécessaire. Les messages déjà transmis ne peuvent pas être rappelés.")
+            }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+            .navigationTitle("Contact").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Contact")
+            .toolbar { if inSheet { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } } }
+            .alert("Bloquer ce contact ?", isPresented: $blocking) {
+                Button("Annuler", role: .cancel) {}
+                Button("Bloquer", role: .destructive) {
+                    runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: contact.nickname)
+                    feedback = "Contact bloqué sur ce téléphone."
+                }
+            } message: { Text("Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion.") }
+            .alert("Retirer ce contact ?", isPresented: $removing) {
+                Button("Annuler", role: .cancel) {}
+                Button("Retirer", role: .destructive) {
+                    if let key = contact.peerID.noiseKey { runtime.chatViewModel.removeWeshContact(for: key) }
+                    dismiss()
+                }
+            } message: { Text("Il disparaîtra des discussions. Ce retrait n’efface pas l’historique. Un nouveau scan sera nécessaire pour envoyer. Les envois en attente pourront reprendre après ce scan.") }
+    }
+}
+
+private struct WeshNearbyPeople: View {
+    let runtime: AppRuntime
+    @ObservedObject private var service: UnifiedPeerService
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.weshTheme) private var theme
+    @State private var selected: WeshQRTrust.Contact?
+    @State private var feedback = ""
+
+    init(runtime: AppRuntime) {
+        self.runtime = runtime
+        _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+    }
+
+    private var participants: [BitchatPeer] {
+        service.peers.filter { $0.noisePublicKey.count == 32 && ($0.isConnected || $0.isReachable) }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if participants.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Aucun participant connu.").font(.title2.weight(.semibold))
+                        Text("Les connexions Bluetooth disponibles apparaîtront ici.").foregroundStyle(theme.secondary)
+                    }.padding(.vertical, 24).listRowSeparator(.hidden)
+                } else {
+                    ForEach(participants, id: \.peerID) { person in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(person.displayName).font(.headline)
+                            Text("Identité · " + String(person.noisePublicKey.sha256Fingerprint().prefix(8)))
+                                .font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                            if runtime.chatViewModel.identityManager.isBlocked(fingerprint: person.noisePublicKey.sha256Fingerprint()) {
+                                Text("Bloqué sur ce téléphone").font(.subheadline).foregroundStyle(theme.secondary)
+                            } else {
+                                Button("Bloquer sur ce téléphone", role: .destructive) {
+                                    selected = .init(noiseKeyHex: person.noisePublicKey.hexEncodedString(), nickname: person.displayName)
+                                }.frame(minHeight: 44)
+                            }
+                        }.padding(.vertical, 8)
+                    }
+                }
+                if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
+            } footer: { Text("Cette liste n’indique ni distance ni réception des messages. Un surnom ne prouve pas une identité. Pour débloquer : Réglages → Contacts bloqués.") }
+            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+            .navigationTitle("Participants connus").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Participants connus")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
+            .alert("Bloquer cette personne ?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
+                Button("Annuler", role: .cancel) { selected = nil }
+                Button("Bloquer", role: .destructive) {
+                    if let person = selected {
+                        runtime.chatViewModel.blockMeshPeer(peerID: person.peerID, displayName: person.nickname)
+                        feedback = "Personne bloquée sur ce téléphone."
+                    }
+                    selected = nil
+                }
+            } message: {
+                Text("\(selected.map { $0.nickname + " · " + String(($0.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8)) } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
+            }
+    }
+}
+
+private struct WeshBlockedContacts: View {
+    let runtime: AppRuntime
+    @ObservedObject private var service: UnifiedPeerService
+    @Environment(\.weshTheme) private var theme
+    @State private var selectedFingerprint: String?
+    @State private var feedback = ""
+
+    init(runtime: AppRuntime) {
+        self.runtime = runtime
+        _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+    }
+
+    private var fingerprints: [String] { runtime.chatViewModel.identityManager.getBlockedFingerprints().sorted() }
+    private func name(for fingerprint: String) -> String {
+        let identity = runtime.chatViewModel.identityManager.getSocialIdentity(for: fingerprint)
+        let name = identity?.localPetname ?? identity?.claimedNickname ?? ""
+        return name.isEmpty ? "Personne sans nom" : name
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if fingerprints.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Personne n’est bloqué.").font(.title2.weight(.semibold))
+                        Text("Les personnes bloquées apparaîtront ici, même hors connexion.").foregroundStyle(theme.secondary)
+                    }.padding(.vertical, 24).listRowSeparator(.hidden)
+                } else {
+                    ForEach(fingerprints, id: \.self) { fingerprint in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(name(for: fingerprint)).font(.headline)
+                            Text("Identité · " + String(fingerprint.prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                            Button("Débloquer") { selectedFingerprint = fingerprint }.frame(minHeight: 44)
+                        }.padding(.vertical, 8)
+                    }
+                }
+                if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
+            } footer: { Text("Débloquer ne remplace pas une vérification QR. Les messages des autres téléphones ne sont pas modifiés.") }
+            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+            .navigationTitle("Contacts bloqués").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Contacts bloqués")
+            .alert("Débloquer cette personne ?", isPresented: Binding(get: { selectedFingerprint != nil }, set: { if !$0 { selectedFingerprint = nil } })) {
+                Button("Annuler", role: .cancel) { selectedFingerprint = nil }
+                Button("Débloquer") {
+                    if let fingerprint = selectedFingerprint {
+                        feedback = runtime.chatViewModel.unblockWeshIdentity(fingerprint) ? "Personne débloquée." : "Cette personne n’est plus bloquée."
+                    }
+                    selectedFingerprint = nil
+                }
+            } message: { Text("Débloquer \(selectedFingerprint.map { name(for: $0) + " · " + String($0.prefix(8)) } ?? "cette personne") ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone.") }
     }
 }
 
@@ -792,6 +1081,7 @@ private struct WeshConnectionSettings: View {
 }
 
 private struct WeshPrivacySettings: View {
+    let runtime: AppRuntime
     @ObservedObject private var trust = WeshQRTrust.shared
     @Environment(\.weshTheme) private var theme
     @State private var forgetContacts = false
@@ -807,7 +1097,7 @@ private struct WeshPrivacySettings: View {
         }.scrollContentBackground(.hidden).navigationTitle("Confidentialité").weshCanvas(title: "Confidentialité")
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
                 Button("Annuler", role: .cancel) {}
-                Button("Retirer", role: .destructive) { trust.clear() }
+                Button("Retirer", role: .destructive) { runtime.chatViewModel.removeAllWeshContacts() }
             } message: { Text("Pour écrire à ces contacts, vous devrez scanner à nouveau leur QR. Les messages existants restent sur ce téléphone.") }
     }
 }

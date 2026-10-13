@@ -13,6 +13,108 @@ import BitFoundation
 struct UnifiedPeerServiceTests {
 
     @Test @MainActor
+    func fullNoiseIdentity_blocksOfflineNonFavoriteWithoutTransportResolution() {
+        let transport = MockTransport()
+        let identity = TestIdentityManager()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let key = Data(repeating: 0xA1, count: 32)
+        let peerID = PeerID(hexData: key)
+        let fingerprint = key.sha256Fingerprint()
+        // A transport-supplied value cannot override the full requested key.
+        transport.peerFingerprints[peerID] = Data(repeating: 0xB2, count: 32).sha256Fingerprint()
+
+        #expect(service.getFingerprint(for: peerID) == fingerprint)
+        #expect(service.setBlocked(peerID, blocked: true) == fingerprint)
+        #expect(service.isBlocked(peerID))
+        #expect(identity.getBlockedFingerprints() == Set([fingerprint]))
+        #expect(service.unblock(fingerprint: fingerprint.uppercased()))
+        #expect(!service.isBlocked(peerID))
+    }
+
+    @Test @MainActor
+    func fullNoiseIdentity_doesNotBlockReusedAliasWithAnotherKey() {
+        let transport = MockTransport()
+        let identity = TestIdentityManager()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let originalKey = Data(repeating: 0xA2, count: 32)
+        let replacementKey = Data(repeating: 0xB3, count: 32)
+        let reusedAlias = PeerID(publicKey: originalKey)
+        let snapshots = [TransportPeerSnapshot(peerID: reusedAlias, nickname: "Alex", isConnected: true, noisePublicKey: replacementKey, lastSeen: Date())]
+        transport.updatePeerSnapshots(snapshots)
+        service.didUpdatePeerSnapshots(snapshots)
+
+        let originalID = PeerID(hexData: originalKey)
+        #expect(service.setBlocked(originalID, blocked: true) == originalKey.sha256Fingerprint())
+        #expect(identity.isBlocked(fingerprint: originalKey.sha256Fingerprint()))
+        #expect(!identity.isBlocked(fingerprint: replacementKey.sha256Fingerprint()))
+        #expect(!service.isBlocked(reusedAlias))
+        #expect(!transport.purgedArchivePeers.contains(reusedAlias))
+        #expect(service.unblock(fingerprint: originalKey.sha256Fingerprint()))
+        #expect(!identity.isBlocked(fingerprint: replacementKey.sha256Fingerprint()))
+    }
+
+    @Test @MainActor
+    func fullNoiseIdentity_purgesOnlyMatchingPublicSenderAliases() {
+        let transport = MockTransport()
+        let identity = TestIdentityManager()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let key = Data(repeating: 0xA3, count: 32)
+        let otherKey = Data(repeating: 0xB4, count: 32)
+        let shortID = PeerID(publicKey: key)
+        let otherID = PeerID(publicKey: otherKey)
+        transport.updatePeerSnapshots([
+            TransportPeerSnapshot(peerID: shortID, nickname: "Alex", isConnected: true, noisePublicKey: key, lastSeen: Date()),
+            TransportPeerSnapshot(peerID: otherID, nickname: "Alex", isConnected: true, noisePublicKey: otherKey, lastSeen: Date())
+        ])
+
+        let fullID = PeerID(hexData: key)
+        #expect(service.setBlocked(fullID, blocked: true) == key.sha256Fingerprint())
+        #expect(Set(transport.purgedArchivePeers) == Set([fullID, shortID]))
+        #expect(!identity.isBlocked(fingerprint: otherKey.sha256Fingerprint()))
+    }
+
+    @Test @MainActor
+    func unblockFingerprint_targetsExactSameNicknameIdentityAndRefreshesPeers() {
+        let transport = MockTransport()
+        let identity = TestIdentityManager()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let keyA = Data(repeating: 0xA4, count: 32)
+        let keyB = Data(repeating: 0xB5, count: 32)
+        let fingerprintA = keyA.sha256Fingerprint()
+        let fingerprintB = keyB.sha256Fingerprint()
+        for fingerprint in [fingerprintA, fingerprintB] {
+            identity.updateSocialIdentity(SocialIdentity(fingerprint: fingerprint, localPetname: nil, claimedNickname: "Alex", trustLevel: .verified, isFavorite: false, isBlocked: true, notes: nil))
+        }
+        // Recovery has no peer rows. The refreshed row comes from the current
+        // snapshot only when the exact-fingerprint unblock refreshes the service.
+        #expect(service.peers.isEmpty)
+        transport.updatePeerSnapshots([TransportPeerSnapshot(peerID: PeerID(publicKey: keyA), nickname: "Alex", isConnected: true, noisePublicKey: keyA, lastSeen: Date())])
+
+        #expect(service.unblock(fingerprint: fingerprintA))
+        #expect(identity.getBlockedFingerprints() == Set([fingerprintB]))
+        #expect(identity.getSocialIdentity(for: fingerprintA)?.trustLevel == .verified)
+        #expect(identity.getSocialIdentity(for: fingerprintB)?.claimedNickname == "Alex")
+        #expect(service.peers.contains { $0.noisePublicKey == keyA })
+        #expect(transport.purgedArchivePeers.isEmpty)
+    }
+
+    @Test @MainActor
+    func unblockFingerprint_rejectsMalformedAndUnknownIdentities() {
+        let transport = MockTransport()
+        let identity = TestIdentityManager()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let fingerprint = Data(repeating: 0xA5, count: 32).sha256Fingerprint()
+        identity.setBlocked(fingerprint, isBlocked: true)
+
+        for invalid in ["Alex", String(fingerprint.prefix(16)), String(repeating: "g", count: 64), " " + fingerprint, Data(repeating: 0xB6, count: 32).sha256Fingerprint()] {
+            #expect(!service.unblock(fingerprint: invalid))
+        }
+        #expect(identity.getBlockedFingerprints() == Set([fingerprint]))
+        #expect(service.unblock(fingerprint: fingerprint))
+        #expect(!service.unblock(fingerprint: fingerprint))
+    }
+
+    @Test @MainActor
     func getFingerprint_prefersMeshService() async {
         let transport = MockTransport()
         let identity = TestIdentityManager()
@@ -257,6 +359,10 @@ private final class TestIdentityManager: SecureIdentityStateManagerProtocol {
 
     func isBlocked(fingerprint: String) -> Bool {
         socialIdentities[fingerprint]?.isBlocked ?? false
+    }
+
+    func getBlockedFingerprints() -> Set<String> {
+        Set(socialIdentities.values.filter(\.isBlocked).map(\.fingerprint))
     }
 
     func setBlocked(_ fingerprint: String, isBlocked: Bool) {

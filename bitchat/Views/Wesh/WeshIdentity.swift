@@ -34,6 +34,24 @@ final class WeshQRTrust: ObservableObject {
         let hex = sessionKey.hexEncodedString()
         contacts.removeAll { $0.noiseKeyHex == hex }
         contacts.append(Contact(noiseKeyHex: hex, nickname: nickname))
+        persist()
+    }
+
+    /// Revokes only this identity's enrollment; history and drafts belong to
+    /// their own stores and must not be cleared by a contact-list action.
+    @discardableResult
+    func remove(sessionKey: Data) -> Bool {
+        guard sessionKey.count == 32 else { return false }
+        let hex = sessionKey.hexEncodedString()
+        let fingerprint = sessionKey.sha256Fingerprint()
+        guard contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint) else { return false }
+        contacts.removeAll { $0.noiseKeyHex == hex }
+        fingerprints.remove(fingerprint)
+        persist()
+        return true
+    }
+
+    private func persist() {
         defaults.set(try? JSONEncoder().encode(contacts), forKey: "wesh.qrContacts.v1")
         defaults.set(Array(fingerprints), forKey: key)
     }
@@ -55,6 +73,7 @@ final class WeshQRTrust: ObservableObject {
 extension ChatViewModel {
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
+        if let pinned = peerID.noiseKey, identityManager.isBlocked(fingerprint: pinned.sha256Fingerprint()) { return false }
         let shortID = getShortIDForNoiseKey(peerID)
         guard !isPeerBlocked(shortID) else { return false }
         let sessionKey = noiseSessionPublicKeyData(for: shortID)
@@ -63,4 +82,18 @@ extension ChatViewModel {
                                   locallyVerified: peerIdentityStore.isVerified(sessionKey.sha256Fingerprint()), requestedKey: peerID.noiseKey)
     }
 
+    @MainActor @discardableResult
+    func unblockWeshIdentity(_ fingerprint: String) -> Bool {
+        unifiedPeerService.unblock(fingerprint: fingerprint)
+    }
+
+}
+
+/// A historical routing alias cannot identify the author after reassignment.
+enum WeshMessageActions {
+    static func blockIdentity(messageSender: PeerID?, pinnedConversation: PeerID?) -> PeerID? {
+        let candidate = pinnedConversation ?? messageSender
+        guard let candidate, let key = candidate.noiseKey, key.count == 32 else { return nil }
+        return candidate
+    }
 }

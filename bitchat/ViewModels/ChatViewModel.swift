@@ -1385,6 +1385,17 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         verificationCoordinator.qrProgress(for: noiseKey)
     }
 
+    @discardableResult
+    func removeWeshContact(for noiseKey: Data) -> Bool {
+        verificationCoordinator.cancelQRVerification(for: noiseKey)
+        return WeshQRTrust.shared.remove(sessionKey: noiseKey)
+    }
+
+    func removeAllWeshContacts() {
+        verificationCoordinator.cancelAllQRVerifications()
+        WeshQRTrust.shared.clear()
+    }
+
     /// Sends a 👋 to the mesh channel regardless of the active channel.
     @MainActor
     func sendMeshWave() {

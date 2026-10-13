@@ -4,6 +4,37 @@ import BitFoundation
 @testable import bitchat
 
 final class SecureIdentityStateManagerTests: XCTestCase {
+    func test_getBlockedFingerprints_preservesOfflineIdentitiesAcrossReloadAndExactUnblock() {
+        let keychain = MockKeychain()
+        let manager = SecureIdentityStateManager(keychain)
+        let fingerprintA = Data(repeating: 0xA7, count: 32).sha256Fingerprint()
+        let fingerprintB = Data(repeating: 0xB8, count: 32).sha256Fingerprint()
+        let favoriteFingerprint = Data(repeating: 0xC9, count: 32).sha256Fingerprint()
+        XCTAssertTrue(manager.getBlockedFingerprints().isEmpty)
+
+        // No crypto or ephemeral peer entries: both offline people share a
+        // display name, but their durable block records remain independent.
+        for fingerprint in [fingerprintA, fingerprintB] {
+            manager.updateSocialIdentity(SocialIdentity(fingerprint: fingerprint, localPetname: nil, claimedNickname: "Alex", trustLevel: .verified, isFavorite: false, isBlocked: true, notes: nil))
+        }
+        manager.setFavorite(favoriteFingerprint, isFavorite: true)
+        manager.setNostrBlocked(String(repeating: "dd", count: 32), isBlocked: true)
+        manager.forceSave()
+
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertEqual(reloaded.getBlockedFingerprints(), Set([fingerprintA, fingerprintB]))
+        reloaded.setBlocked(fingerprintA, isBlocked: false)
+        XCTAssertEqual(reloaded.getBlockedFingerprints(), Set([fingerprintB]))
+        XCTAssertEqual(reloaded.getSocialIdentity(for: fingerprintA)?.trustLevel, .verified)
+        XCTAssertEqual(reloaded.getSocialIdentity(for: fingerprintB)?.claimedNickname, "Alex")
+        reloaded.forceSave()
+
+        let reloadedAgain = SecureIdentityStateManager(keychain)
+        XCTAssertEqual(reloadedAgain.getBlockedFingerprints(), Set([fingerprintB]))
+        XCTAssertFalse(reloadedAgain.isBlocked(fingerprint: fingerprintA))
+        XCTAssertTrue(reloadedAgain.isFavorite(fingerprint: favoriteFingerprint))
+    }
+
     func test_upsertCryptographicIdentity_withoutClaimedNicknameDoesNotCreateSocialIdentity() async {
         let manager = SecureIdentityStateManager(MockKeychain())
         let fingerprint = String(repeating: "aa", count: 32)

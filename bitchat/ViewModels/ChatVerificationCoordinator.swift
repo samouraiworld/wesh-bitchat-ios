@@ -190,6 +190,19 @@ final class ChatVerificationCoordinator {
         return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
     }
 
+    /// A removed contact cannot be re-enrolled by a response to an older scan.
+    func cancelQRVerification(for noiseKey: Data) {
+        guard noiseKey.count == 32 else { return }
+        let hex = noiseKey.hexEncodedString().lowercased()
+        for peer in pendingQRVerifications.filter({ $0.value.noiseKeyHex.lowercased() == hex }).keys {
+            pendingQRVerifications.removeValue(forKey: peer)
+        }
+    }
+
+    func cancelAllQRVerifications() {
+        pendingQRVerifications.removeAll()
+    }
+
     func verifyFingerprint(for peerID: PeerID) {
         guard let fingerprint = context.getFingerprint(for: peerID) else { return }
 

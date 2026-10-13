@@ -229,6 +229,46 @@ struct ChatVerificationCoordinatorContextTests {
     }
 
     @Test @MainActor
+    func cancelledContactCannotReturnFromDelayedSignedResponse() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let firstKey = transport.noiseStaticPublicKeyData()
+        let secondKey = Data(repeating: 23, count: 32)
+        let firstPeer = PeerID(str: "1122334455667788")
+        let secondPeer = PeerID(str: "8877665544332211")
+        let context = MockChatVerificationContext()
+        context.unifiedPeers = [BitchatPeer(peerID: firstPeer, noisePublicKey: firstKey, nickname: "Test"),
+                                BitchatPeer(peerID: secondPeer, noisePublicKey: secondKey, nickname: "Test")]
+        context.establishedNoiseSessions = [firstPeer, secondPeer]
+        context.noiseSessionKeysByPeerID = [firstPeer: firstKey, secondPeer: secondKey]
+        context.fingerprintsByPeerID = [firstPeer: firstKey.sha256Fingerprint(), secondPeer: secondKey.sha256Fingerprint()]
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        let firstQR = VerificationService.VerificationQR(v: 1, noiseKeyHex: firstKey.hexEncodedString(),
+            signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+            nickname: "Test", ts: 0, nonceB64: "", sigHex: "")
+        #expect(coordinator.beginQRVerification(with: firstQR))
+        #expect(coordinator.beginQRVerification(with: makeVerificationQR(noiseKeyHex: secondKey.hexEncodedString())))
+        let nonce = try #require(context.sentChallenges.first?.nonceA)
+        let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: firstQR.noiseKeyHex, nonceA: nonce))
+        let response = try #require(NoisePayload.decode(encoded))
+        coordinator.cancelQRVerification(for: firstKey)
+        #expect(coordinator.qrProgress(for: firstKey) == .unavailable)
+        #expect(coordinator.qrProgress(for: secondKey) == .pending)
+        coordinator.handleVerifyResponsePayload(from: firstPeer, payload: response.data)
+        #expect(context.identityVerifiedCalls.isEmpty)
+        #expect(WeshQRTrust.shared.contacts.isEmpty)
+        coordinator.cancelAllQRVerifications()
+        #expect(coordinator.qrProgress(for: secondKey) == .unavailable)
+        #expect(coordinator.beginQRVerification(with: firstQR))
+        coordinator.handleVerifyResponsePayload(from: firstPeer, payload: response.data)
+        #expect(context.identityVerifiedCalls.isEmpty)
+        #expect(WeshQRTrust.shared.contacts.isEmpty)
+    }
+
+    @Test @MainActor
     func expiredOrChangedSigningIdentityReplacesPendingChallenge() {
         let previousContacts = WeshQRTrust.shared.contacts
         defer { restoreQRContacts(previousContacts) }

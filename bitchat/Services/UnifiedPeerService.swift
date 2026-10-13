@@ -304,9 +304,30 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
             // archived-echo seed filter can't resolve offline strangers, so
             // scrub their carried messages now rather than at relaunch.
             (meshService as? MeshPublicArchiving)?.purgeArchivedPublicMessages(from: peerID)
+            if let noiseKey = peerID.noiseKey, noiseKey.count == 32 {
+                // Public packets are archived under their short routing ID.
+                // Only purge aliases currently bound to this exact identity.
+                for peer in meshService.currentPeerSnapshots()
+                    where peer.noisePublicKey == noiseKey && peer.peerID != peerID {
+                    (meshService as? MeshPublicArchiving)?.purgeArchivedPublicMessages(from: peer.peerID)
+                }
+            }
         }
         updatePeers()
         return fingerprint
+    }
+
+    /// Unblocks the exact persisted identity even when its peer is offline.
+    /// Names and ephemeral routing aliases never participate in resolution.
+    @discardableResult
+    func unblock(fingerprint: String) -> Bool {
+        guard fingerprint.utf8.count == 64,
+              let bytes = Data(hexString: fingerprint), bytes.count == 32 else { return false }
+        let canonicalFingerprint = bytes.hexEncodedString()
+        guard identityManager.getBlockedFingerprints().contains(canonicalFingerprint) else { return false }
+        identityManager.setBlocked(canonicalFingerprint, isBlocked: false)
+        updatePeers()
+        return true
     }
 
     /// Toggle favorite status
@@ -375,6 +396,11 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
     }
     
     func getFingerprint(for peerID: PeerID) -> String? {
+        // A full Noise identity is authoritative even without a mesh row.
+        // Resolve it before caches so a reused routing alias cannot replace it.
+        if let noiseKey = peerID.noiseKey, noiseKey.count == 32 {
+            return noiseKey.sha256Fingerprint()
+        }
         // Check cache first
         if let cached = fingerprintCache[peerID] {
             return cached

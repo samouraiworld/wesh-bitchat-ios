@@ -94,6 +94,37 @@ struct WeshNativeUITests {
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: verified, locallyVerified: false))
     }
 
+    @Test func historicalMessageBlockUsesPinnedIdentityAndRejectsShortAlias() {
+        let first = PeerID(hexData: Data(repeating: 31, count: 32))
+        let second = PeerID(hexData: Data(repeating: 32, count: 32))
+        let staleAlias = PeerID(str: "1122334455667788")
+        #expect(WeshMessageActions.blockIdentity(messageSender: staleAlias, pinnedConversation: first) == first)
+        #expect(WeshMessageActions.blockIdentity(messageSender: second, pinnedConversation: first) == first)
+        #expect(WeshMessageActions.blockIdentity(messageSender: staleAlias, pinnedConversation: nil) == nil)
+        #expect(WeshMessageActions.blockIdentity(messageSender: second, pinnedConversation: nil) == second)
+        #expect(WeshMessageActions.blockIdentity(messageSender: first, pinnedConversation: staleAlias) == nil)
+    }
+
+    @Test @MainActor func contactRemovalRevokesOnlyExactKeyAndPersists() throws {
+        let suite = "wesh-contact-removal-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let trust = WeshQRTrust(defaults: defaults)
+        let first = Data(repeating: 11, count: 32)
+        let second = Data(repeating: 12, count: 32)
+        trust.record(sessionKey: first, nickname: "Même surnom")
+        trust.record(sessionKey: second, nickname: "Même surnom")
+        #expect(!trust.remove(sessionKey: Data(repeating: 11, count: 31)))
+        #expect(!trust.remove(sessionKey: Data(repeating: 13, count: 32)))
+        #expect(trust.contacts.count == 2)
+        #expect(trust.remove(sessionKey: first))
+        let reloaded = WeshQRTrust(defaults: defaults)
+        #expect(reloaded.contacts.map(\.noiseKeyHex) == [second.hexEncodedString()])
+        #expect(!WeshQRTrust.canSend(sessionKey: first, qrFingerprints: reloaded.fingerprints, locallyVerified: true))
+        #expect(WeshQRTrust.canSend(sessionKey: second, qrFingerprints: reloaded.fingerprints, locallyVerified: true))
+        #expect(!reloaded.remove(sessionKey: first))
+    }
+
     @Test func receiptsDoNotConflateQueuedCarriedAndDelivered() {
         #expect(WeshDelivery.publicLabel(.notSentYet) == "En attente de diffusion")
         #expect(WeshDelivery.publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
