@@ -138,6 +138,9 @@ private struct WeshConversation: View {
     @FocusState private var composerFocused: Bool
 
     private var isPrivate: Bool { peerID != nil }
+    private var draftKey: ComposerDraftStore.Key {
+        .from(peerID: peerID, fingerprint: peerID?.noiseKey?.sha256Fingerprint(), channel: .mesh)
+    }
     private var canSend: Bool { peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic }
     private var messages: [BitchatMessage] {
         if let peerID {
@@ -235,9 +238,11 @@ private struct WeshConversation: View {
         } message: { Text("Tout participant au salon peut voir, conserver ou relayer ce message. Le Bluetooth ne garantit aucune frontière géographique. Un surnom ne prouve pas une identité. Votre brouillon reste ici si vous annulez.") }
         .sheet(isPresented: $contactSheet) { WeshContactSheet(runtime: runtime) }
         .onAppear {
+            draft = ComposerDraftStore.load(draftKey)
             if let peerID { privateChat.startConversation(with: peerID) }
             else { privateChat.endConversation(); runtime.chatViewModel.switchLocationChannel(to: .mesh) }
         }
+        .onChange(of: draft) { value in ComposerDraftStore.save(value, for: draftKey) }
     }
 
     private func send() {
@@ -302,6 +307,7 @@ private struct WeshContactSheet: View {
     @State private var scannedKey: Data?
     @State private var qr = ""
     @State private var pastedQR = ""
+    @FocusState private var pastedQRFocused: Bool
     @State private var progress: ChatVerificationCoordinator.QRProgress = .unavailable
     private let renewal = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -340,6 +346,7 @@ private struct WeshContactSheet: View {
                     DisclosureGroup("Comparer et coller un lien QR en direct") {
                         Text("Comparez ce lien sur le téléphone de la personne devant vous. Une photo ou un lien transféré ne prouve pas qui vous rencontrez.").font(.footnote)
                         TextField("Lien QR", text: $pastedQR, axis: .vertical).lineLimit(2...5).textFieldStyle(.roundedBorder)
+                            .focused($pastedQRFocused)
                         Button("Vérifier ce QR") { scan(pastedQR) }.frame(minHeight: 44).disabled(pastedQR.isEmpty)
                     }
                     if completed {
@@ -352,6 +359,7 @@ private struct WeshContactSheet: View {
                     } else if !status.isEmpty { Text(status).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
                 }.padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Ajouter un contact").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
             .onAppear { qr = verification.myQRString() }
@@ -362,6 +370,7 @@ private struct WeshContactSheet: View {
     }
 
     private func scan(_ value: String) {
+        pastedQRFocused = false
         scanning = false
         scannedKey = nil
         progress = .unavailable
