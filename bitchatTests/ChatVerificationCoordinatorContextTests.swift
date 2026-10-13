@@ -197,6 +197,9 @@ struct ChatVerificationCoordinatorContextTests {
 
     @Test @MainActor
     func signedQRResponseMustMatchActualSessionAndSuppressesMutualClaims() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
         let transport = MockTransport()
         VerificationService.shared.configure(with: transport)
         let key = transport.noiseStaticPublicKeyData()
@@ -223,11 +226,13 @@ struct ChatVerificationCoordinatorContextTests {
             coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
             #expect(context.identityVerifiedCalls.count == (matching ? 1 : 0))
         }
-        WeshQRTrust.shared.clear()
     }
 
     @Test @MainActor
     func expiredOrChangedSigningIdentityReplacesPendingChallenge() {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
         let context = MockChatVerificationContext()
         let key = Data(repeating: 1, count: 32)
         let peer = PeerID(str: "1122334455667788")
@@ -258,9 +263,20 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(coordinator.qrProgress(for: Data(repeating: 3, count: 32)) == .unavailable)
         context.verifiedFingerprints.insert(key.sha256Fingerprint())
         WeshQRTrust.shared.record(sessionKey: key)
-        defer { WeshQRTrust.shared.clear() }
         clock = clock.addingTimeInterval(61)
         #expect(coordinator.qrProgress(for: key) == .verified)
+    }
+
+    @MainActor private func restoreQRContacts(_ contacts: [WeshQRTrust.Contact]) {
+        WeshQRTrust.shared.clear()
+        for contact in contacts {
+            if let key = Data(hexString: contact.noiseKeyHex) {
+                WeshQRTrust.shared.record(sessionKey: key, nickname: contact.nickname)
+            }
+        }
+        // Hosted tests share the simulator app's preferences. Flush cleanup
+        // before XCTest terminates the host so synthetic contacts cannot linger.
+        UserDefaults.standard.synchronize()
     }
 
     @Test @MainActor

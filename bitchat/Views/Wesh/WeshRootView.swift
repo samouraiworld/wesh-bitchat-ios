@@ -400,15 +400,22 @@ private struct WeshContactSheet: View {
     @State private var cameraUnavailable = false
     @State private var status = ""
     @State private var scannedKey: Data?
+    @State private var scannedName = ""
     @State private var qr = ""
     @State private var pastedQR = ""
     @FocusState private var pastedQRFocused: Bool
+    private enum QRFocus: Hashable { case result, camera }
+    @AccessibilityFocusState(for: .voiceOver) private var accessibilityFocus: QRFocus?
+    @State private var focusTarget: QRFocus = .result
+    @State private var focusRevision = 0
+    @State private var waitingForKeyboard = false
     @State private var progress: ChatVerificationCoordinator.QRProgress = .unavailable
     private let renewal = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(spacing: 4) {
@@ -416,9 +423,16 @@ private struct WeshContactSheet: View {
                         mode("Scanner", scanner: true)
                     }.padding(4).overlay(RoundedRectangle(cornerRadius: theme.radius + 4).strokeBorder(theme.line, lineWidth: 1))
 
-                    if showingScanner { scannerContent } else {
+                    if showingScanner {
+                        if scannedKey != nil { verificationResult }
+                        else {
+                            if !status.isEmpty { resultMessage(status) }
+                            scannerContent
+                        }
+                    } else {
                         VStack(spacing: 12) {
-                            Text("Présentez votre QR.").font(.title2.weight(.semibold))
+                            Text(progress == .verified ? "À son tour de scanner." : "Présentez votre QR.")
+                                .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                             Text("Sur votre écran, en personne.\nVotre contact pourra alors vous écrire.")
                                 .foregroundStyle(theme.secondary).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.top, 12)
@@ -439,32 +453,31 @@ private struct WeshContactSheet: View {
                         }.buttonStyle(WeshPrimaryButtonStyle())
                     }
 
-                    if showingScanner { if progress == .verified {
-                        Label("Identité vérifiée sur ce téléphone", systemImage: "checkmark.shield")
-                            .font(.headline).foregroundStyle(theme.accent)
-                        Text("Votre contact doit aussi scanner votre QR pour vous écrire.").foregroundStyle(theme.secondary)
-                    } else if scannedKey != nil && (progress == .expired || progress == .unavailable) {
-                        Text("Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis réessayez.")
-                        Button("Réessayer le scan") {
-                            scannedKey = nil; status = ""; selectMode(scanner: true)
-                        }.buttonStyle(WeshPrimaryButtonStyle())
-                    } else if !status.isEmpty {
-                        Text(status).font(.subheadline).accessibilityAddTraits(.updatesFrequently)
-                    } }
                     DisclosureGroup("Comment ça marche ?") {
                         Text("Chacun scanne le QR affiché en direct par l’autre. Une photo ou un lien transféré ne prouve pas qui vous rencontrez. La vérification vaut sur ce téléphone : elle ne confirme pas ce que l’autre personne a vérifié.")
                             .font(.subheadline).foregroundStyle(theme.secondary).padding(.top, 12)
                     }.padding(.top, 4)
                 }.padding(theme.contentInset)
             }
+            .onChange(of: focusRevision) { _ in
+                scroll.scrollTo(focusTarget, anchor: .top)
+                DispatchQueue.main.async { accessibilityFocus = focusTarget }
+            }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Ajouter un contact").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fermer") { dismiss() }.frame(minHeight: 44) } }
             .onAppear { qr = verification.myQRString() }
             .onReceive(renewal) { _ in qr = verification.myQRString() }
             .onReceive(progressRefresh) { _ in refreshProgress() }
             .onChange(of: trust.fingerprints) { _ in refreshProgress() }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                guard waitingForKeyboard else { return }
+                waitingForKeyboard = false
+                focusResult()
+            }
+            .onDisappear { scanning = false }
             .weshCanvas(title: "Ajouter un contact")
+            }
         }.weshSheetBackground()
     }
 
@@ -474,22 +487,67 @@ private struct WeshContactSheet: View {
                 .foregroundStyle(showingScanner == scanner ? theme.onAccent : theme.secondary)
                 .background(showingScanner == scanner ? AnyShapeStyle(theme.metalFill) : AnyShapeStyle(theme.canvas), in: RoundedRectangle(cornerRadius: theme.radius))
         }.buttonStyle(.plain).accessibilityAddTraits(showingScanner == scanner ? .isSelected : [])
+            .accessibilityHint(scanner ? "Vérifier l’identité du contact devant vous" : "Montrer votre identité à votre contact")
+    }
+
+    private func resultMessage(_ message: String) -> some View {
+        Text(message).font(.subheadline)
+            .id(QRFocus.result)
+            .accessibilityFocused($accessibilityFocus, equals: .result)
+    }
+
+    @ViewBuilder private var verificationResult: some View {
+        if progress == .verified {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Identité vérifiée ici", systemImage: "checkmark.shield")
+                    .font(.title2.weight(.semibold)).foregroundStyle(theme.accent)
+                Text(scannedName).font(.headline)
+                Text("Sur ce téléphone, vous avez vérifié votre contact. Pour qu’il puisse vous écrire, montrez-lui maintenant votre QR.")
+                    .foregroundStyle(theme.secondary)
+            }.accessibilityElement(children: .combine)
+                .id(QRFocus.result)
+                .accessibilityFocused($accessibilityFocus, equals: .result)
+            Button { selectMode(scanner: false) } label: {
+                Label("Montrer mon QR", systemImage: "qrcode")
+            }.buttonStyle(WeshPrimaryButtonStyle())
+            Button("Scanner un autre contact", action: retryScan).frame(minHeight: 44)
+        } else if progress == .pending {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Vérification en cours…").font(.title2.weight(.semibold))
+                Text(status).foregroundStyle(theme.secondary)
+            }.accessibilityElement(children: .combine)
+                .id(QRFocus.result)
+                .accessibilityFocused($accessibilityFocus, equals: .result)
+            Button("Scanner à nouveau", action: retryScan).frame(minHeight: 44)
+        } else {
+            resultMessage("Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis réessayez.")
+            Button("Réessayer le scan", action: retryScan).buttonStyle(WeshPrimaryButtonStyle())
+        }
     }
 
     @ViewBuilder private var scannerContent: some View {
-        Text("Scannez son QR.").font(.title2.weight(.semibold))
+        Text("Scannez son QR.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
         Text("Visez le QR affiché en direct sur le téléphone de votre contact.").foregroundStyle(theme.secondary)
         if scanning {
-            CameraScannerView(isActive: scanning, onUnavailable: { cameraUnavailable = true; scanning = false }, onCode: scan)
+            CameraScannerView(isActive: scanning, onUnavailable: {
+                cameraUnavailable = true; scanning = false; focusResult(.camera)
+            }, onCode: { value in
+                guard scanning else { return }
+                scan(value)
+            })
                 .frame(height: 260).clipShape(RoundedRectangle(cornerRadius: theme.radius))
                 .accessibilityLabel("Scanner le QR du contact")
             Button("Arrêter la caméra") { scanning = false }.frame(minHeight: 44)
         } else {
             if cameraUnavailable {
-                Label("Caméra indisponible", systemImage: "camera")
-                    .font(.headline).padding(.vertical, 12)
-                Text("Autorisez la caméra dans les réglages, ou comparez le lien en personne avec « Autre méthode ».")
-                    .font(.subheadline).foregroundStyle(theme.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Caméra indisponible", systemImage: "camera")
+                        .font(.headline)
+                    Text("Autorisez la caméra dans les réglages, ou comparez le lien en personne avec « Autre méthode ».")
+                        .font(.subheadline).foregroundStyle(theme.secondary)
+                }.padding(.vertical, 12).accessibilityElement(children: .combine)
+                    .id(QRFocus.camera)
+                    .accessibilityFocused($accessibilityFocus, equals: .camera)
                 Button("Ouvrir les réglages", action: openWeshSystemSettings).frame(minHeight: 44)
             }
             Button { cameraUnavailable = false; scanning = true } label: {
@@ -504,8 +562,10 @@ private struct WeshContactSheet: View {
                     .lineLimit(2...5).focused($pastedQRFocused).padding(12)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.line, lineWidth: 1))
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .accessibilityLabel("Lien du QR de votre contact")
+                    .accessibilityHint("À comparer en personne avec le lien affiché sur son téléphone")
                 Button("Vérifier ce QR") { scan(pastedQR) }
-                    .buttonStyle(WeshPrimaryButtonStyle()).disabled(pastedQR.isEmpty)
+                    .buttonStyle(WeshPrimaryButtonStyle()).disabled(pastedQR.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }.padding(.top, 12)
         }
     }
@@ -513,26 +573,53 @@ private struct WeshContactSheet: View {
     private func selectMode(scanner: Bool) {
         pastedQRFocused = false
         showingScanner = scanner
-        scanning = scanner
+        scanning = scanner && scannedKey == nil
         cameraUnavailable = false
     }
+    private func retryScan() {
+        scannedKey = nil; scannedName = ""; status = ""; progress = .unavailable
+        selectMode(scanner: true)
+    }
+    private func focusResult(_ target: QRFocus = .result) {
+        accessibilityFocus = nil
+        focusTarget = target
+        guard !waitingForKeyboard else { return }
+        focusRevision += 1
+    }
     private func scan(_ value: String) {
+        waitingForKeyboard = pastedQRFocused
         pastedQRFocused = false
         scanning = false
         scannedKey = nil
+        scannedName = ""
         progress = .unavailable
+        if let scannedURL = URL(string: value),
+           let parsed = VerificationService.VerificationQR.fromURL(scannedURL),
+           let ownURL = URL(string: qr),
+           let own = VerificationService.VerificationQR.fromURL(ownURL),
+           parsed.noiseKeyHex == own.noiseKeyHex,
+           VerificationService.shared.verifyScannedQR(value) != nil {
+            status = "C’est votre QR. Scannez celui de votre contact."
+            focusResult()
+            return
+        }
         switch verification.verifyScannedPayload(value) {
         case .invalid: status = "QR invalide ou expiré. Demandez un nouveau QR à votre contact."
         case .notFound: status = "Contact introuvable ou identité différente. Rapprochez les téléphones et réessayez."
         case .requested(let name):
+            scannedName = name
             if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) { scannedKey = Data(hexString: parsed.noiseKeyHex) }
             status = "Vérification de \(name) en cours… Gardez Wesh ouvert sur les deux téléphones."
             refreshProgress()
         }
+        focusResult()
     }
     private func refreshProgress() {
         guard let scannedKey else { return }
-        progress = runtime.chatViewModel.weshQRProgress(for: scannedKey)
+        let updated = runtime.chatViewModel.weshQRProgress(for: scannedKey)
+        guard updated != progress else { return }
+        progress = updated
+        if showingScanner { focusResult() }
     }
 }
 
