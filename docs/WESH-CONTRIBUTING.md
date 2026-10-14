@@ -24,7 +24,9 @@ access warnings in inherited `ViewSmokeTests`, with no test failures; those smok
 checks do not establish live view updates or accessibility behavior.
 
 The RC4 App Store export attempt stopped because Xcode could not access an Apple
-Distribution signing identity/account. Existing RC3 App Store profiles remain
+Distribution signing identity/account. A local retry after Mac access resumed
+still reported `No Accounts` and no Distribution signing certificate; the earlier
+screen lock alone does not establish the cause. Existing RC3 App Store profiles remain
 compatible with the RC4 app and extension, but profiles alone cannot sign an IPA.
 No RC4 IPA has been produced, uploaded, or validated by Apple's servers. Historical
 RC3 artifacts remain associated with their original source commit.
