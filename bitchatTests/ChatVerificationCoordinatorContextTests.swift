@@ -304,7 +304,7 @@ struct ChatVerificationCoordinatorContextTests {
         context.verifiedFingerprints.insert(key.sha256Fingerprint())
         WeshQRTrust.shared.record(sessionKey: key)
         clock = clock.addingTimeInterval(61)
-        #expect(coordinator.qrProgress(for: key) == .verified)
+        #expect(coordinator.qrProgress(for: key) == .expired)
     }
 
     @MainActor private func restoreQRContacts(_ contacts: [WeshQRTrust.Contact]) {
@@ -468,6 +468,76 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(context.postedLocalNotifications.count == 1)
         #expect(context.sentResponses.count == 2)
     }
+    @Test @MainActor
+    func rescanCannotBorrowOldTrustAndProgressIsBoundToItsChallenge() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
+        let transport = MockTransport()
+        let otherSigner = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        let peer = PeerID(str: "1122334455667788")
+        let context = MockChatVerificationContext()
+        context.unifiedPeers = [BitchatPeer(peerID: peer, noisePublicKey: key, nickname: "Nora")]
+        context.establishedNoiseSessions = [peer]
+        context.noiseSessionKeysByPeerID[peer] = key
+        context.fingerprintsByPeerID[peer] = key.sha256Fingerprint()
+        context.verifiedFingerprints.insert(key.sha256Fingerprint())
+        WeshQRTrust.shared.record(sessionKey: key, nickname: "Nora")
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true, now: { clock })
+        func qr(signer: MockTransport, nickname: String, nonce: UInt8) throws -> VerificationService.VerificationQR {
+            var payload = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+                signKeyHex: signer.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+                nickname: nickname, ts: Int64(clock.timeIntervalSince1970),
+                nonceB64: Data(repeating: nonce, count: 16).base64EncodedString().replacingOccurrences(of: "=", with: ""), sigHex: "")
+            payload.sigHex = try #require(signer.noiseSignData(payload.canonicalBytes())).hexEncodedString()
+            return try #require(VerificationService.shared.verifyScannedQR(payload.toURLString(), now: clock.timeIntervalSince1970))
+        }
+        func response(_ nonce: Data) throws -> Data {
+            let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: key.hexEncodedString(), nonceA: nonce))
+            return try #require(NoisePayload.decode(encoded)).data
+        }
+        let original = try qr(signer: transport, nickname: "Nora", nonce: 1)
+        #expect(coordinator.beginQRVerification(with: original))
+        let firstNonce = try #require(coordinator.qrAttemptNonce(for: key))
+        let firstResponse = try response(firstNonce)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: firstNonce) == .pending)
+        coordinator.handleVerifyResponsePayload(from: peer, payload: firstResponse)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: firstNonce) == .verified)
+
+        let claimedByOtherSigner = try qr(signer: otherSigner, nickname: "Someone else", nonce: 2)
+        #expect(coordinator.beginQRVerification(with: claimedByOtherSigner))
+        let secondNonce = try #require(coordinator.qrAttemptNonce(for: key))
+        #expect(secondNonce != firstNonce)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: secondNonce) == .pending)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: firstNonce) == .unavailable)
+        coordinator.handleVerifyResponsePayload(from: peer, payload: firstResponse)
+        coordinator.handleVerifyResponsePayload(from: peer, payload: try response(secondNonce))
+        #expect(coordinator.qrProgress(for: key, attemptNonce: secondNonce) == .pending)
+        #expect(WeshQRTrust.shared.contacts.first?.nickname == "Nora")
+        clock = clock.addingTimeInterval(61)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: secondNonce) == .expired)
+        #expect(WeshQRTrust.shared.fingerprints.contains(key.sha256Fingerprint()))
+
+        let renewed = try qr(signer: transport, nickname: "Nora renewed", nonce: 3)
+        #expect(coordinator.beginQRVerification(with: renewed))
+        let thirdNonce = try #require(coordinator.qrAttemptNonce(for: key))
+        #expect(coordinator.beginQRVerification(with: renewed))
+        #expect(coordinator.qrAttemptNonce(for: key) == thirdNonce)
+        coordinator.handleVerifyResponsePayload(from: peer, payload: try response(thirdNonce))
+        #expect(coordinator.qrProgress(for: key, attemptNonce: thirdNonce) == .verified)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: secondNonce) == .unavailable)
+        #expect(WeshQRTrust.shared.contacts.first?.nickname == "Nora renewed")
+        let freshSameSigner = try qr(signer: transport, nickname: "Nora renewed", nonce: 4)
+        #expect(coordinator.beginQRVerification(with: freshSameSigner))
+        #expect(coordinator.qrAttemptNonce(for: key) != thirdNonce)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: thirdNonce) == .unavailable)
+        coordinator.cancelQRVerification(for: key)
+        #expect(coordinator.qrProgress(for: key) == .unavailable)
+    }
+
 }
 
 /// The installed callbacks hop through `DispatchQueue.main.async`; tests must

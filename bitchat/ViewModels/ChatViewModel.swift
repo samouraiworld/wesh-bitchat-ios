@@ -1381,8 +1381,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         return true
     }
 
-    func weshQRProgress(for noiseKey: Data) -> ChatVerificationCoordinator.QRProgress {
-        verificationCoordinator.qrProgress(for: noiseKey)
+    func weshQRProgress(for noiseKey: Data, attemptNonce: Data) -> ChatVerificationCoordinator.QRProgress {
+        verificationCoordinator.qrProgress(for: noiseKey, attemptNonce: attemptNonce)
+    }
+
+    func weshQRAttemptNonce(for noiseKey: Data) -> Data? {
+        verificationCoordinator.qrAttemptNonce(for: noiseKey)
     }
 
     @discardableResult

@@ -693,7 +693,7 @@ enum WeshDelivery {
         switch status {
         case .notSentYet: return "En attente d’envoi"
         case .sending: return "En cours d’envoi"
-        case .sent: return "Parti de ce téléphone"
+        case .sent: return "Transmission non confirmée"
         case .carried: return "Confié à un relais · réception non confirmée"
         case .delivered: return "Réception confirmée"
         case .read: return "Lu"
@@ -715,6 +715,7 @@ private struct WeshContactSheet: View {
     @State private var cameraUnavailable = false
     @State private var status = ""
     @State private var scannedKey: Data?
+    @State private var scannedAttemptNonce: Data?
     @State private var scannedName = ""
     @State private var qr = ""
     @State private var pastedQR = ""
@@ -900,7 +901,7 @@ private struct WeshContactSheet: View {
         cameraUnavailable = false
     }
     private func retryScan() {
-        scannedKey = nil; scannedName = ""; status = ""; progress = .unavailable
+        scannedKey = nil; scannedAttemptNonce = nil; scannedName = ""; status = ""; progress = .unavailable
         selectMode(scanner: true)
     }
     private func focusResult(_ target: QRFocus = .result) {
@@ -914,6 +915,7 @@ private struct WeshContactSheet: View {
         pastedQRFocused = false
         scanning = false
         scannedKey = nil
+        scannedAttemptNonce = nil
         scannedName = ""
         progress = .unavailable
         if let scannedURL = URL(string: value),
@@ -931,15 +933,18 @@ private struct WeshContactSheet: View {
         case .notFound: status = "Contact introuvable ou identité différente. Rapprochez les téléphones et réessayez."
         case .requested(let name):
             scannedName = name
-            if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) { scannedKey = Data(hexString: parsed.noiseKeyHex) }
+            if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) {
+                scannedKey = Data(hexString: parsed.noiseKeyHex)
+                if let scannedKey { scannedAttemptNonce = runtime.chatViewModel.weshQRAttemptNonce(for: scannedKey) }
+            }
             status = "Vérification de \(name) en cours… Gardez Wesh ouvert sur les deux téléphones."
             refreshProgress()
         }
         focusResult()
     }
     private func refreshProgress() {
-        guard let scannedKey else { return }
-        let updated = runtime.chatViewModel.weshQRProgress(for: scannedKey)
+        guard let scannedKey, let scannedAttemptNonce else { return }
+        let updated = runtime.chatViewModel.weshQRProgress(for: scannedKey, attemptNonce: scannedAttemptNonce)
         guard updated != progress else { return }
         progress = updated
         if showingScanner { focusResult() }

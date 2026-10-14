@@ -155,6 +155,7 @@ final class ChatVerificationCoordinator {
         case pending, verified, expired, unavailable
     }
     struct PendingVerification {
+        let scannedQRBytes: Data
         let noiseKeyHex: String
         let signKeyHex: String
         let nickname: String
@@ -167,6 +168,7 @@ final class ChatVerificationCoordinator {
     private let weshMode: Bool
     private let now: () -> Date
     private var pendingQRVerifications: [PeerID: PendingVerification] = [:]
+    private var completedQRNonces: [String: Data] = [:]
     private var lastVerifyNonceByPeer: [PeerID: Data] = [:]
     private var lastInboundVerifyChallengeAt: [String: Date] = [:]
     private var lastMutualToastAt: [String: Date] = [:]
@@ -177,23 +179,35 @@ final class ChatVerificationCoordinator {
         self.context = context
     }
 
-    /// Uses the same injected clock and 60-second lifetime as challenge completion.
-    /// A completed local proof wins over expiration; this never extends a pending attempt.
-    func qrProgress(for noiseKey: Data) -> QRProgress {
+    /// Progress belongs to this scan's challenge, never a previous enrollment.
+    func qrProgress(for noiseKey: Data, attemptNonce: Data? = nil) -> QRProgress {
         guard noiseKey.count == 32 else { return .unavailable }
-        let fingerprint = noiseKey.sha256Fingerprint()
-        if context.isVerifiedFingerprint(fingerprint),
-           !weshMode || WeshQRTrust.shared.fingerprints.contains(fingerprint) { return .verified }
-        guard let pending = pendingQRVerifications.values.first(where: {
+        let hex = noiseKey.hexEncodedString().lowercased()
+        if let pending = pendingQRVerifications.values.first(where: {
             $0.noiseKeyHex.lowercased() == noiseKey.hexEncodedString().lowercased()
-        }) else { return .unavailable }
-        return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
+        }) {
+            guard attemptNonce == nil || attemptNonce == pending.nonceA else { return .unavailable }
+            return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
+        }
+        guard let completedNonce = completedQRNonces[hex],
+              attemptNonce == nil || attemptNonce == completedNonce,
+              context.isVerifiedFingerprint(noiseKey.sha256Fingerprint()),
+              !weshMode || WeshQRTrust.shared.fingerprints.contains(noiseKey.sha256Fingerprint()) else { return .unavailable }
+        return .verified
+    }
+
+    func qrAttemptNonce(for noiseKey: Data) -> Data? {
+        guard noiseKey.count == 32 else { return nil }
+        let hex = noiseKey.hexEncodedString().lowercased()
+        return pendingQRVerifications.values.first(where: { $0.noiseKeyHex.lowercased() == hex })?.nonceA
+            ?? completedQRNonces[hex]
     }
 
     /// A removed contact cannot be re-enrolled by a response to an older scan.
     func cancelQRVerification(for noiseKey: Data) {
         guard noiseKey.count == 32 else { return }
         let hex = noiseKey.hexEncodedString().lowercased()
+        completedQRNonces.removeValue(forKey: hex)
         for peer in pendingQRVerifications.filter({ $0.value.noiseKeyHex.lowercased() == hex }).keys {
             pendingQRVerifications.removeValue(forKey: peer)
         }
@@ -201,6 +215,7 @@ final class ChatVerificationCoordinator {
 
     func cancelAllQRVerifications() {
         pendingQRVerifications.removeAll()
+        completedQRNonces.removeAll()
     }
 
     func verifyFingerprint(for peerID: PeerID) {
@@ -333,15 +348,16 @@ final class ChatVerificationCoordinator {
 
         let peerID = peer.peerID
         if let pending = pendingQRVerifications[peerID],
-           pending.noiseKeyHex.lowercased() == targetNoise,
-           pending.signKeyHex.lowercased() == qr.signKeyHex.lowercased(),
+           pending.scannedQRBytes == qr.canonicalBytes(),
            (0...60).contains(now().timeIntervalSince(pending.createdAt)) { return true }
-        pendingQRVerifications.removeValue(forKey: peerID)
+        // Retain the established contact separately; replace only scan progress.
+        if let noiseKey = Data(hexString: targetNoise) { cancelQRVerification(for: noiseKey) }
 
         var nonce = Data(count: 16)
         let status = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         guard status == errSecSuccess else { return false }
         var pending = PendingVerification(
+            scannedQRBytes: qr.canonicalBytes(),
             noiseKeyHex: qr.noiseKeyHex,
             signKeyHex: qr.signKeyHex,
             nickname: qr.nickname,
@@ -423,6 +439,7 @@ final class ChatVerificationCoordinator {
               sessionKey.count == 32, sessionKey.hexEncodedString().lowercased() == pending.noiseKeyHex.lowercased(),
               let fingerprint = context.getFingerprint(for: peerID), fingerprint == sessionKey.sha256Fingerprint() else { return }
         if weshMode { WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname) }
+        completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
 
         let shortFingerprint = fingerprint.prefix(8)
         SecureLogger.info("🔐 Marking verified fingerprint: \(shortFingerprint)", category: .security)

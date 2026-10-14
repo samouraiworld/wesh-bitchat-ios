@@ -1,21 +1,34 @@
 import BitFoundation
 import Foundation
+import Darwin
 import Testing
 @testable import bitchat
 
+private final class ControlledSynchronizeDefaults: UserDefaults, @unchecked Sendable {
+    var synchronizeResults: [Bool] = []
+    override func synchronize() -> Bool {
+        if !synchronizeResults.isEmpty, !synchronizeResults.removeFirst() { return false }
+        return super.synchronize()
+    }
+}
+
 @Suite("Share extension handoff", .serialized)
 struct SharedContentHandoffTests {
-    private func makeStore() -> (suite: String, defaults: UserDefaults, store: SharedContentStore) {
+    private func makeStore() -> (suite: String, defaults: UserDefaults, lockURL: URL, store: SharedContentStore) {
         let suite = "SharedContentHandoffTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return (suite, defaults, SharedContentStore(defaults: defaults))
+        let lockURL = FileManager.default.temporaryDirectory.appendingPathComponent(suite + ".lock")
+        return (suite, defaults, lockURL, SharedContentStore(defaults: defaults, lockURL: lockURL))
     }
 
     @Test("A staged share survives an inactive app and a late open")
     func stagedShareSurvivesLateOpen() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let stagedAt = Date(timeIntervalSince1970: 1_000_000)
         let payload = SharedContentPayload.text("review me later", createdAt: stagedAt)
 
@@ -28,7 +41,10 @@ struct SharedContentHandoffTests {
     @Test("Malformed, oversized, unsupported, and expired payloads are rejected and cleared")
     func invalidPayloadsAreRejectedAndCleared() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 2_000_000)
 
         context.defaults.set(Data("not-json".utf8), forKey: SharedContentStore.storageKey)
@@ -102,7 +118,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func staleDestinationCannotBeConfirmed() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 3_000_000)
         let payload = SharedContentPayload.text("do not auto-send", createdAt: now)
         let peer = PeerID(str: "8899aabbccddeeff")
@@ -127,7 +146,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func oneTimeConfirmationAndCancellation() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 4_000_000)
         let model = SharedContentImportModel(store: context.store)
 
@@ -156,7 +178,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func cancellationPreservesNewerShare() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 5_000_000)
         let model = SharedContentImportModel(store: context.store)
         let old = SharedContentPayload.text("old", createdAt: now)
@@ -175,7 +200,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshRequiresAnExplicitStableRoute() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 6_000_000)
         let payload = SharedContentPayload.text("route explicitly", createdAt: now)
         let model = SharedContentImportModel(store: context.store)
@@ -200,7 +228,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshConfirmationRejectsRouteDrift() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 7_000_000)
         let payload = SharedContentPayload.text("private draft", createdAt: now)
         let peer = PeerID(hexData: Data(repeating: 0x11, count: 32))
@@ -226,7 +257,10 @@ struct SharedContentHandoffTests {
     func weshReviewPreservesNewerEnvelope() throws {
         for refreshBeforeTap in [false, true] {
             let context = makeStore()
-            defer { context.defaults.removePersistentDomain(forName: context.suite) }
+            defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
             let now = Date(timeIntervalSince1970: 8_000_000)
             let old = SharedContentPayload.text("old review", createdAt: now)
             let newer = SharedContentPayload.text("new review needed", createdAt: now)
@@ -252,7 +286,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshReviewRejectsChangedContentWithSameID() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 9_000_000)
         let payload = SharedContentPayload.text("reviewed text", createdAt: now)
         let model = SharedContentImportModel(store: context.store)
@@ -274,7 +311,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshRechecksDestinationEligibility() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 10_000_000)
         let payload = SharedContentPayload.text("blocked while reviewing", createdAt: now)
         let destination = SharedContentDestination.privateConversation(
@@ -296,7 +336,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshRejectsOversizedDraft() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 11_000_000)
         let payload = SharedContentPayload.text(
             String(repeating: "x", count: ComposerDraftStore.maxDraftLength + 1), createdAt: now)
@@ -320,7 +363,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshImportsExactUnicodeLimitOnce() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 12_000_000)
         let payload = SharedContentPayload.text(
             String(repeating: "é", count: ComposerDraftStore.maxDraftLength), createdAt: now)
@@ -343,7 +389,10 @@ struct SharedContentHandoffTests {
     @MainActor
     func weshRechecksExpiryBeforeImport() throws {
         let context = makeStore()
-        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
         let now = Date(timeIntervalSince1970: 13_000_000)
         let payload = SharedContentPayload.text("expires before consent", createdAt: now)
         let model = SharedContentImportModel(store: context.store)
@@ -358,4 +407,121 @@ struct SharedContentHandoffTests {
         }
         #expect(model.offer == nil)
     }
+    @Test("An extension stage between lookup and deletion waits for the app-group file lock")
+    func concurrentStagePreservesNewEnvelope() throws {
+        for operation in ["consume", "discard", "expired"] {
+            let context = makeStore()
+            defer {
+                context.defaults.removePersistentDomain(forName: context.suite)
+                try? FileManager.default.removeItem(at: context.lockURL)
+            }
+            let oldTime = Date(timeIntervalSince1970: 20_000_000)
+            let reviewTime = operation == "expired" ? oldTime.addingTimeInterval(SharedContentPayload.retentionSeconds + 1) : oldTime
+            let old = SharedContentPayload.text("old", createdAt: oldTime)
+            let newer = SharedContentPayload.text("new from extension", createdAt: reviewTime)
+            try context.store.stage(old, now: oldTime)
+            let extensionStore = SharedContentStore(defaults: UserDefaults(suiteName: context.suite)!, lockURL: context.lockURL)
+            let started = DispatchSemaphore(value: 0)
+            let finished = DispatchSemaphore(value: 0)
+            context.store.beforeRemovalForTesting = {
+                DispatchQueue.global().async {
+                    started.signal()
+                    try? extensionStore.stage(newer, now: reviewTime)
+                    finished.signal()
+                }
+                #expect(started.wait(timeout: .now() + 2) == .success)
+                // A distinct BSD descriptor cannot acquire this shared lock,
+                // as an extension process would not be able to acquire it.
+                let descriptor = Darwin.open(context.lockURL.path, O_RDWR)
+                #expect(descriptor >= 0)
+                if descriptor >= 0 {
+                    #expect(flock(descriptor, LOCK_EX | LOCK_NB) != 0)
+                    Darwin.close(descriptor)
+                }
+                #expect(finished.wait(timeout: .now()) == .timedOut)
+            }
+            switch operation {
+            case "consume": #expect(context.store.consume(id: old.id, now: reviewTime) == old)
+            case "discard": context.store.discard(id: old.id)
+            default: #expect(context.store.pending(now: reviewTime) == nil)
+            }
+            #expect(finished.wait(timeout: .now() + 2) == .success)
+            #expect(context.store.pending(now: reviewTime) == newer)
+        }
+    }
+
+    @Test("Unavailable shared locking fails closed without deleting the existing envelope")
+    func unavailableLockPreservesPendingData() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let payload = SharedContentPayload.text("retain me")
+        let encoded = try JSONEncoder().encode(payload)
+        context.defaults.set(encoded, forKey: SharedContentStore.storageKey)
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("missing.lock")
+        let unavailable = SharedContentStore(defaults: context.defaults, lockURL: missing)
+        #expect(throws: SharedContentHandoffError.storageUnavailable) { try unavailable.stage(.text("replacement")) }
+        #expect(unavailable.pending() == nil)
+        #expect(unavailable.consume(id: payload.id) == nil)
+        unavailable.discard(id: payload.id)
+        unavailable.discardAll()
+        #expect(context.defaults.data(forKey: SharedContentStore.storageKey) == encoded)
+    }
+
+    @Test("A failed preference flush restores an envelope instead of losing a review")
+    func failedFlushRestoresPreviousEnvelope() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let payload = SharedContentPayload.text("retain reviewed text")
+        try context.store.stage(payload)
+        let controlled = ControlledSynchronizeDefaults(suiteName: context.suite)!
+        let store = SharedContentStore(defaults: controlled, lockURL: context.lockURL)
+        controlled.synchronizeResults = [true, false, true]
+        #expect(throws: SharedContentHandoffError.storageUnavailable) { try store.stage(.text("new text")) }
+        #expect(store.pending() == payload)
+        controlled.synchronizeResults = [true, false, true]
+        #expect(store.consume(id: payload.id) == nil)
+        #expect(store.pending() == payload)
+        controlled.synchronizeResults = [true, false, true]
+        store.discard(id: payload.id)
+        #expect(store.pending() == payload)
+        let malformed = Data("invalid json".utf8)
+        controlled.set(malformed, forKey: SharedContentStore.storageKey)
+        controlled.synchronizeResults = [true, false, true]
+        #expect(store.pending() == nil)
+        #expect(controlled.data(forKey: SharedContentStore.storageKey) == malformed)
+    }
+
+    @Test("A suspended writer cannot make the app wait without a bound or delete its payload")
+    func heldLockRefusesAfterDeterministicBudget() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let payload = SharedContentPayload.text("held by extension")
+        try context.store.stage(payload)
+        let descriptor = Darwin.open(context.lockURL.path, O_RDWR)
+        #expect(descriptor >= 0)
+        guard descriptor >= 0 else { return }
+        defer { Darwin.close(descriptor) }
+        #expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+        var clock: TimeInterval = 0
+        var pauses = 0
+        let contender = SharedContentStore(defaults: context.defaults, lockURL: context.lockURL,
+            lockTimeout: 0.05, monotonicNow: { clock }, pauseBeforeLockRetry: { pauses += 1; clock += 0.05 })
+        #expect(contender.consume(id: payload.id) == nil)
+        #expect(pauses == 1)
+        #expect(context.defaults.data(forKey: SharedContentStore.storageKey) != nil)
+        #expect(throws: SharedContentHandoffError.storageUnavailable) { try contender.stage(.text("new")) }
+        #expect(pauses == 2)
+        flock(descriptor, LOCK_UN)
+        #expect(contender.pending() == payload)
+    }
+
 }

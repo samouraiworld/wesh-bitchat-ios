@@ -174,6 +174,7 @@ struct WeshNativeUITests {
         #expect(WeshDelivery.publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
         #expect(WeshDelivery.publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
         #expect(WeshDelivery.label(.notSentYet) != WeshDelivery.label(.sent))
+        #expect(WeshDelivery.label(.sent).contains("non confirmée"))
         #expect(WeshDelivery.label(.carried).contains("non confirmée"))
         #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
         #expect(WeshDelivery.label(.read(by: "Nora", at: Date())) == "Lu")
