@@ -23,17 +23,34 @@ routing, delivery states, and network activation. Those 228 are a subset of the
 access warnings in inherited `ViewSmokeTests`, with no test failures; those smoke
 checks do not establish live view updates or accessibility behavior.
 
+After the candidate freeze, four tests were added for the same immutable,
+synthetic signed Ed25519 QR fixture used by Android. They verify real signature
+acceptance, canonical encoding, tamper rejection, and freshness boundaries. The
+targeted run passed all four new tests plus five existing design-system control
+tests. This is supplementary evidence at a later test-only source revision; it
+does not change the candidate's 2,329-test result or archive provenance, and does
+not prove a live camera scan, Noise session, or radio exchange. The fixture's
+explicitly public seed must never be used as a real identity.
+
 The RC4 App Store export attempt stopped because Xcode could not access an Apple
 Distribution signing identity/account. A local retry after Mac access resumed
 still reported `No Accounts` and no Distribution signing certificate; the earlier
 screen lock alone does not establish the cause. Existing RC3 App Store profiles remain
 compatible with the RC4 app and extension, but profiles alone cannot sign an IPA.
+The Xcode account UI retained a team but requested renewed human authentication;
+the CLI error does not establish that the UI account or team was absent.
 No RC4 IPA has been produced, uploaded, or validated by Apple's servers. Historical
 RC3 artifacts remain associated with their original source commit.
 
 Documentation-only commits after the candidate do not change its source identity.
 Local archives, simulator packages, test results, signing details, and raw logs
 belong in ignored `.validation/`; do not commit them or substitute an older IPA.
+
+A separate RC4 simulator visual smoke confirmed silver controls on black,
+empty Contacts/Discussions, public-channel information, and Send disabled when
+Bluetooth was unavailable. VoiceOver showed an initial focus rectangle; speech,
+rotor, and gesture completion were not established. Safari/share-extension smoke
+was not repeated on RC4; prior RC3 sharing evidence remains historical.
 
 ## Simulator build
 
