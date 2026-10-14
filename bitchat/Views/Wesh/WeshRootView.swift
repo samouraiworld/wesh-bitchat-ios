@@ -108,6 +108,15 @@ enum WeshSharedContentReview {
         }
     }
 
+    static func destinationLabel(_ destination: SharedContentDestination) -> String {
+        switch destination {
+        case .mesh: return "Salon local · PUBLIC"
+        case .privateConversation(let peerID, let name):
+            return "Privé · " + weshIdentitySummary(name, fingerprint: peerID.noiseKey?.sha256Fingerprint())
+        case .geohash: return "Destination indisponible"
+        }
+    }
+
     static func prepare(id: UUID, destination: SharedContentDestination, model: SharedContentImportModel,
                         destinationAllowed: Bool, now: Date = Date()) -> Result<SharedContentOffer, Issue> {
         guard supports(destination), destinationAllowed else { return .failure(.unavailableDestination) }
@@ -194,8 +203,12 @@ private struct WeshSharedContentSheet: View {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(contact.nickname).font(.headline)
                                         Text("Privé · Contact QR").font(.subheadline).foregroundStyle(theme.secondary)
+                                        Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8)))
+                                            .font(.caption.monospaced()).foregroundStyle(theme.secondary)
                                     }.padding(.vertical, 8)
                                 }
+                                .accessibilityLabel(WeshSharedContentReview.destinationLabel(.privateConversation(peerID: contact.peerID, displayName: contact.nickname)))
+                                .accessibilityHint("Relire le contenu et confirmer le remplacement du brouillon pour cette identité, sans envoyer")
                             }
                         } header: { WeshSectionLabel(text: "Contacts privés") }
                         .listRowBackground(theme.canvas)
@@ -470,6 +483,8 @@ private struct WeshConversation: View {
                                     }
                                     if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
                                         Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = isPrivate ? title : message.sender }
+                                            .accessibilityLabel("Bloquer " + weshIdentitySummary(isPrivate ? title : message.sender, fingerprint: identity.noiseKey?.sha256Fingerprint()))
+                                            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                                     }
                                 }
                         }
@@ -543,8 +558,10 @@ private struct WeshConversation: View {
                 WeshSharedContentReview.cancel(id: offer.id, destination: sharedDestination, model: sharedImport)
             }
             Button("Remplacer le brouillon", action: confirmSharedDraft)
+                .accessibilityLabel("Remplacer le brouillon pour " + WeshSharedContentReview.destinationLabel(offer.destination))
+                .accessibilityHint("Prépare ce contenu pour cette destination sans envoyer de message")
         } message: { offer in
-            Text("\(isPrivate ? "Privé · \(title)" : "Salon local · PUBLIC")\n\n\(isPrivate ? "Le contenu restera un brouillon pour ce contact QR." : "Si vous l’envoyez ensuite, les participants pourront le lire, le conserver et le relayer.")\n\nLe brouillon actuel sera remplacé. Aucun message ne sera envoyé.\n\n\(offer.payload.preview)")
+            Text("\(WeshSharedContentReview.destinationLabel(offer.destination))\n\n\(isPrivate ? "Le contenu restera un brouillon pour ce contact QR." : "Si vous l’envoyez ensuite, les participants pourront le lire, le conserver et le relayer.")\n\nLe brouillon actuel sera remplacé. Aucun message ne sera envoyé.\n\n\(offer.payload.preview)")
         }
         .sheet(isPresented: $contactSheet) { WeshContactSheet(runtime: runtime) }
         .alert("Bloquer cette personne ?", isPresented: Binding(get: { blockTarget != nil }, set: { if !$0 { blockTarget = nil } })) {
@@ -553,6 +570,7 @@ private struct WeshConversation: View {
                 if let target = blockTarget { actions.block(peerID: target, displayName: blockName) }
                 blockTarget = nil
             }
+            .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
         .sheet(isPresented: $contactDetails) {
@@ -1117,8 +1135,12 @@ private struct WeshContactDetails: View {
                             feedback = "Contact débloqué."
                         } else { feedback = "Ce contact n’est plus bloqué." }
                     }.frame(minHeight: 48)
+                        .accessibilityLabel("Débloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
+                        .accessibilityHint("Autorise à nouveau ses prochains messages sur ce téléphone")
                 } else {
                     Button("Bloquer sur ce téléphone", role: .destructive) { blocking = true }.frame(minHeight: 48)
+                        .accessibilityLabel("Bloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
+                        .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                 }
                 Button("Retirer ce contact", role: .destructive) { removing = true }.frame(minHeight: 48)
                 if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
@@ -1134,6 +1156,7 @@ private struct WeshContactDetails: View {
                     runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: contact.nickname)
                     feedback = "Contact bloqué sur ce téléphone."
                 }
+                .accessibilityLabel("Bloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
             } message: { Text("Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion.") }
             .alert("Retirer ce contact ?", isPresented: $removing) {
                 Button("Annuler", role: .cancel) {}
@@ -1182,6 +1205,8 @@ private struct WeshNearbyPeople: View {
                                 Button("Bloquer sur ce téléphone", role: .destructive) {
                                     selected = .init(noiseKeyHex: person.noisePublicKey.hexEncodedString(), nickname: person.displayName)
                                 }.frame(minHeight: 44)
+                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(person.displayName, fingerprint: person.noisePublicKey.sha256Fingerprint()))
+                                    .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                             }
                         }.padding(.vertical, 8)
                     }
@@ -1201,6 +1226,7 @@ private struct WeshNearbyPeople: View {
                     }
                     selected = nil
                 }
+                .accessibilityLabel("Bloquer " + (selected.map { weshIdentitySummary($0.nickname, fingerprint: $0.peerID.noiseKey?.sha256Fingerprint()) } ?? "cette personne"))
             } message: {
                 Text("\(selected.map { $0.nickname + " · " + String(($0.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8)) } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
             }
@@ -1240,6 +1266,8 @@ private struct WeshBlockedContacts: View {
                             Text(name(for: fingerprint)).font(.headline)
                             Text("Identité · " + String(fingerprint.prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
                             Button("Débloquer") { selectedFingerprint = fingerprint }.frame(minHeight: 44)
+                                .accessibilityLabel("Débloquer " + weshIdentitySummary(name(for: fingerprint), fingerprint: fingerprint))
+                                .accessibilityHint("Demande confirmation avant d’autoriser ses prochains messages sur ce téléphone")
                         }.padding(.vertical, 8)
                     }
                 }
@@ -1256,6 +1284,7 @@ private struct WeshBlockedContacts: View {
                     }
                     selectedFingerprint = nil
                 }
+                .accessibilityLabel("Débloquer " + (selectedFingerprint.map { weshIdentitySummary(name(for: $0), fingerprint: $0) } ?? "cette personne"))
             } message: { Text("Débloquer \(selectedFingerprint.map { name(for: $0) + " · " + String($0.prefix(8)) } ?? "cette personne") ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone.") }
     }
 }
@@ -1419,6 +1448,11 @@ private struct WeshMeetingNote: View {
             Button("Effacer", role: .destructive) { title = ""; place = ""; note = ""; date = Date().timeIntervalSince1970 }
         }
     }
+}
+
+private func weshIdentitySummary(_ name: String, fingerprint: String?) -> String {
+    guard let fingerprint, !fingerprint.isEmpty else { return name }
+    return "\(name), identité \(fingerprint.prefix(8))"
 }
 
 private func openWeshSystemSettings() {
