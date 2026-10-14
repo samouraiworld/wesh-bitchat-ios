@@ -21,6 +21,9 @@ export RUSTC="$(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# Packaging below reads this exact directory; never accept a caller cache that
+# could leave us packaging stale libraries from a different build.
+export CARGO_TARGET_DIR="$SCRIPT_DIR/target"
 
 # Configuration
 CRATE_NAME="arti-bitchat"
@@ -95,7 +98,30 @@ setup_rustflags() {
     local target="$1"
 
     # Base flags for size optimization
-    export RUSTFLAGS="-C opt-level=z -C lto=fat -C codegen-units=1 -C panic=abort -C strip=symbols"
+    # Rust paths can otherwise retain developer home/workspace names in panic
+    # strings. Encode arguments separately so remapping also supports spaces.
+    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    local rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    local rustflags=(
+        "-C" "opt-level=z" "-C" "lto=fat" "-C" "codegen-units=1"
+        "-C" "panic=abort" "-C" "strip=symbols"
+        "--remap-path-prefix=$SCRIPT_DIR=/usr/src/arti-bitchat"
+        "--remap-path-prefix=$cargo_home=/usr/local/cargo"
+        "--remap-path-prefix=$rustup_home=/usr/local/rustup"
+    )
+    unset RUSTFLAGS
+    export CARGO_ENCODED_RUSTFLAGS="$(IFS=$'\037'; echo "${rustflags[*]}")"
+    export CARGO_INCREMENTAL=0
+    # Native dependencies (notably ring) also embed __FILE__ in C assertions.
+    # cc-rs can parse quoted arguments, including checkout paths with spaces.
+    local cflags=(
+        "-ffile-prefix-map=$SCRIPT_DIR=/usr/src/arti-bitchat"
+        "-ffile-prefix-map=$cargo_home=/usr/local/cargo"
+        "-ffile-prefix-map=$rustup_home=/usr/local/rustup"
+    )
+    printf -v CFLAGS '%q ' "${cflags[@]}"
+    export CFLAGS
+    export CC_SHELL_ESCAPED_FLAGS=1
 
     # Set deployment targets to suppress linker warnings about version mismatches
     case "$target" in
@@ -111,7 +137,7 @@ setup_rustflags() {
             ;;
     esac
 
-    log_info "RUSTFLAGS: $RUSTFLAGS"
+    log_info "Release flags: size optimization, fat LTO, no incremental cache, neutral source paths"
     log_info "Deployment target: MACOSX=$MACOSX_DEPLOYMENT_TARGET IPHONEOS=$IPHONEOS_DEPLOYMENT_TARGET"
 }
 
@@ -123,7 +149,7 @@ build_target() {
     setup_rustflags "$target"
 
     # Build release
-    rustup run "$RUST_TOOLCHAIN" cargo build --release --target "$target" -p "$CRATE_NAME"
+    rustup run "$RUST_TOOLCHAIN" cargo build --locked --release --jobs "${BUILD_JOBS:-1}" --target "$target" -p "$CRATE_NAME"
 
     # Check output
     local lib_path="target/$target/release/$LIB_NAME"
@@ -192,14 +218,16 @@ create_xcframework() {
     mv "$normalized_macos" "$macos_lib"
 
     local header_dir="$OUTPUT_DIR/include"
-    local cmd="xcodebuild -create-xcframework"
-    cmd="$cmd -library $SCRIPT_DIR/target/aarch64-apple-ios/release/$LIB_NAME -headers $header_dir"
-    cmd="$cmd -library $simulator_lib -headers $header_dir"
-    cmd="$cmd -library $macos_lib -headers $header_dir"
-    cmd="$cmd -output $xcframework_path"
+    local cmd=(
+        xcodebuild -create-xcframework
+        -library "$SCRIPT_DIR/target/aarch64-apple-ios/release/$LIB_NAME" -headers "$header_dir"
+        -library "$simulator_lib" -headers "$header_dir"
+        -library "$macos_lib" -headers "$header_dir"
+        -output "$xcframework_path"
+    )
 
-    log_info "Running: $cmd"
-    eval "$cmd"
+    log_info "Packaging the five built architectures as an xcframework"
+    "${cmd[@]}"
 
     if [[ -d "$xcframework_path" ]]; then
         cat > "$xcframework_path/Info.plist" << 'EOF'
