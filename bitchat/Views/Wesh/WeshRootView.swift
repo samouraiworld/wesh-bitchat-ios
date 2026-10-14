@@ -11,6 +11,7 @@ struct WeshRootView: View {
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var theme: WeshTheme { WeshTheme(appearance: appearance) }
 
     var body: some View {
@@ -43,11 +44,17 @@ struct WeshRootView: View {
     private func tab(_ title: String, symbol: String, index: Int) -> some View {
         Button { selectedTab = index } label: {
             VStack(spacing: 4) {
-                Image(systemName: symbol).font(.title3.weight(selectedTab == index ? .semibold : .regular))
-                Text(title).font(.caption.weight(selectedTab == index ? .semibold : .regular))
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: selectedTab == index ? .semibold : .regular))
+                    .accessibilityHidden(true)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(title).font(.caption.weight(selectedTab == index ? .semibold : .regular))
+                }
             }.frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
                 .foregroundStyle(selectedTab == index ? theme.accent : theme.secondary)
         }.buttonStyle(.plain)
+            .accessibilityLabel(title)
             .accessibilityAddTraits(selectedTab == index ? .isSelected : [])
     }
 }
@@ -57,6 +64,7 @@ private struct WeshInbox: View {
     @EnvironmentObject private var inbox: PrivateInboxModel
     @EnvironmentObject private var chrome: AppChromeModel
     @Environment(\.weshTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var addingContact = false
     @EnvironmentObject private var peers: PeerListModel
@@ -75,16 +83,28 @@ private struct WeshInbox: View {
                 NavigationLink {
                     WeshConversation(runtime: runtime, peerID: nil, title: "Salon local")
                 } label: {
-                    HStack(spacing: 16) {
-                        WeshAvatar(symbol: "antenna.radiowaves.left.and.right")
-                        VStack(alignment: .leading, spacing: 5) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("Salon local").font(.headline)
+                            Text("Public").font(.subheadline.weight(.semibold)).foregroundStyle(theme.accent)
                             Text("Une conversation ouverte autour de vous.")
                                 .font(.subheadline).foregroundStyle(theme.secondary)
                         }
-                        Spacer(minLength: 0)
-                        Text("Public").font(.caption.weight(.semibold)).foregroundStyle(theme.accent)
-                    }.padding(.vertical, theme.isDark ? 14 : 8)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 14)
+                    } else {
+                        HStack(spacing: 16) {
+                            WeshAvatar(symbol: "antenna.radiowaves.left.and.right")
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Salon local").font(.headline)
+                                Text("Une conversation ouverte autour de vous.")
+                                    .font(.subheadline).foregroundStyle(theme.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Text("Public").font(.caption.weight(.semibold)).foregroundStyle(theme.accent)
+                        }.padding(.vertical, theme.isDark ? 14 : 8)
+                    }
                 }
             } header: { WeshSectionLabel(text: "À proximité") } footer: {
                 Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
@@ -109,18 +129,24 @@ private struct WeshInbox: View {
                         .listRowSeparator(.hidden)
                 } else {
                     ForEach(contacts) { row in
+                        let hasUnread = inbox.unreadPeerIDs.contains(row.peerID) || inbox.unreadPeerIDs.contains(runtime.chatViewModel.getShortIDForNoiseKey(row.peerID))
                         NavigationLink {
                             WeshConversation(runtime: runtime, peerID: row.peerID, title: row.nickname)
                         } label: {
                             HStack(spacing: 16) {
-                                WeshAvatar(symbol: "person")
+                                if !dynamicTypeSize.isAccessibilitySize { WeshAvatar(symbol: "person") }
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(row.nickname).font(.headline)
                                     Text(inbox.messages(for: row.peerID).last?.content ?? "Identité vérifiée sur ce téléphone")
-                                        .lineLimit(2).font(.subheadline).foregroundStyle(theme.secondary)
+                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                                        .font(.subheadline).foregroundStyle(theme.secondary)
+                                    if dynamicTypeSize.isAccessibilitySize && hasUnread {
+                                        Text("Messages non lus").font(.subheadline).foregroundStyle(theme.accent)
+                                    }
                                 }
-                                Spacer(minLength: 4)
-                                if inbox.unreadPeerIDs.contains(row.peerID) || inbox.unreadPeerIDs.contains(runtime.chatViewModel.getShortIDForNoiseKey(row.peerID)) {
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                                if !dynamicTypeSize.isAccessibilitySize && hasUnread {
                                     Image(systemName: "circle.fill").font(.caption2).foregroundStyle(theme.accent).accessibilityLabel("Messages non lus")
                                 }
                             }.padding(.vertical, theme.isDark ? 12 : 6)
@@ -148,7 +174,7 @@ private struct WeshAvatar: View {
     let symbol: String
     @Environment(\.weshTheme) private var theme
     var body: some View {
-        Image(systemName: symbol).font(.title3.weight(.medium)).foregroundStyle(theme.accent)
+        Image(systemName: symbol).font(.system(size: 24, weight: .medium)).foregroundStyle(theme.accent)
             .frame(width: 48, height: 48)
             .overlay(RoundedRectangle(cornerRadius: theme.isDark ? 24 : 14).strokeBorder(theme.line, lineWidth: 1))
             .accessibilityHidden(true)
