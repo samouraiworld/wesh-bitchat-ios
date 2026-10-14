@@ -7,7 +7,8 @@ guide](docs/WESH-CONTRIBUTING.md) for simulator commands and the current validat
 limits.
 
 Local RC4 is **0.1.0 (5)**, built from
-`261e3f1f8c4f85ccc79ead55b582d1c23aef14df`, with **228 tests passing**.
+`261e3f1f8c4f85ccc79ead55b582d1c23aef14df`, with **2,329 iOS tests passing**
+(including the 228-test focused regression set).
 Its Release device archive and universal simulator package are prepared. App Store
 export is blocked by unavailable local Distribution signing access; no RC4 IPA or
 TestFlight upload has been produced. The unresolved RSA dependency advisory and

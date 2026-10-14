@@ -10,10 +10,18 @@ Work on a feature branch and open a pull request. Never commit to `main` or
 
 Local **RC4, version 0.1.0 (5)**, uses source commit
 `261e3f1f8c4f85ccc79ead55b582d1c23aef14df`. The universal simulator build and signed
-Release device archive passed. The selected regression suites passed **228 tests**
-(173 Swift Testing tests and 55 XCTest tests), with no failures. These suites cover
-QR identity binding, blocking, drafts, sharing, routing, delivery states, and
-network activation; they are not the entire inherited upstream test collection.
+Release device archive passed. The complete iOS test collection passed **2,329
+tests** (2,114 Swift Testing tests and 215 XCTest tests), with no failures, skips,
+or expected failures. No `-only-testing` or `-skip-testing` filter was applied.
+This covers the tests compiled for the iOS simulator; macOS-only conditional code
+and physical-device behavior are separate validation scopes.
+
+The focused regression set also passed **228 tests** (173 Swift Testing tests
+and 55 XCTest tests). It covers QR identity binding, blocking, drafts, sharing,
+routing, delivery states, and network activation. Those 228 are a subset of the
+2,329, not an additional count. The full run reported SwiftUI environment/state
+access warnings in inherited `ViewSmokeTests`, with no test failures; those smoke
+checks do not establish live view updates or accessibility behavior.
 
 The RC4 App Store export attempt stopped because Xcode could not access an Apple
 Distribution signing identity/account. Existing RC3 App Store profiles remain
@@ -81,6 +89,20 @@ xcodebuild -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
   -disableAutomaticPackageResolution -jobs 2 -parallel-testing-enabled NO \
   -resultBundlePath .validation/wesh-regression.xcresult \
   "${selection[@]}" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
+```
+
+For the full iOS collection, use the same dedicated simulator and cache paths,
+without test-selection arguments:
+
+```sh
+xcodebuild -project bitchat.xcodeproj -scheme 'bitchat (iOS)' \
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.6' \
+  -derivedDataPath .validation/DerivedData-wesh-ui \
+  -clonedSourcePackagesDirPath .validation/SourcePackages-wesh-ui \
+  -disableAutomaticPackageResolution -jobs 2 -parallel-testing-enabled NO \
+  -resultBundlePath .validation/wesh-full-regression.xcresult \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- test
 ```
 
 ## Device signing and local distribution
