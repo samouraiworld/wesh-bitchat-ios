@@ -170,4 +170,192 @@ struct SharedContentHandoffTests {
         #expect(model.offer?.payload == newer)
         #expect(context.store.pending(now: now) == newer)
     }
+
+    @Test("Wesh refuses short aliases and location routes without consuming the share")
+    @MainActor
+    func weshRequiresAnExplicitStableRoute() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        let payload = SharedContentPayload.text("route explicitly", createdAt: now)
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+
+        let unsupported: [SharedContentDestination] = [
+            .geohash("u4pruy"),
+            .privateConversation(peerID: PeerID(str: "0011223344556677"), displayName: "Alias")
+        ]
+        for destination in unsupported {
+            #expect(throws: WeshSharedContentReview.Issue.unavailableDestination) {
+                try WeshSharedContentReview.prepare(id: payload.id, destination: destination,
+                    model: model, destinationAllowed: true, now: now).get()
+            }
+            #expect(model.offer?.destination == .mesh)
+            #expect(context.store.pending(now: now) == payload)
+        }
+    }
+
+    @Test("A Wesh confirmation pins the full Noise key and rejects a changed destination")
+    @MainActor
+    func weshConfirmationRejectsRouteDrift() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 7_000_000)
+        let payload = SharedContentPayload.text("private draft", createdAt: now)
+        let peer = PeerID(hexData: Data(repeating: 0x11, count: 32))
+        let destination = SharedContentDestination.privateConversation(peerID: peer, displayName: "Nora")
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: destination,
+            model: model, destinationAllowed: true, now: now).get()
+        #expect(reviewed.destination == destination)
+        model.updateDestination(.mesh)
+
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: true, now: now).get()
+        }
+        #expect(model.offer?.destination == .mesh)
+        #expect(context.store.pending(now: now) == payload)
+    }
+
+    @Test("A stale Wesh confirmation and cancellation preserve a newer share, refreshed or not")
+    @MainActor
+    func weshReviewPreservesNewerEnvelope() throws {
+        for refreshBeforeTap in [false, true] {
+            let context = makeStore()
+            defer { context.defaults.removePersistentDomain(forName: context.suite) }
+            let now = Date(timeIntervalSince1970: 8_000_000)
+            let old = SharedContentPayload.text("old review", createdAt: now)
+            let newer = SharedContentPayload.text("new review needed", createdAt: now)
+            let model = SharedContentImportModel(store: context.store)
+            try context.store.stage(old, now: now)
+            model.refresh(destination: .mesh, now: now)
+            let reviewed = try WeshSharedContentReview.prepare(id: old.id, destination: .mesh,
+                model: model, destinationAllowed: true, now: now).get()
+            try context.store.stage(newer, now: now)
+            if refreshBeforeTap { model.refresh(destination: .mesh, now: now) }
+
+            #expect(throws: WeshSharedContentReview.Issue.changed) {
+                try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                    destinationAllowed: true, now: now).get()
+            }
+            WeshSharedContentReview.cancel(id: old.id, destination: .mesh, model: model, now: now)
+            #expect(model.offer?.payload == newer)
+            #expect(context.store.pending(now: now) == newer)
+        }
+    }
+
+    @Test("A Wesh review compares the complete payload even when an envelope ID is reused")
+    @MainActor
+    func weshReviewRejectsChangedContentWithSameID() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 9_000_000)
+        let payload = SharedContentPayload.text("reviewed text", createdAt: now)
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get()
+        let changed = SharedContentPayload(id: payload.id, kind: .text, content: "not reviewed", createdAt: now)
+        try context.store.stage(changed, now: now)
+
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: true, now: now).get()
+        }
+        #expect(context.store.pending(now: now) == changed)
+    }
+
+    @Test("Revoking a QR destination after review prevents draft import and keeps the envelope")
+    @MainActor
+    func weshRechecksDestinationEligibility() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let payload = SharedContentPayload.text("blocked while reviewing", createdAt: now)
+        let destination = SharedContentDestination.privateConversation(
+            peerID: PeerID(hexData: Data(repeating: 0x22, count: 32)), displayName: "Nora")
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: destination,
+            model: model, destinationAllowed: true, now: now).get()
+
+        #expect(throws: WeshSharedContentReview.Issue.unavailableDestination) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: false, now: now).get()
+        }
+        #expect(context.store.pending(now: now) == payload)
+    }
+
+    @Test("Oversized Wesh drafts are neither consumed nor silently truncated")
+    @MainActor
+    func weshRejectsOversizedDraft() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 11_000_000)
+        let payload = SharedContentPayload.text(
+            String(repeating: "x", count: ComposerDraftStore.maxDraftLength + 1), createdAt: now)
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try #require(model.offer)
+
+        #expect(throws: WeshSharedContentReview.Issue.tooLong) {
+            try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+                model: model, destinationAllowed: true, now: now).get()
+        }
+        #expect(throws: WeshSharedContentReview.Issue.tooLong) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: true, now: now).get()
+        }
+        #expect(context.store.pending(now: now) == payload)
+    }
+
+    @Test("A Unicode draft at the exact Wesh character limit imports intact once")
+    @MainActor
+    func weshImportsExactUnicodeLimitOnce() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 12_000_000)
+        let payload = SharedContentPayload.text(
+            String(repeating: "é", count: ComposerDraftStore.maxDraftLength), createdAt: now)
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get()
+
+        #expect(try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+            destinationAllowed: true, now: now).get() == payload.content)
+        #expect(context.store.pending(now: now) == nil)
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: true, now: now).get()
+        }
+    }
+
+    @Test("An envelope that expires while the Wesh confirmation is open cannot be imported")
+    @MainActor
+    func weshRechecksExpiryBeforeImport() throws {
+        let context = makeStore()
+        defer { context.defaults.removePersistentDomain(forName: context.suite) }
+        let now = Date(timeIntervalSince1970: 13_000_000)
+        let payload = SharedContentPayload.text("expires before consent", createdAt: now)
+        let model = SharedContentImportModel(store: context.store)
+        try context.store.stage(payload, now: now)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get()
+
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.confirm(reviewed: reviewed, model: model,
+                destinationAllowed: true, now: now.addingTimeInterval(SharedContentPayload.retentionSeconds + 1)).get()
+        }
+        #expect(model.offer == nil)
+    }
 }

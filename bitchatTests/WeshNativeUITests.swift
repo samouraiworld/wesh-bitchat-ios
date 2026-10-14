@@ -51,6 +51,50 @@ struct WeshNativeUITests {
         #expect(draft.isEmpty)
         #expect(transport.sentMessages.count == 1)
     }
+    @Test @MainActor func notificationWaveRequiresDisclosureAndAvailableBluetooth() {
+        let consentKey = "wesh.publicDisclosureAccepted.v1"
+        let previous = UserDefaults.standard.object(forKey: consentKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+            else { UserDefaults.standard.removeObject(forKey: consentKey) }
+        }
+        let keychain = MockKeychain()
+        let transport = MockTransport()
+        let vm = ChatViewModel(keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: MockIdentityManager(keychain), transport: transport,
+            weshPrivatePolicyEnabled: true)
+
+        vm.bluetoothState = .poweredOn
+        UserDefaults.standard.set(false, forKey: consentKey)
+        vm.sendMeshWave()
+        #expect(transport.sentMessages.isEmpty)
+
+        UserDefaults.standard.set(true, forKey: consentKey)
+        vm.bluetoothState = .poweredOff
+        vm.sendMeshWave()
+        #expect(transport.sentMessages.isEmpty)
+
+        vm.bluetoothState = .poweredOn
+        vm.sendMeshWave()
+        #expect(transport.sentMessages.count == 1)
+    }
+
+    @Test @MainActor func sharedDraftRequiresExactCurrentUnblockedEnrollment() {
+        let key = Data(repeating: 41, count: 32)
+        let otherKey = Data(repeating: 42, count: 32)
+        let peer = PeerID(hexData: key)
+        let other = PeerID(hexData: otherKey)
+        let contacts = [WeshQRTrust.Contact(noiseKeyHex: key.hexEncodedString(), nickname: "Contact test")]
+        let enrolled: Set<String> = [key.sha256Fingerprint(), otherKey.sha256Fingerprint()]
+        #expect(WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
+        #expect(!WeshQRTrust.canPrepareDraft(to: peer.toShort(), contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
+        #expect(!WeshQRTrust.canPrepareDraft(to: other, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
+        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: [], qrFingerprints: enrolled, blockedFingerprints: []))
+        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: [], blockedFingerprints: []))
+        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: [key.sha256Fingerprint()]))
+    }
+
     private var vector: VerificationService.VerificationQR {
         .init(v: 1, noiseKeyHex: "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
               signKeyHex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",

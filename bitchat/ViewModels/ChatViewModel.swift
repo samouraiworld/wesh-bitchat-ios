@@ -1399,6 +1399,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Sends a 👋 to the mesh channel regardless of the active channel.
     @MainActor
     func sendMeshWave() {
+        // Notification actions can run without opening the public composer.
+        // In Wesh they must respect the same first-send disclosure and radio gate.
+        if weshPrivatePolicyEnabled {
+            guard canSendWeshPublic,
+                  UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return }
+        }
         outgoingCoordinator.sendMeshWave()
     }
 
