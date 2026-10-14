@@ -707,6 +707,7 @@ private struct WeshContactSheet: View {
     let runtime: AppRuntime
     @Environment(\.dismiss) private var dismiss
     @Environment(\.weshTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var verification: VerificationModel
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var showingScanner = false
@@ -858,8 +859,13 @@ private struct WeshContactSheet: View {
         } else {
             if cameraUnavailable {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("Caméra indisponible", systemImage: "camera")
-                        .font(.headline)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Text("Caméra indisponible")
+                        } else {
+                            Label("Caméra indisponible", systemImage: "camera")
+                        }
+                    }.font(.headline)
                     Text("Autorisez la caméra dans les réglages, ou comparez le lien en personne avec « Autre méthode ».")
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(.vertical, 12).accessibilityElement(children: .combine)
@@ -980,6 +986,7 @@ private struct WeshSettings: View {
     let runtime: AppRuntime
     @EnvironmentObject private var chrome: AppChromeModel
     @Environment(\.weshTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showQR = false
     var body: some View {
         List {
@@ -999,10 +1006,19 @@ private struct WeshSettings: View {
             }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
                 NavigationLink { WeshAppearanceSettings() } label: {
-                    HStack {
-                        Label("Apparence", systemImage: "circle.lefthalf.filled")
-                        Spacer()
-                        Text(theme.appearance.title).foregroundStyle(theme.secondary)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Apparence")
+                                Text(theme.appearance.title).foregroundStyle(theme.secondary)
+                            }
+                        } else {
+                            HStack {
+                                Label("Apparence", systemImage: "circle.lefthalf.filled")
+                                Spacer()
+                                Text(theme.appearance.title).foregroundStyle(theme.secondary)
+                            }
+                        }
                     }.frame(minHeight: 48)
                 }
                 NavigationLink { WeshMeetingNote() } label: {
@@ -1029,7 +1045,7 @@ private struct WeshSettings: View {
             } header: { WeshSectionLabel(text: "Pour échanger") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
-                LabeledContent("Version", value: WeshBuildInfo.displayVersion)
+                WeshValueRow("Version", value: WeshBuildInfo.displayVersion)
                     .font(.footnote).foregroundStyle(theme.secondary).frame(minHeight: 44)
             }.listRowBackground(theme.canvas)
         }
@@ -1292,6 +1308,7 @@ private struct WeshBlockedContacts: View {
 private struct WeshAppearanceSettings: View {
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
     @Environment(\.weshTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -1300,14 +1317,16 @@ private struct WeshAppearanceSettings: View {
                     let palette = WeshTheme(appearance: choice)
                     Button { appearance = choice } label: {
                         HStack(spacing: 20) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("wesh").font(.system(.title2, design: .rounded).weight(.bold))
-                                Capsule().fill(palette.metalFill).frame(width: 44, height: 8)
-                                Capsule().fill(palette.ink).frame(width: 30, height: 4)
-                            }.foregroundStyle(palette.ink).frame(width: 96, height: 108)
-                                .background(palette.canvas, in: RoundedRectangle(cornerRadius: palette.radius))
-                                .overlay(RoundedRectangle(cornerRadius: palette.radius).strokeBorder(theme.line, lineWidth: 1))
-                                .accessibilityHidden(true)
+                            if !dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("wesh").font(.system(.title2, design: .rounded).weight(.bold))
+                                    Capsule().fill(palette.metalFill).frame(width: 44, height: 8)
+                                    Capsule().fill(palette.ink).frame(width: 30, height: 4)
+                                }.foregroundStyle(palette.ink).frame(width: 96, height: 108)
+                                    .background(palette.canvas, in: RoundedRectangle(cornerRadius: palette.radius))
+                                    .overlay(RoundedRectangle(cornerRadius: palette.radius).strokeBorder(theme.line, lineWidth: 1))
+                                    .accessibilityHidden(true)
+                            }
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(choice.title).font(.headline)
                                 Text(choice.subtitle).font(.subheadline).foregroundStyle(theme.secondary)
@@ -1386,13 +1405,13 @@ private struct WeshConnectionSettings: View {
             Section {
                 Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
                 if chrome.bluetoothState == .unauthorized { Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44) }
-                LabeledContent("Connexions", value: String(peers.connectedMeshPeerCount))
+                WeshValueRow("Connexions", value: String(peers.connectedMeshPeerCount))
             } footer: {
                 Text("Gardez Wesh ouvert sur les deux téléphones. Une connexion disponible ne confirme pas la réception d’un message.")
             }.listRowBackground(theme.canvas)
             Section {
-                LabeledContent("Transport", value: "Bluetooth")
-                LabeledContent("Passerelles Internet", value: "Désactivées")
+                WeshValueRow("Transport", value: "Bluetooth")
+                WeshValueRow("Passerelles Internet", value: "Désactivées")
             }.listRowBackground(theme.canvas)
         }.scrollContentBackground(.hidden).navigationTitle("Connexion").weshCanvas(title: "Connexion")
     }
@@ -1446,6 +1465,32 @@ private struct WeshMeetingNote: View {
         .alert("Effacer votre note ?", isPresented: $clear) {
             Button("Annuler", role: .cancel) {}
             Button("Effacer", role: .destructive) { title = ""; place = ""; note = ""; date = Date().timeIntervalSince1970 }
+        }
+    }
+}
+
+private struct WeshValueRow: View {
+    let title: String
+    let value: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.weshTheme) private var theme
+
+    init(_ title: String, value: String) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                    Text(value).foregroundStyle(theme.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            } else {
+                LabeledContent(title, value: value)
+            }
         }
     }
 }
