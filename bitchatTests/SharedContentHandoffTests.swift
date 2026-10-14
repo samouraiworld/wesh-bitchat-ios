@@ -12,6 +12,11 @@ private final class ControlledSynchronizeDefaults: UserDefaults, @unchecked Send
     }
 }
 
+/// Isolated notification center delivers synchronously on the test's main actor.
+private final class ImportedDraftKeyRecorder: @unchecked Sendable {
+    var keys: [ComposerDraftStore.Key] = []
+}
+
 @Suite("Share extension handoff", .serialized)
 struct SharedContentHandoffTests {
     private func makeStore() -> (suite: String, defaults: UserDefaults, lockURL: URL, store: SharedContentStore) {
@@ -522,6 +527,144 @@ struct SharedContentHandoffTests {
         #expect(pauses == 2)
         flock(descriptor, LOCK_UN)
         #expect(contender.pending() == payload)
+    }
+
+    @Test("Cancel replacement preserves the pending review and existing draft; explicit discard removes only the share")
+    @MainActor
+    func cancelledReplacementDefersRatherThanDiscards() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let previousDrafts = ComposerDraftStore.replaceAllForTesting(["mesh": "existing draft"])
+        defer { ComposerDraftStore.replaceAllForTesting(previousDrafts) }
+        let now = Date(timeIntervalSince1970: 21_000_000)
+        let payload = SharedContentPayload.text("shared draft", createdAt: now)
+        try context.store.stage(payload, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get()
+        #expect(try WeshSharedContentReview.deferReplacement(reviewed: reviewed, model: model, now: now).get() == reviewed)
+        #expect(model.offer == reviewed)
+        #expect(context.store.pending(now: now) == payload)
+        #expect(ComposerDraftStore.load(.mesh) == "existing draft")
+        #expect(try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get() == reviewed)
+        WeshSharedContentReview.cancel(id: payload.id, destination: .mesh, model: model, now: now)
+        #expect(model.offer == nil)
+        #expect(context.store.pending(now: now) == nil)
+        #expect(ComposerDraftStore.load(.mesh) == "existing draft")
+    }
+
+    @Test("Successful import stores only the reviewed identity draft before closing, exactly once")
+    @MainActor
+    func successfulImportClosesAfterScopedDraftSave() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let first = PeerID(hexData: Data(repeating: 0x41, count: 32))
+        let second = PeerID(hexData: Data(repeating: 0x42, count: 32))
+        let firstKey = ComposerDraftStore.Key.from(peerID: first, fingerprint: first.noiseKey?.sha256Fingerprint(), channel: .mesh)
+        let secondKey = ComposerDraftStore.Key.from(peerID: second, fingerprint: second.noiseKey?.sha256Fingerprint(), channel: .mesh)
+        let previousDrafts = ComposerDraftStore.replaceAllForTesting(["mesh": "public draft", firstKey.storageString: "first draft", secondKey.storageString: "second draft"])
+        defer { ComposerDraftStore.replaceAllForTesting(previousDrafts) }
+        let now = Date(timeIntervalSince1970: 22_000_000)
+        let payload = SharedContentPayload.text("private shared draft", createdAt: now)
+        try context.store.stage(payload, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id,
+            destination: .privateConversation(peerID: first, displayName: "Same nickname"),
+            model: model, destinationAllowed: true, now: now).get()
+        let center = NotificationCenter()
+        let recorded = ImportedDraftKeyRecorder()
+        let token = center.addObserver(forName: WeshSharedContentReview.importedDraftNotification, object: nil, queue: nil) { note in
+            if let key = note.object as? ComposerDraftStore.Key { recorded.keys.append(key) }
+        }
+        defer { center.removeObserver(token) }
+        var closed = 0
+        let imported = try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model,
+            destinationAllowed: true, notificationCenter: center, onImported: {
+                closed += 1
+                #expect(model.offer == nil)
+                #expect(ComposerDraftStore.load(firstKey) == payload.content)
+            }, now: now).get()
+        #expect(imported == payload.content)
+        #expect(closed == 1)
+        #expect(recorded.keys == [firstKey])
+        #expect(context.store.pending(now: now) == nil)
+        #expect(ComposerDraftStore.load(.mesh) == "public draft")
+        #expect(ComposerDraftStore.load(secondKey) == "second draft")
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model,
+                destinationAllowed: true, notificationCenter: center, onImported: { closed += 1 }, now: now).get()
+        }
+        #expect(closed == 1)
+        #expect(recorded.keys == [firstKey])
+    }
+
+    @Test("Deferring an older confirmation refreshes but cannot erase a newer share or import stale content")
+    @MainActor
+    func deferredOldReviewPreservesNewShare() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let previousDrafts = ComposerDraftStore.replaceAllForTesting(["mesh": "existing"])
+        defer { ComposerDraftStore.replaceAllForTesting(previousDrafts) }
+        let now = Date(timeIntervalSince1970: 23_000_000)
+        let old = SharedContentPayload.text("old", createdAt: now)
+        let newer = SharedContentPayload.text("new", createdAt: now)
+        try context.store.stage(old, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try #require(model.offer)
+        try context.store.stage(newer, now: now)
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.deferReplacement(reviewed: reviewed, model: model, now: now).get()
+        }
+        var closed = false
+        #expect(throws: WeshSharedContentReview.Issue.changed) {
+            try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model,
+                destinationAllowed: true, notificationCenter: NotificationCenter(), onImported: { closed = true }, now: now).get()
+        }
+        WeshSharedContentReview.cancel(id: old.id, destination: .mesh, model: model, now: now)
+        #expect(!closed)
+        #expect(model.offer?.payload == newer)
+        #expect(context.store.pending(now: now) == newer)
+        #expect(ComposerDraftStore.load(.mesh) == "existing")
+    }
+
+    @Test("A revoked destination cannot update a draft or close review")
+    @MainActor
+    func revokedDestinationCannotCloseImport() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let previousDrafts = ComposerDraftStore.replaceAllForTesting(["mesh": "existing"])
+        defer { ComposerDraftStore.replaceAllForTesting(previousDrafts) }
+        let now = Date(timeIntervalSince1970: 24_000_000)
+        let payload = SharedContentPayload.text("review only", createdAt: now)
+        try context.store.stage(payload, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try #require(model.offer)
+        var closed = false
+        #expect(throws: WeshSharedContentReview.Issue.unavailableDestination) {
+            try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model,
+                destinationAllowed: false, notificationCenter: NotificationCenter(), onImported: { closed = true }, now: now).get()
+        }
+        #expect(!closed)
+        #expect(model.offer == reviewed)
+        #expect(context.store.pending(now: now) == payload)
+        #expect(ComposerDraftStore.load(.mesh) == "existing")
     }
 
 }
