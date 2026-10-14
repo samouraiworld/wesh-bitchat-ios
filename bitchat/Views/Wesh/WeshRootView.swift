@@ -99,7 +99,7 @@ private struct WeshInbox: View {
                 if contacts.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Un QR. Et on se parle.")
-                            .font(.title2.weight(.semibold))
+                            .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                         Text("Ajoutez une personne en face de vous pour commencer une discussion privée.")
                             .font(.body).foregroundStyle(theme.secondary)
                         Button { addingContact = true } label: {
@@ -237,7 +237,7 @@ private struct WeshConversation: View {
                                 Image(systemName: isPrivate ? "bubble.left.and.bubble.right" : "antenna.radiowaves.left.and.right")
                                     .font(.system(size: 40, weight: .light)).foregroundStyle(theme.accent).accessibilityHidden(true)
                                 Text(isPrivate ? "Votre discussion commence ici." : (canSend ? "Un premier salut ?" : "Le salon est prêt."))
-                                    .font(.title2.weight(.semibold))
+                                    .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                                 Text(isPrivate ? "Écrivez quand votre contact est connecté." : (canSend ? "Entrez dans la conversation.\nAucun contact à ajouter." : "Préparez un message. Il restera ici tant que l’envoi est indisponible."))
                                     .font(.body).foregroundStyle(theme.secondary)
                             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 64)
@@ -450,6 +450,7 @@ private struct WeshContactSheet: View {
     @State private var focusTarget: QRFocus = .result
     @State private var focusRevision = 0
     @State private var waitingForKeyboard = false
+    @State private var softwareKeyboardVisible = false
     @State private var progress: ChatVerificationCoordinator.QRProgress = .unavailable
     private let renewal = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -511,7 +512,9 @@ private struct WeshContactSheet: View {
             .onReceive(renewal) { _ in qr = verification.myQRString() }
             .onReceive(progressRefresh) { _ in refreshProgress() }
             .onChange(of: trust.fingerprints) { _ in refreshProgress() }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in softwareKeyboardVisible = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                softwareKeyboardVisible = false
                 guard waitingForKeyboard else { return }
                 waitingForKeyboard = false
                 focusResult()
@@ -628,7 +631,7 @@ private struct WeshContactSheet: View {
         focusRevision += 1
     }
     private func scan(_ value: String) {
-        waitingForKeyboard = pastedQRFocused
+        waitingForKeyboard = pastedQRFocused && softwareKeyboardVisible
         pastedQRFocused = false
         scanning = false
         scannedKey = nil
@@ -752,6 +755,10 @@ private struct WeshSettings: View {
                 }
             } header: { WeshSectionLabel(text: "Pour échanger") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+            Section {
+                LabeledContent("Version", value: WeshBuildInfo.displayVersion)
+                    .font(.footnote).foregroundStyle(theme.secondary).frame(minHeight: 44)
+            }.listRowBackground(theme.canvas)
         }
         .listStyle(.plain).scrollContentBackground(.hidden)
         .navigationTitle("Réglages").weshCanvas(title: "Réglages")
@@ -776,7 +783,7 @@ private struct WeshContacts: View {
             Section {
                 if trust.contacts.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Vos contacts, en personne.").font(.title2.weight(.semibold))
+                        Text("Vos contacts, en personne.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                         Text("Scannez le QR de quelqu’un pour commencer une discussion privée.").foregroundStyle(theme.secondary)
                         Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "qrcode.viewfinder") }
                             .buttonStyle(WeshPrimaryButtonStyle())
@@ -905,7 +912,7 @@ private struct WeshNearbyPeople: View {
             Section {
                 if participants.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Aucun participant connu.").font(.title2.weight(.semibold))
+                        Text("Aucun participant connu.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                         Text("Les connexions Bluetooth disponibles apparaîtront ici.").foregroundStyle(theme.secondary)
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
@@ -969,7 +976,7 @@ private struct WeshBlockedContacts: View {
             Section {
                 if fingerprints.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Personne n’est bloqué.").font(.title2.weight(.semibold))
+                        Text("Personne n’est bloqué.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                         Text("Les personnes bloquées apparaîtront ici, même hors connexion.").foregroundStyle(theme.secondary)
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
@@ -1004,7 +1011,7 @@ private struct WeshAppearanceSettings: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Une touche de métal.").font(.title2.weight(.semibold))
+                Text("Une touche de métal.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                 ForEach(WeshAppearance.allCases) { choice in
                     let palette = WeshTheme(appearance: choice)
                     Button { appearance = choice } label: {
@@ -1039,23 +1046,50 @@ private struct WeshProfileEditor: View {
     @Environment(\.weshTheme) private var theme
     @State private var nickname = ""
     @State private var feedback = ""
+    @FocusState private var nicknameFocused: Bool
+    @AccessibilityFocusState(for: .voiceOver) private var feedbackFocused: Bool
+    @State private var softwareKeyboardVisible = false
+    @State private var waitingForKeyboard = false
+    @State private var focusRevision = 0
+
     var body: some View {
-        Form {
-            Section {
-                TextField("Votre surnom", text: $nickname).onSubmit(save)
-                Button("Enregistrer", action: save).frame(minHeight: 44)
-                if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
-            } header: { WeshSectionLabel(text: "Votre surnom") } footer: {
-                Text("Ce surnom est visible dans le salon public. Il ne prouve pas votre identité.")
-            }.listRowBackground(theme.canvas)
-        }.scrollContentBackground(.hidden).navigationTitle("Votre profil").weshCanvas(title: "Votre profil")
-            .onAppear { nickname = chrome.nickname }
+        ScrollViewReader { scroll in
+            Form {
+                Section {
+                    TextField("Votre surnom", text: $nickname).focused($nicknameFocused).onSubmit(save)
+                        .accessibilityLabel("Votre surnom")
+                    Button("Enregistrer", action: save).frame(minHeight: 44)
+                    if !feedback.isEmpty {
+                        Text(feedback).font(.subheadline).id("profileFeedback")
+                            .accessibilityFocused($feedbackFocused)
+                    }
+                } header: { WeshSectionLabel(text: "Votre surnom") } footer: {
+                    Text("Ce surnom est visible dans le salon public. Il ne prouve pas votre identité.")
+                }.listRowBackground(theme.canvas)
+            }.scrollContentBackground(.hidden).navigationTitle("Votre profil").weshCanvas(title: "Votre profil")
+                .onAppear { nickname = chrome.nickname }
+                .onChange(of: focusRevision) { _ in
+                    scroll.scrollTo("profileFeedback", anchor: .center)
+                    DispatchQueue.main.async { feedbackFocused = true }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in softwareKeyboardVisible = true }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                    softwareKeyboardVisible = false
+                    if waitingForKeyboard { waitingForKeyboard = false; focusRevision += 1 }
+                }
+        }
     }
+
     private func save() {
         let value = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.utf8.count <= 255 else { feedback = "Choisissez un surnom plus court et non vide."; return }
-        chrome.setNickname(value); chrome.validateAndSaveNickname(); nickname = chrome.nickname
-        feedback = "Surnom enregistré."
+        if !value.isEmpty, value.utf8.count <= 255 {
+            chrome.setNickname(value); chrome.validateAndSaveNickname(); nickname = chrome.nickname
+            feedback = "Surnom enregistré."
+        } else { feedback = "Choisissez un surnom plus court et non vide." }
+        feedbackFocused = false
+        waitingForKeyboard = nicknameFocused && softwareKeyboardVisible
+        nicknameFocused = false
+        if !waitingForKeyboard { focusRevision += 1 }
     }
 }
 

@@ -1,5 +1,5 @@
-MARKETING_VERSION = 1.7.1
-CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 2
 
 IPHONEOS_DEPLOYMENT_TARGET = 16.0
 MACOSX_DEPLOYMENT_TARGET = 13.0
@@ -10,3 +10,7 @@ CODE_SIGN_STYLE = Automatic
 
 PRODUCT_BUNDLE_IDENTIFIER = chat.bitchat
 APP_GROUP_ID = group.chat.bitchat
+
+// Optional developer-local Wesh signing, shared by build and archive.
+// Personal identifiers and profiles stay in this ignored file.
+#include? "Local.xcconfig"
