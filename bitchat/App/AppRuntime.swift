@@ -28,6 +28,7 @@ final class AppRuntime: ObservableObject {
     let appChromeModel: AppChromeModel
     let boardAlertsModel: BoardAlertsModel
     let sharedContentImportModel: SharedContentImportModel
+    let composerDrafts = ComposerDraftStore.repository
 
     private let idBridge: NostrIdentityBridge
     private var cancellables = Set<AnyCancellable>()
@@ -122,6 +123,7 @@ final class AppRuntime: ObservableObject {
         if chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
             GeoRelayDirectory.shared.prefetchIfNeeded()
         }
+        configureComposerDrafts()
         bindRuntimeObservers()
         NotificationDelegate.shared.runtime = self
     }
@@ -183,6 +185,8 @@ final class AppRuntime: ObservableObject {
     func handleDidBecomeActiveNotification() {
         guard chatViewModel.networkActivationAllowed else { return }
         chatViewModel.handleDidBecomeActive()
+        configureComposerDrafts()
+        composerDrafts.retry()
         checkForSharedContent()
     }
 
@@ -199,6 +203,7 @@ final class AppRuntime: ObservableObject {
     func handleScenePhaseChange(_ newPhase: ScenePhase) {
         switch newPhase {
         case .background:
+            composerDrafts.flush()
             record(.scenePhaseChanged(.background))
             TorManager.shared.setAppForeground(false)
             TorManager.shared.goDormantOnBackground()
@@ -234,6 +239,8 @@ final class AppRuntime: ObservableObject {
             }
 
             chatViewModel.handleDidBecomeActive()
+            configureComposerDrafts()
+            composerDrafts.retry()
             checkForSharedContent()
 
         case .inactive:
@@ -246,6 +253,7 @@ final class AppRuntime: ObservableObject {
     #endif
 
     func applicationWillTerminate() {
+        composerDrafts.flush()
         record(.terminationRequested)
         chatViewModel.applicationWillTerminate()
     }
@@ -296,7 +304,17 @@ final class AppRuntime: ObservableObject {
 }
 
 private extension AppRuntime {
+    private func configureComposerDrafts() {
+        guard chatViewModel.networkActivationAllowed else { return }
+        ComposerDraftStore.configurePersistence(keychain: chatViewModel.keychain,
+            noiseKey: chatViewModel.meshService.noiseStaticPublicKeyData())
+    }
+
     func bindRuntimeObservers() {
+        chatViewModel.$noiseIdentityAvailability
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.configureComposerDrafts() }
+            .store(in: &cancellables)
         NostrRelayManager.shared.$isConnected
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isConnected in

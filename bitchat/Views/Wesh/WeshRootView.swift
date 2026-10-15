@@ -141,7 +141,7 @@ struct WeshRootView: View {
 enum WeshSharedContentReview {
     static let importedDraftNotification = Notification.Name("wesh.importedDraft.v1")
     enum Issue: Error, Equatable {
-        case changed, unavailableDestination, tooLong
+        case changed, unavailableDestination, tooLong, draftUnavailable
 
         var message: String {
             switch self {
@@ -149,8 +149,10 @@ enum WeshSharedContentReview {
                 return "Ce partage ou sa destination a changé. Relisez-le avant de remplacer le brouillon."
             case .unavailableDestination:
                 return "Ce contact n’est plus disponible pour l’import. Choisissez un contact QR non bloqué."
+            case .draftUnavailable:
+                return "Le brouillon n’a pas pu être ajouté. Le partage reste disponible. Réessayez après la fin de l’effacement ou de l’enregistrement."
             case .tooLong:
-                return "Ce contenu dépasse \(ComposerDraftStore.maxDraftLength) caractères. Raccourcissez-le dans l’app d’origine puis partagez-le à nouveau. Rien n’a été importé."
+                return "Ce contenu dépasse \(ComposerDraftStore.maxDraftLength) caractères ou la limite de stockage. Raccourcissez-le dans l’app d’origine puis partagez-le à nouveau. Rien n’a été importé."
             }
         }
     }
@@ -178,20 +180,28 @@ enum WeshSharedContentReview {
         guard model.offer?.id == id else { return .failure(.changed) }
         model.refresh(destination: destination, now: now)
         guard let offer = model.offer, offer.id == id else { return .failure(.changed) }
-        guard offer.payload.composerText.count <= ComposerDraftStore.maxDraftLength else { return .failure(.tooLong) }
+        guard offer.payload.composerText.count <= ComposerDraftStore.maxDraftLength,
+              offer.payload.composerText.utf8.count <= ComposerDraftPersistence.maxTextBytes else { return .failure(.tooLong) }
         return .success(offer)
     }
 
     static func confirm(reviewed: SharedContentOffer, model: SharedContentImportModel,
-                        destinationAllowed: Bool, now: Date = Date()) -> Result<String, Issue> {
+                        destinationAllowed: Bool, now: Date = Date(),
+                        acceptDraft: (String) -> Bool = { _ in true }) -> Result<String, Issue> {
         guard supports(reviewed.destination), destinationAllowed else { return .failure(.unavailableDestination) }
         guard let current = model.offer, current.id == reviewed.id else { return .failure(.changed) }
         // Reload expiry/replacement before consuming, preserving the model's
         // current route so a destination change still requires a new review.
         model.refresh(destination: current.destination, now: now)
         guard let refreshed = model.offer, refreshed == reviewed else { return .failure(.changed) }
-        guard refreshed.payload.composerText.count <= ComposerDraftStore.maxDraftLength else { return .failure(.tooLong) }
-        guard let text = model.confirm(destination: reviewed.destination, now: now) else { return .failure(.changed) }
+        guard refreshed.payload.composerText.count <= ComposerDraftStore.maxDraftLength,
+              refreshed.payload.composerText.utf8.count <= ComposerDraftPersistence.maxTextBytes else { return .failure(.tooLong) }
+        var admissionRefused = false
+        guard let text = model.confirm(destination: reviewed.destination, now: now, acceptDraft: { text in
+            let accepted = acceptDraft(text)
+            admissionRefused = !accepted
+            return accepted
+        }) else { return .failure(admissionRefused ? .draftUnavailable : .changed) }
         return .success(text)
     }
 
@@ -210,9 +220,11 @@ enum WeshSharedContentReview {
         return .success(current)
     }
 
-    /// Save only the explicit destination's in-memory draft before closing review.
+    /// Prepare only the explicit destination. Encrypted persistence is asynchronous;
+    /// import confirmation never claims the draft is already durable.
     static func importDraft(reviewed: SharedContentOffer, model: SharedContentImportModel,
                             destinationAllowed: Bool, notificationCenter: NotificationCenter = .default,
+                            repository: ComposerDraftRepository = ComposerDraftStore.repository,
                             onImported: () -> Void,
                             now: Date = Date()) -> Result<String, Issue> {
         let key: ComposerDraftStore.Key
@@ -223,9 +235,10 @@ enum WeshSharedContentReview {
             key = .from(peerID: peerID, fingerprint: noiseKey.sha256Fingerprint(), channel: .mesh)
         case .geohash: return .failure(.unavailableDestination)
         }
-        switch confirm(reviewed: reviewed, model: model, destinationAllowed: destinationAllowed, now: now) {
+        let generation = repository.currentGeneration
+        switch confirm(reviewed: reviewed, model: model, destinationAllowed: destinationAllowed, now: now,
+                       acceptDraft: { repository.admitDisplayedText($0, for: key, generation: generation) }) {
         case .success(let text):
-            ComposerDraftStore.save(text, for: key)
             notificationCenter.post(name: importedDraftNotification, object: key)
             onImported()
             return .success(text)
@@ -452,6 +465,28 @@ private struct WeshAvatar: View {
     }
 }
 
+enum WeshDraftStoragePresentation {
+    static func message(_ status: ComposerDraftStatus, hasText: Bool) -> String? {
+        switch status {
+        case .sessionOnly: return hasText ? "Brouillon conservé pour cette ouverture de Wesh." : nil
+        case .waitingForIdentity: return "L’identité est indisponible. Le brouillon n’est pas enregistré."
+        case .loading: return "Vérification des brouillons sur ce téléphone…"
+        case .dirty, .saving: return "Enregistrement du brouillon à confirmer…"
+        case .durable: return hasText ? "Brouillon enregistré sur ce téléphone." : nil
+        case .suspended: return "L’effacement doit se terminer avant d’enregistrer un brouillon."
+        case .unavailable(.tooLarge): return "Ce texte est trop long pour être enregistré. Raccourcissez-le."
+        case .unavailable(.capacityReached): return "Ce brouillon ne peut pas encore être enregistré. Gardez cette page ouverte et réessayez."
+        case .unavailable(.recoveryRequired), .unavailable(.ownerMismatch):
+            return "Le brouillon enregistré n’a pas pu être récupéré. Il est conservé sans être remplacé."
+        case .unavailable: return "L’enregistrement du brouillon est indisponible. Gardez cette page ouverte."
+        }
+    }
+    static func canRetry(_ status: ComposerDraftStatus) -> Bool {
+        if case .unavailable = status { return true }
+        return false
+    }
+}
+
 private struct WeshConversation: View {
     let runtime: AppRuntime
     let peerID: PeerID?
@@ -459,6 +494,8 @@ private struct WeshConversation: View {
     let sharedContentID: UUID?
     let onSharedDraftImported: (() -> Void)?
     @ObservedObject private var sharedImport: SharedContentImportModel
+    @ObservedObject private var composerDrafts: ComposerDraftRepository
+    @State private var draftGeneration: UInt64 = 0
     @State private var reviewedShare: SharedContentOffer?
     @State private var replacingSharedDraft = false
     @State private var sharedFeedback = ""
@@ -496,11 +533,24 @@ private struct WeshConversation: View {
         self.sharedContentID = sharedContentID
         self.onSharedDraftImported = onSharedDraftImported
         _sharedImport = ObservedObject(wrappedValue: runtime.sharedContentImportModel)
+        _composerDrafts = ObservedObject(wrappedValue: runtime.composerDrafts)
     }
 
     private var isPrivate: Bool { peerID != nil }
     private var draftKey: ComposerDraftStore.Key {
         .from(peerID: peerID, fingerprint: peerID?.noiseKey?.sha256Fingerprint(), channel: .mesh)
+    }
+    private var draftBinding: Binding<String> {
+        Binding(get: { draft }, set: { value in
+            if composerDrafts.admitDisplayedText(value, for: draftKey, generation: draftGeneration) {
+                draft = value
+            } else {
+                showSharedFeedback("Cette modification dépasse la limite du brouillon ou ne peut pas être conservée. Le texte précédent reste affiché.")
+            }
+        })
+    }
+    private var draftStatus: ComposerDraftStatus {
+        composerDrafts.status(for: draftKey, displayedText: draft)
     }
     private var canSend: Bool {
         let _ = peers.renderID
@@ -616,8 +666,17 @@ private struct WeshConversation: View {
                         Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44)
                     }
                 }
+                if let message = WeshDraftStoragePresentation.message(draftStatus, hasText: !draft.isEmpty) {
+                    Text(message).font(.footnote).foregroundStyle(theme.secondary)
+                    if WeshDraftStoragePresentation.canRetry(draftStatus) {
+                        Button("Réessayer l’enregistrement") {
+                            composerDrafts.save(draft, for: draftKey, generation: draftGeneration)
+                            composerDrafts.retry()
+                        }.frame(minHeight: 44)
+                    }
+                }
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField(isPrivate ? "Message privé" : "Message public", text: $draft,
+                    TextField(isPrivate ? "Message privé" : "Message public", text: draftBinding,
                               prompt: Text(isPrivate ? "Message privé" : "Message public").foregroundColor(theme.secondary), axis: .vertical)
                         .lineLimit(1...(dynamicTypeSize.isAccessibilitySize ? 3 : 6))
                         .focused($composerFocused)
@@ -691,7 +750,8 @@ private struct WeshConversation: View {
             WeshInformationSheet(isPrivate: isPrivate)
         }
         .onAppear {
-            draft = ComposerDraftStore.load(draftKey)
+            draftGeneration = composerDrafts.currentGeneration
+            draft = composerDrafts.load(draftKey)
             if let peerID { privateChat.startConversation(with: peerID) }
             else { privateChat.endConversation(); runtime.chatViewModel.switchLocationChannel(to: .mesh) }
             if sharedContentID != nil && !handledSharedReview {
@@ -699,15 +759,31 @@ private struct WeshConversation: View {
                 prepareSharedDraft()
             }
         }
-        .onChange(of: draft) { value in ComposerDraftStore.save(value, for: draftKey) }
+        .onDisappear { composerDrafts.flush() }
+        .onReceive(composerDrafts.changes) { change in
+            if change.reset, change.generation == composerDrafts.currentGeneration,
+               draftGeneration != change.generation {
+                draft = ""; draftGeneration = change.generation
+            } else if let restored = composerDrafts.restoredText(for: draftKey, from: change) {
+                draft = restored; draftGeneration = change.generation
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: WeshSharedContentReview.importedDraftNotification)) { notification in
             guard let key = notification.object as? ComposerDraftStore.Key, key == draftKey else { return }
-            draft = ComposerDraftStore.load(draftKey)
+            draftGeneration = composerDrafts.currentGeneration
+            draft = composerDrafts.load(draftKey)
         }
     }
 
     private func send() {
-        if runtime.chatViewModel.sendWeshDraft(&draft, to: peerID) { composerFocused = false }
+        guard let snapshot = composerDrafts.submission(for: draftKey, displayedText: draft, generation: draftGeneration) else {
+            showSharedFeedback("Le brouillon a changé. Relisez le texte avant de l’envoyer.")
+            return
+        }
+        if runtime.chatViewModel.sendWeshDraft(&draft, to: peerID) {
+            if !composerDrafts.clearIfUnchanged(snapshot) { draft = composerDrafts.load(draftKey) }
+            composerFocused = false
+        }
     }
 
     private func prepareSharedDraft() {
@@ -727,6 +803,7 @@ private struct WeshConversation: View {
             onSharedDraftImported?()
         }) {
         case .success(let text):
+            draftGeneration = composerDrafts.currentGeneration
             draft = text
             sharedFeedback = "Contenu ajouté au brouillon. Relisez-le avant d’envoyer."
             // Let the confirmation alert dismiss before requesting the keyboard.

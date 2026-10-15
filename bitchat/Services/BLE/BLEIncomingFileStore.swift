@@ -39,7 +39,8 @@ struct PanicRecoveryOperations {
 
     static func live(
         fileStore: BLEIncomingFileStore = BLEIncomingFileStore(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        wipeDrafts: @escaping () throws -> Void = ComposerDraftStore.wipePersistentDraftsForPanic
     ) -> PanicRecoveryOperations {
         let defaultsKey = "bitchat.panicResetPending"
         return PanicRecoveryOperations(
@@ -73,9 +74,17 @@ struct PanicRecoveryOperations {
                 )
             },
             wipeMedia: { intent in
-                try fileStore.panicWipe(
-                    hasDurablePendingMarker: intent.hasDurableMarker
-                )
+                // Both independent payload trees must be attempted. Either
+                // failure retains the global startup recovery markers.
+                var mediaFailure: Error?
+                var draftFailure: Error?
+                do { try fileStore.panicWipe(hasDurablePendingMarker: intent.hasDurableMarker) }
+                catch { mediaFailure = error }
+                do { try wipeDrafts() }
+                catch { draftFailure = error }
+                if mediaFailure != nil || draftFailure != nil {
+                    throw PanicLocalFileCleanupError.failed(media: mediaFailure, drafts: draftFailure)
+                }
             },
             complete: {
                 // Keep the independent defaults latch until the file marker
@@ -91,6 +100,10 @@ struct PanicRecoveryOperations {
             }
         )
     }
+}
+
+private enum PanicLocalFileCleanupError: Error {
+    case failed(media: Error?, drafts: Error?)
 }
 
 struct BLEIncomingFileStore: @unchecked Sendable {

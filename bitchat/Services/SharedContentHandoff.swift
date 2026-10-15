@@ -212,9 +212,11 @@ final class SharedContentStore {
 
     /// Consumes only the envelope the user actually reviewed. If a newer share
     /// already replaced it, the newer content remains pending.
-    func consume(id: UUID, now: Date = Date()) -> SharedContentPayload? {
+    func consume(id: UUID, now: Date = Date(), expected: SharedContentPayload? = nil,
+                 accepting: (SharedContentPayload) -> Bool = { _ in true }) -> SharedContentPayload? {
         (try? withInterprocessLock {
-            guard let payload = pendingUnlocked(now: now), payload.id == id else { return nil as SharedContentPayload? }
+            guard let payload = pendingUnlocked(now: now), payload.id == id,
+                  expected == nil || expected == payload, accepting(payload) else { return nil as SharedContentPayload? }
             removeEnvelopeUnlocked()
             return payload
         }) ?? nil

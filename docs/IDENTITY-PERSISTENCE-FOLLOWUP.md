@@ -241,3 +241,102 @@ version bump, upload or distribution was performed.
 
 The dedicated test simulator was already Shutdown when shutdown was requested;
 the subsequent inventory confirmed no booted simulator. No data was wiped.
+
+## Local composer drafts after 9808aa4b (2026-10-15)
+
+The Wesh runtime now explicitly enables an encrypted draft repository after a
+confirmed Noise identity is available. Public mesh drafts and private drafts
+addressed by an explicit complete 32-byte Noise key may persist. Geohash and
+short-peer/fingerprint fallback destinations stay in RAM. The cache includes the
+SHA256 owner fingerprint of the local Noise public key; a different identity
+cannot restore or overwrite the old owner's cache. No draft is sent or imported
+automatically. Tests leave the default singleton in memory and inject temporary
+files and mock Keychain dependencies for persistence.
+
+The local file is Application Support/composer-drafts/wesh-v1.enc, protected
+until first unlock and excluded from backup. It uses existing ChaChaPoly with
+AAD `wesh.composer-drafts.v1` and a separate random 32-byte Keychain key named
+`composerDraftEncryptionKey.v1` in the existing local identity service. This is
+local storage only: no cryptographic primitive, identity or wire format changes.
+The authenticated plaintext is strict binary: eight-byte magic `WESHDRFT`,
+version byte 1, 32-byte owner, UInt16 record count, then destination byte (0 mesh,
+1 full private key), optional 32-byte private key, UInt64 epoch milliseconds,
+UInt32 UTF8 byte count and text bytes. Integers are big endian. Unknown versions,
+duplicates, invalid destinations, timestamps, UTF8, trailing bytes or owner
+mismatches are rejected. There are at most 64 durable records, 8000 characters
+and 32000 UTF8 bytes per record, and a bounded 2100000-byte encrypted file read
+(up to the limit plus one before rejection).
+
+Only confirmed absence of both key and cache permits creating a key. Permission
+and read errors, malformed keys, missing-key/orphaned files and authentication
+failures preserve existing bytes and block replacement. Writes require the
+previous ciphertext and Keychain value to match the loaded baseline, atomic
+file replacement and exact readback. These checks are conservative in-process
+recovery safeguards, not an interprocess transaction or a power-loss guarantee.
+
+RAM access stays synchronous. Load, Keychain/file IO and debounced writes run on
+a serial utility queue. Startup empty composer state does not save an empty
+draft. Edits and explicit share imports made while loading override only their
+own destination; bounded tombstones preserve explicit clears. Admission refuses
+new pending destinations when its bounded intent map is full. TextField edits
+are admitted within both limits before changing displayed text; refusal keeps
+the previous text and explains that the edit was not accepted. Legacy RAM calls
+retain their character truncation behavior but a truncated entry is never
+reported as a durable copy of its original text. Delayed restoration requires
+the same destination, generation and untouched revision. Submission requires a
+matching RAM snapshot; successful send clears only that unchanged snapshot.
+Shared import consumes the exact reviewed envelope under its existing lock only
+after draft admission, so refusal retains the offer and allows retry.
+
+French UI distinguishes session-only, identity unavailable, loading, pending,
+confirmed, suspended and storage/recovery errors. “Enregistré” follows confirmed
+readback; the last keystroke remains pending until then. Retry and foreground
+reload merge pending edits with validated stored drafts. Background/termination
+flush is best effort, not a promise that termination waits for completion.
+
+Panic increments the generation, rejects old callbacks, clears RAM and drains
+old IO before global Keychain deletion. The synchronous security barrier can
+briefly make Main wait; actual IO remains on the utility queue, which never
+waits for Main. Global recovery attempts both media and draft file cleanup even
+if either fails, retains its marker until cleanup succeeds, and confirms draft
+file absence. Startup marker replay runs before draft persistence configuration.
+A failed panic leaves the repository suspended; only confirmed global success
+allows the new identity to load again. Old write/load completions cannot restore
+an earlier generation.
+
+Final validation passed **104/104** targeted Swift Testing cases in eight suites,
+including the 20 new repository/backend cases, two new handoff cases, legacy
+composer/Wesh/panic coverage and the existing timing-hygiene gate. The complete
+unfiltered collection then passed **2432/2432** (2200 Swift Testing +232 XCTest),
+zero failures, skips or expected failures, Xcode exit 0 and xcresult Passed.
+The 104 targeted cases are included in that collection. Full testing used
+`test-without-building` with no only/skip filters and the same compiled products.
+All 11 changed Swift SHA256 values, their inventory and all three compiled
+product hashes matched afterward. The 39 inherited runtime warnings all come
+from off-tree `ViewSmokeTests`; these are not interactive accessibility evidence.
+No new compiler warning originates in the new draft backend/repository/test files.
+
+Intermediate attempts are preserved separately: an initial build failed before
+running tests on a MainActor isolation error; the corrected intermediate target
+passed 101/101. The following build compiled but its runner launched zero cases;
+it was interrupted and Xcode exited 75. The first unfiltered collection ran
+2432 cases and reported one timing-hygiene failure because a new test helper
+used a two-second deadline. That helper and its bounded semaphore waits now use
+the repository's `TestConstants.settleTimeout`; the gate was neither disabled nor
+exempted. The final passing targeted and full results above follow that change.
+
+Evidence remains ignored under `.validation/composer-drafts-record.json`,
+`.validation/composer-drafts-targeted-timing-fixed.xcresult`,
+`.validation/composer-drafts-full-final.xcresult`, their logs/summaries,
+source/product manifests and `.validation/composer-drafts-post-full-integrity.json`.
+RC5 ZIP/IPA and the exact old 119-file archive inventory still match, confirmed
+again in `.validation/composer-drafts-rc5-artifact-recheck-final.json`. No archive,
+export, version bump, upload or distribution was performed. The dedicated
+simulator was already Shutdown when shutdown was requested; its subsequent
+inventory confirms no booted simulator. No simulator data was erased.
+
+New persistence tests use only synthetic text/keys, isolated temporary files and
+mock Keychain data. Restart coverage recreates repository/backend instances;
+physical power-loss, device lock/unlock, reinstall/upgrade and phones remain
+unqualified. The earlier identity/Noise results and RC5 distribution hashes
+above remain historical evidence for their own sources.

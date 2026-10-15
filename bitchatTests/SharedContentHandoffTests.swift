@@ -607,6 +607,65 @@ struct SharedContentHandoffTests {
         #expect(recorded.keys == [firstKey])
     }
 
+    @Test("Refused draft admission preserves the reviewed share for retry without success notification")
+    @MainActor
+    func refusedDraftAdmissionKeepsOfferAndCanRetry() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let now = Date(timeIntervalSince1970: 22_000_000)
+        let payload = SharedContentPayload.text("synthetic pending share", createdAt: now)
+        try context.store.stage(payload, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let reviewed = try WeshSharedContentReview.prepare(id: payload.id, destination: .mesh,
+            model: model, destinationAllowed: true, now: now).get()
+        let repository = ComposerDraftRepository()
+        repository.suspendForPanic()
+        let center = NotificationCenter()
+        let recorded = ImportedDraftKeyRecorder()
+        let token = center.addObserver(forName: WeshSharedContentReview.importedDraftNotification, object: nil, queue: nil) { note in
+            if let key = note.object as? ComposerDraftStore.Key { recorded.keys.append(key) }
+        }
+        defer { center.removeObserver(token) }
+        var closed = 0
+        #expect(throws: WeshSharedContentReview.Issue.draftUnavailable) {
+            try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model, destinationAllowed: true,
+                notificationCenter: center, repository: repository, onImported: { closed += 1 }, now: now).get()
+        }
+        #expect(model.offer == reviewed)
+        #expect(context.store.pending(now: now) == payload)
+        #expect(recorded.keys.isEmpty)
+        #expect(closed == 0)
+        repository.completePanic(success: true, owner: nil)
+        #expect(try WeshSharedContentReview.importDraft(reviewed: reviewed, model: model, destinationAllowed: true,
+            notificationCenter: center, repository: repository, onImported: { closed += 1 }, now: now).get() == payload.content)
+        #expect(recorded.keys == [.mesh])
+        #expect(closed == 1)
+        #expect(model.offer == nil)
+    }
+
+    @Test("Combining text over the byte limit remains a pending share")
+    @MainActor
+    func sharedCombiningTextCannotBypassDraftByteLimit() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let now = Date(timeIntervalSince1970: 22_000_000)
+        let original = SharedContentPayload.text("pending original", createdAt: now)
+        try context.store.stage(original, now: now)
+        let model = SharedContentImportModel(store: context.store)
+        model.refresh(destination: .mesh, now: now)
+        let payload = SharedContentPayload.text("a" + String(repeating: "\u{301}", count: 16_001), createdAt: now)
+        #expect(throws: SharedContentHandoffError.contentTooLarge) { try context.store.stage(payload, now: now) }
+        #expect(context.store.pending(now: now) == original)
+        #expect(model.offer?.id == original.id)
+    }
+
     @Test("Deferring an older confirmation refreshes but cannot erase a newer share or import stale content")
     @MainActor
     func deferredOldReviewPreservesNewShare() throws {

@@ -101,6 +101,7 @@ struct ContentView: View {
     /// Conversation the current `messageText` belongs to, so a channel switch
     /// can save under the previous key before loading the next draft.
     @State private var activeDraftKey: ComposerDraftStore.Key = .mesh
+    @State private var activeDraftGeneration = ComposerDraftStore.repository.currentGeneration
     @FocusState private var isTextFieldFocused: Bool
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.appTheme) private var appTheme
@@ -254,6 +255,7 @@ struct ContentView: View {
                     fingerprint: selectedPrivatePeerID.flatMap { conversationUIModel.getFingerprint(for: $0) },
                     channel: locationChannelsModel.selectedChannel
                 )
+                activeDraftGeneration = ComposerDraftStore.repository.currentGeneration
                 messageText = ComposerDraftStore.load(activeDraftKey)
             }
             .onChange(of: colorScheme) { newValue in
@@ -290,12 +292,18 @@ struct ContentView: View {
                 ))
             }
         }
+        .onReceive(ComposerDraftStore.repository.changes) { change in
+            if change.reset, change.generation == ComposerDraftStore.repository.currentGeneration,
+               activeDraftGeneration != change.generation {
+                messageText = ""; activeDraftGeneration = change.generation
+            }
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .background || phase == .inactive {
                 // Always save, including empty — clearing the composer must
                 // remove the in-memory draft so it does not resurrect on the
                 // next switch back into this conversation.
-                ComposerDraftStore.save(messageText, for: activeDraftKey)
+                ComposerDraftStore.save(messageText, for: activeDraftKey, generation: activeDraftGeneration)
             }
         }
         .sheet(
@@ -613,7 +621,7 @@ struct ContentView: View {
         guard let trimmed = messageText.trimmedOrNilIfEmpty else { return }
 
         messageText = ""
-        ComposerDraftStore.save("", for: activeDraftKey)
+        ComposerDraftStore.save("", for: activeDraftKey, generation: activeDraftGeneration)
 
         DispatchQueue.main.async {
             self.conversationUIModel.sendMessage(trimmed)
@@ -622,8 +630,9 @@ struct ContentView: View {
 
     private func switchComposerDraft(to newKey: ComposerDraftStore.Key) {
         guard newKey != activeDraftKey else { return }
-        ComposerDraftStore.save(messageText, for: activeDraftKey)
+        ComposerDraftStore.save(messageText, for: activeDraftKey, generation: activeDraftGeneration)
         activeDraftKey = newKey
+        activeDraftGeneration = ComposerDraftStore.repository.currentGeneration
         messageText = ComposerDraftStore.load(newKey)
     }
 }

@@ -1680,6 +1680,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // `wipeMedia` will still attempt deletion if neither write succeeds.
         let recoveryIntent = panicRecoveryOperations.begin()
 
+        // Fence UI/load callbacks and drain old draft IO before deleting keys.
+        // The utility queue never synchronously waits on Main.
+        ComposerDraftStore.suspendForPanic()
+
         // Quiesce the mesh before clearing stores. Identity replacement below
         // deliberately stays stopped until media deletion and marker commit.
         if let panicTransport = meshService as? PanicResettingTransport {
@@ -1755,7 +1759,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         MeshSightingsTracker.shared.clear()
         MeshEchoSettings.reset()
         NotificationPrivacySettings.reset()
-        ComposerDraftStore.reset()
         // A hand-added relay names an operator someone chose to route through,
         // which is the kind of trace a wipe should not leave behind.
         NostrRelaySettings.reset()
@@ -1874,6 +1877,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 restartServices: restartServices
             )
         }
+
+        ComposerDraftStore.completePanic(
+            success: true, noiseKey: meshService.noiseStaticPublicKeyData()
+        )
 
         if restartServices {
             // All persistent state and media are gone. Bring each service back
