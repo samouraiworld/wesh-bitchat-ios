@@ -8,49 +8,63 @@ Work on a feature branch and open a pull request. Never commit to `main` or
 
 ## Candidate and evidence boundaries
 
-Local **RC4, version 0.1.0 (5)**, uses source commit
-`261e3f1f8c4f85ccc79ead55b582d1c23aef14df`. The universal simulator build and signed
-Release device archive passed. The complete iOS test collection passed **2,329
-tests** (2,114 Swift Testing tests and 215 XCTest tests), with no failures, skips,
-or expected failures. No `-only-testing` or `-skip-testing` filter was applied.
-This covers the tests compiled for the iOS simulator; macOS-only conditional code
-and physical-device behavior are separate validation scopes.
+Local **RC5, version 0.1.0 (6)**, uses frozen source commit
+`140030a19965ee7dd2fa0bfb3b0988359e32d697`. Its universal simulator package,
+Release Development archive, and **locally exported App Store IPA** are verified.
+App and extension have matching versions, compatible entitlements/profiles,
+strict signatures, and archive dSYM UUIDs. The IPA is signed with Apple
+Distribution certificates included in its App Store profiles; those certificates
+are currently valid and `get-task-allow` is false. **No Apple server validation,
+TestFlight upload, or invitation has taken place.**
 
-The focused regression set also passed **228 tests** (173 Swift Testing tests
-and 55 XCTest tests). It covers QR identity binding, blocking, drafts, sharing,
-routing, delivery states, and network activation. Those 228 are a subset of the
-2,329, not an additional count. The full run reported SwiftUI environment/state
-access warnings in inherited `ViewSmokeTests`, with no test failures; those smoke
-checks do not establish live view updates or accessibility behavior.
+The complete iOS simulator collection passed **2,333 tests**: **2,114 Swift
+Testing tests and 219 XCTest tests**, with no failures, skips, or expected
+failures. This includes the four immutable signed-QR interoperability tests;
+do not add them again. No `-only-testing` or `-skip-testing` filter was applied.
+An initial attempt compiled the test products but stalled in a CoreSimulator
+launch request before running any case. That owned Xcode process was interrupted
+and its evidence preserved. A complete `test-without-building` retry using the
+same frozen products passed with Xcode exit 0 and xcresult `Passed`. The dedicated
+iPhone 16 Pro / iOS 18.6 test simulator was confirmed shut down afterward; the
+separate Wesh VoiceOver QA simulator was not booted or erased.
 
-After the candidate freeze, four tests were added for the same immutable,
-synthetic signed Ed25519 QR fixture used by Android. They verify real signature
-acceptance, canonical encoding, tamper rejection, and freshness boundaries. The
-targeted run passed all four new tests plus five existing design-system control
-tests. This is supplementary evidence at a later test-only source revision; it
-does not change the candidate's 2,329-test result or archive provenance, and does
-not prove a live camera scan, Noise session, or radio exchange. The fixture's
-explicitly public seed must never be used as a real identity.
+RC5 changes launcher artwork and build number; it does not change messaging,
+cryptographic source, or the five-architecture Arti libraries rebuilt for RC4.
+See the [icon source and rendering guide](WESH-APP-ICON.md) and the
+[RC5 validation scope](RC5-VALIDATION.md). Documentation commits after the freeze
+do not change artifact provenance. Local archives, packages, IPA files, signing
+details, test results, and raw logs belong in ignored `.validation/`.
 
-The RC4 App Store export attempt stopped because Xcode could not access an Apple
-Distribution signing identity/account. A local retry after Mac access resumed
-still reported `No Accounts` and no Distribution signing certificate; the earlier
-screen lock alone does not establish the cause. Existing RC3 App Store profiles remain
-compatible with the RC4 app and extension, but profiles alone cannot sign an IPA.
-The Xcode account UI retained a team but requested renewed human authentication;
-the CLI error does not establish that the UI account or team was absent.
-No RC4 IPA has been produced, uploaded, or validated by Apple's servers. Historical
-RC3 artifacts remain associated with their original source commit.
+The synthetic signed QR fixture verifies signature acceptance, canonical encoding,
+tamper rejection, and freshness boundaries. Its explicitly public seed must never
+be used as a real identity. These API tests do not prove a live camera scan,
+current Noise-session challenge, reciprocal verification, or radio exchange. The
+packaged simulator app, archive, and IPA contain no XCTest plugins or that fixture.
 
-Documentation-only commits after the candidate do not change its source identity.
-Local archives, simulator packages, test results, signing details, and raw logs
-belong in ignored `.validation/`; do not commit them or substitute an older IPA.
+The complete run reported **39 inherited SwiftUI environment/state access
+warnings** in `ViewSmokeTests`, with no test failures. Off-tree smoke assertions
+do not establish live updates or accessibility behavior. Interactive RC5
+VoiceOver and Safari/share-extension QA remain open: CUA application selection
+took 204 seconds despite a requested 30-second timeout, and an earlier call was
+interrupted after 812 seconds. GUI work was paused without changing security
+settings or using an alternative GUI automation method. This tool latency does
+not diagnose the Apple account or the app.
 
-A separate RC4 simulator visual smoke confirmed silver controls on black,
-empty Contacts/Discussions, public-channel information, and Send disabled when
-Bluetooth was unavailable. VoiceOver showed an initial focus rectangle; speech,
-rotor, and gesture completion were not established. Safari/share-extension smoke
-was not repeated on RC4; prior RC3 sharing evidence remains historical.
+### Historical candidates
+
+RC4 **0.1.0 (5)** remains associated with source
+`261e3f1f8c4f85ccc79ead55b582d1c23aef14df`, **2,329 passing iOS tests**, its
+Development archive/universal simulator package, and its original inherited blue
+launcher artwork. Its focused 228-test set is a subset of those 2,329. The four
+signed-QR tests passed separately after the RC4 freeze. RC4 export attempts were
+blocked; the successful RC5 export must not be described as an RC4 IPA. All 119
+RC4 archive files were rechecked unchanged after RC5 validation.
+
+RC4 visual smoke confirmed silver controls on black, empty Contacts/Discussions,
+public-channel information, and Send disabled with unavailable Bluetooth.
+VoiceOver showed an initial focus rectangle, without completing speech, rotor,
+or gestures. The last interactive Safari/share-extension smoke remains RC3-only.
+Do not attribute either historical GUI result to RC5.
 
 ## Simulator build
 
