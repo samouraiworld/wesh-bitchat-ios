@@ -12,6 +12,38 @@ import BitFoundation
 @testable import bitchat
 
 struct BLEServiceCoreTests {
+    @Test
+    func gossipDelegateResumesAfterNormalStopButOldDelegateCannotCrossPanic() {
+        let ble = makeService()
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let delegate = ble._test_makeGossipDelegate()
+        let packet = BitchatPacket(type: MessageType.requestSync.rawValue,
+            senderID: Data(hexString: ble.myPeerID.id) ?? Data(), recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1_000),
+            payload: Data([1]), signature: nil, ttl: 0)
+        delegate.sendPacket(packet)
+        #expect(outbound.count(ofType: .requestSync) == 1)
+        ble.stopServices()
+        delegate.sendPacket(packet)
+        #expect(outbound.count(ofType: .requestSync) == 1)
+        ble.startServices()
+        delegate.sendPacket(packet)
+        #expect(outbound.count(ofType: .requestSync) == 2)
+        #expect(delegate.signPacketForBroadcast(packet).signature != nil)
+        ble.suspendForPanicReset()
+        ble.completePanicReset(restartServices: true)
+        delegate.sendPacket(packet)
+        delegate.sendPacket(to: PeerID(str: "1020304050607080"), packet: packet)
+        #expect(outbound.count(ofType: .requestSync) == 2)
+        #expect(delegate.signPacketForBroadcast(packet).signature == nil)
+        #expect(delegate.getConnectedPeers().isEmpty)
+        let currentDelegate = ble._test_makeGossipDelegate()
+        currentDelegate.sendPacket(packet)
+        #expect(outbound.count(ofType: .requestSync) == 3)
+        #expect(currentDelegate.signPacketForBroadcast(packet).signature != nil)
+    }
+
     @Test @MainActor
     func unavailableIdentityEventsArriveOutsideTheClosedMessageIngressAndRetryFailure() async {
         let storage = MockKeychain()

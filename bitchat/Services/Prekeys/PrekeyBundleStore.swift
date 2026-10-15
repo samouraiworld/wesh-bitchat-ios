@@ -51,6 +51,8 @@ final class PrekeyBundleStore {
     private var bundles: [Data: StoredBundle] = [:]
     private let queue = DispatchQueue(label: "chat.bitchat.prekeys.bundles")
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
     private let maxPeers: Int
     private let now: () -> Date
 
@@ -60,11 +62,15 @@ final class PrekeyBundleStore {
         persistsToDisk: Bool = true,
         fileURL: URL? = nil,
         maxPeers: Int = Limits.maxPeers,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        wipeFileManager: FileManager = .default
     ) {
         self.now = now
         self.maxPeers = maxPeers
-        self.fileURL = persistsToDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.wipeFileManager = wipeFileManager
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
         loadFromDisk()
     }
 
@@ -144,13 +150,14 @@ final class PrekeyBundleStore {
     // MARK: - Maintenance
 
     /// Panic wipe: drop all cached bundles from memory and disk.
-    func wipe() {
-        queue.sync {
+    @discardableResult
+    func wipe() -> Bool {
+        let removed = queue.sync {
             bundles.removeAll()
-            if let fileURL {
-                try? FileManager.default.removeItem(at: fileURL)
-            }
+            let removed = PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
+            return removed
         }
+        return removed
     }
 
     // MARK: - Internals (call only on `queue`)

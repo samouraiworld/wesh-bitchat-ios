@@ -236,11 +236,17 @@ final class SharedContentStore {
         }
     }
 
-    func discardAll() {
-        try? withInterprocessLock {
-            removeEnvelopeUnlocked()
-            clearLegacyKeys()
-        }
+    @discardableResult
+    func discardAll() -> Bool {
+        do {
+            return try withInterprocessLock(verifyCommit: {
+                ([Self.storageKey] + Self.legacyKeys).allSatisfy { self.defaults.object(forKey: $0) == nil }
+            }) {
+                removeEnvelopeUnlocked()
+                clearLegacyKeys()
+                return true
+            }
+        } catch { return false }
     }
 
     private func removeEnvelopeUnlocked() {
@@ -252,7 +258,7 @@ final class SharedContentStore {
 
     /// Every app/extension operation uses the same app-group BSD file lock.
     /// Synchronize preferences inside the critical section, not after releasing it.
-    private func withInterprocessLock<T>(_ body: () throws -> T) throws -> T {
+    private func withInterprocessLock<T>(verifyCommit: () -> Bool = { true }, _ body: () throws -> T) throws -> T {
         guard let lockURL else { throw SharedContentHandoffError.storageUnavailable }
         let descriptor = Darwin.open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw SharedContentHandoffError.storageUnavailable }
@@ -273,7 +279,7 @@ final class SharedContentStore {
         })
         do {
             let result = try body()
-            guard defaults.synchronize() else { throw SharedContentHandoffError.storageUnavailable }
+            guard defaults.synchronize(), verifyCommit() else { throw SharedContentHandoffError.storageUnavailable }
             return result
         } catch {
             // A failed flush must not consume a review or replace its content.

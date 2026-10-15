@@ -6,6 +6,91 @@ import SwiftUI
 import UIKit
 #endif
 
+/// One owner for the note. An editor event belongs to the generation in which
+/// its Binding was created, including events delivered after a wipe/restart.
+@MainActor
+final class WeshMeetingNoteStore: ObservableObject {
+    struct Content: Equatable {
+        var title = ""
+        var place = ""
+        var note = ""
+        var date = Date().timeIntervalSince1970
+    }
+
+    @Published private(set) var content: Content
+    @Published private(set) var generation: UInt64 = 0
+    @Published private(set) var isSuspended = false
+    private let defaults: UserDefaults?
+    private let erasePersisted: @MainActor () -> Bool
+    private static let keys = ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"]
+
+    /// Nil defaults is a RAM-only instance. Tests inject synthetic storage and
+    /// never construct an owner backed by the host's standard defaults.
+    init(defaults: UserDefaults? = nil, erasePersisted: (@MainActor () -> Bool)? = nil) {
+        self.defaults = defaults
+        content = Content(
+            title: defaults?.string(forKey: Self.keys[0]) ?? "",
+            place: defaults?.string(forKey: Self.keys[1]) ?? "",
+            note: defaults?.string(forKey: Self.keys[2]) ?? "",
+            date: defaults?.object(forKey: Self.keys[3]) as? Double ?? Date().timeIntervalSince1970
+        )
+        self.erasePersisted = erasePersisted ?? {
+            guard let defaults else { return true }
+            Self.keys.forEach { defaults.removeObject(forKey: $0) }
+            return Self.keys.allSatisfy { defaults.object(forKey: $0) == nil }
+        }
+    }
+
+    @discardableResult
+    func edit(_ field: WritableKeyPath<Content, String>, value: String, generation expected: UInt64) -> Bool {
+        guard !isSuspended, expected == generation else { return false }
+        content[keyPath: field] = value
+        let key: String
+        switch field {
+        case \Content.title: key = Self.keys[0]
+        case \Content.place: key = Self.keys[1]
+        case \Content.note: key = Self.keys[2]
+        default: return false
+        }
+        defaults?.set(value, forKey: key)
+        return true
+    }
+
+    @discardableResult
+    func editDate(_ value: TimeInterval, generation expected: UInt64) -> Bool {
+        guard !isSuspended, expected == generation, value.isFinite else { return false }
+        content.date = value
+        defaults?.set(value, forKey: Self.keys[3])
+        return true
+    }
+
+    func suspendForPanic() {
+        generation &+= 1
+        isSuspended = true
+        content = Content()
+    }
+
+    func wipeForPanic() -> Bool {
+        guard isSuspended else { return false }
+        return erasePersisted()
+    }
+
+    func completePanic() {
+        // Events created while the editor was disabled are stale too.
+        generation &+= 1
+        isSuspended = false
+    }
+
+    @discardableResult
+    func clear(generation expected: UInt64) -> Bool {
+        guard !isSuspended, expected == generation else { return false }
+        suspendForPanic()
+        guard wipeForPanic() else { return false }
+        completePanic()
+        return true
+    }
+}
+
 /// User-facing recovery copy; no action here can erase or replace identity data.
 struct WeshNoiseIdentityNotice: Equatable {
     let title: String
@@ -63,7 +148,10 @@ private struct WeshNoiseIdentityRecoveryPanel: View {
 struct WeshRootView: View {
     let runtime: AppRuntime
     @ObservedObject private var sharedImport: SharedContentImportModel
+    @ObservedObject private var viewModel: ChatViewModel
+    @EnvironmentObject private var chrome: AppChromeModel
     @State private var sharedReview: SharedContentOffer?
+    @State private var panicFeedback = ""
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
@@ -73,41 +161,74 @@ struct WeshRootView: View {
     init(runtime: AppRuntime) {
         self.runtime = runtime
         _sharedImport = ObservedObject(wrappedValue: runtime.sharedContentImportModel)
+        _viewModel = ObservedObject(wrappedValue: runtime.chatViewModel)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let offer = sharedImport.offer {
-                Button { sharedReview = offer } label: {
-                    Label("Contenu partagé à relire", systemImage: "square.and.arrow.down")
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).foregroundStyle(theme.accent)
-                    .accessibilityHint("Choisir la destination puis confirmer le remplacement du brouillon, sans envoyer")
+            if viewModel.panicRecoveryBlocked {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Effacement local inachevé", systemImage: "exclamationmark.triangle")
+                            .font(.headline).accessibilityAddTraits(.isHeader)
+                        Text("Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité.")
+                        Button("Reprendre l’effacement local") { chrome.requestPanicWipe() }
+                            .frame(minHeight: 44)
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                if !panicFeedback.isEmpty {
+                    Text(panicFeedback).font(.subheadline).padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                if let offer = sharedImport.offer {
+                    Button { sharedReview = offer } label: {
+                        Label("Contenu partagé à relire", systemImage: "square.and.arrow.down")
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).foregroundStyle(theme.accent)
+                        .accessibilityHint("Choisir la destination puis confirmer le remplacement du brouillon, sans envoyer")
+                }
+                TabView(selection: $selectedTab) {
+                    NavigationStack { WeshInbox(runtime: runtime) }
+                        .tabItem { Label("Discussions", systemImage: "bubble.left.and.bubble.right") }
+                        .tag(0).toolbar(.hidden, for: .tabBar)
+                    NavigationStack { WeshSettings(runtime: runtime) }
+                        .tabItem { Label("Réglages", systemImage: "gearshape") }
+                        .tag(1).toolbar(.hidden, for: .tabBar)
+                }
+                .id(viewModel.weshPanicGeneration)
+                if !keyboardVisible { VStack(spacing: 0) {
+                    Rectangle().fill(theme.line).frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        tab("Discussions", symbol: "bubble.left.and.bubble.right", index: 0)
+                        tab("Réglages", symbol: "gearshape", index: 1)
+                    }.padding(.top, 8).padding(.bottom, 4)
+                }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
             }
-            TabView(selection: $selectedTab) {
-                NavigationStack { WeshInbox(runtime: runtime) }
-                    .tabItem { Label("Discussions", systemImage: "bubble.left.and.bubble.right") }
-                    .tag(0).toolbar(.hidden, for: .tabBar)
-                NavigationStack { WeshSettings(runtime: runtime) }
-                    .tabItem { Label("Réglages", systemImage: "gearshape") }
-                    .tag(1).toolbar(.hidden, for: .tabBar)
-            }
-            if !keyboardVisible { VStack(spacing: 0) {
-                Rectangle().fill(theme.line).frame(height: 0.5)
-                HStack(spacing: 0) {
-                    tab("Discussions", symbol: "bubble.left.and.bubble.right", index: 0)
-                    tab("Réglages", symbol: "gearshape", index: 1)
-                }.padding(.top, 8).padding(.bottom, 4)
-            }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
         }
         .environment(\.weshTheme, theme)
         .environment(\.colorScheme, theme.scheme)
         .tint(theme.accent)
         .preferredColorScheme(theme.scheme)
         .background(theme.canvas.ignoresSafeArea())
+        .onChange(of: viewModel.weshPanicGeneration) { _ in sharedReview = nil }
+        .alert("Effacer les données de Wesh sur ce téléphone ?", isPresented: $chrome.showPanicConfirmation) {
+            Button("Annuler", role: .cancel) {}
+            Button("Effacer les données locales", role: .destructive) {
+                sharedReview = nil
+                let completed = chrome.panicClearAllData()
+                selectedTab = 1
+                panicFeedback = completed
+                    ? "Effacement local confirmé. Vos contacts devront être vérifiés à nouveau avant tout échange privé."
+                    : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+            }
+        } message: {
+            Text("Cette action efface l’identité Wesh, les contacts et leurs vérifications, l’historique, les fichiers reçus, les brouillons et la note de rendez-vous conservés ici. Elle ne supprime pas les copies détenues par d’autres personnes ni leurs sauvegardes. Elle ne garantit pas un effacement physique du stockage. Cette action est irréversible.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .sheet(item: $sharedReview) { offer in
@@ -1239,7 +1360,7 @@ private struct WeshSettings: View {
                         }
                     }.frame(minHeight: 48)
                 }
-                NavigationLink { WeshMeetingNote() } label: {
+                NavigationLink { WeshMeetingNote(store: runtime.chatViewModel.weshMeetingNote) } label: {
                     Label("Note de rendez-vous", systemImage: "calendar").frame(minHeight: 48)
                 }
             } header: { WeshSectionLabel(text: "À votre façon") }
@@ -1646,6 +1767,7 @@ private struct WeshPrivacySettings: View {
     let runtime: AppRuntime
     @ObservedObject private var trust = WeshQRTrust.shared
     @Environment(\.weshTheme) private var theme
+    @EnvironmentObject private var chrome: AppChromeModel
     @State private var forgetContacts = false
     var body: some View {
         Form {
@@ -1655,6 +1777,14 @@ private struct WeshPrivacySettings: View {
             }.listRowBackground(theme.canvas)
             Section {
                 Button("Retirer les vérifications QR", role: .destructive) { forgetContacts = true }.frame(minHeight: 44)
+            }.listRowBackground(theme.canvas)
+            Section {
+                Button("Effacer les données de Wesh ici", role: .destructive) {
+                    chrome.requestPanicWipe()
+                }.frame(minHeight: 48)
+                    .accessibilityHint("Demande confirmation avant d’effacer l’identité, les contacts, l’historique, les brouillons et la note sur ce téléphone")
+            } header: { Text("Effacement local") } footer: {
+                Text("Les copies conservées par vos contacts ne sont pas effacées. En cas d’échec, les échanges restent suspendus et vous pouvez reprendre l’effacement.")
             }.listRowBackground(theme.canvas)
         }.scrollContentBackground(.hidden).navigationTitle("Confidentialité").weshCanvas(title: "Confidentialité")
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
@@ -1666,30 +1796,38 @@ private struct WeshPrivacySettings: View {
 
 private struct WeshMeetingNote: View {
     @Environment(\.weshTheme) private var theme
-    @AppStorage("wesh.meeting.title") private var title = ""
-    @AppStorage("wesh.meeting.place") private var place = ""
-    @AppStorage("wesh.meeting.note") private var note = ""
-    @AppStorage("wesh.meeting.date") private var date = Date().timeIntervalSince1970
+    @ObservedObject var store: WeshMeetingNoteStore
     @State private var clear = false
+    private func textBinding(_ field: WritableKeyPath<WeshMeetingNoteStore.Content, String>, generation: UInt64) -> Binding<String> {
+        Binding(get: { store.content[keyPath: field] }, set: { value in
+            store.edit(field, value: value, generation: generation)
+        })
+    }
     var body: some View {
+        let generation = store.generation
         Form {
             Section {
                 Label("Une note pour vous", systemImage: "calendar").font(.headline)
                 Text("Une note personnelle, conservée ici. Rien n’est envoyé à vos contacts.").foregroundStyle(theme.secondary)
             }.listRowBackground(theme.canvas)
             Section("Votre rendez-vous") {
-                TextField("Titre", text: $title)
-                TextField("Lieu ou repère", text: $place)
-                DatePicker("Quand", selection: Binding(get: { Date(timeIntervalSince1970: date) }, set: { date = $0.timeIntervalSince1970 }))
-                TextField("À retenir", text: $note, axis: .vertical).lineLimit(3...8)
-            }.listRowBackground(theme.canvas)
-            Section { Button("Effacer cette note", role: .destructive) { clear = true }.frame(minHeight: 44) }.listRowBackground(theme.canvas)
+                TextField("Titre", text: textBinding(\.title, generation: generation))
+                TextField("Lieu ou repère", text: textBinding(\.place, generation: generation))
+                DatePicker("Quand", selection: Binding(get: { Date(timeIntervalSince1970: store.content.date) }, set: {
+                    store.editDate($0.timeIntervalSince1970, generation: generation)
+                }))
+                TextField("À retenir", text: textBinding(\.note, generation: generation), axis: .vertical).lineLimit(3...8)
+            }.disabled(store.isSuspended).listRowBackground(theme.canvas)
+            if store.isSuspended {
+                Text("La note est suspendue après une demande d’effacement. Certaines données peuvent rester ici. Reprenez l’effacement local depuis les réglages de confidentialité.")
+            }
+            Section { Button("Effacer cette note", role: .destructive) { clear = true }.frame(minHeight: 44).disabled(store.isSuspended) }.listRowBackground(theme.canvas)
         }
         .scrollContentBackground(.hidden).weshCanvas(title: "Rendez-vous")
         .navigationTitle("Rendez-vous")
         .alert("Effacer votre note ?", isPresented: $clear) {
             Button("Annuler", role: .cancel) {}
-            Button("Effacer", role: .destructive) { title = ""; place = ""; note = ""; date = Date().timeIntervalSince1970 }
+            Button("Effacer", role: .destructive) { store.clear(generation: generation) }
         }
     }
 }

@@ -96,6 +96,8 @@ final class MessageOutboxStore {
     }
 
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
     private let keychain: KeychainManagerProtocol
     private let readData: (URL) throws -> Data
     private let writeData: (Data, URL, Data.WritingOptions) throws -> Void
@@ -153,10 +155,14 @@ final class MessageOutboxStore {
         writeData: @escaping (Data, URL, Data.WritingOptions) throws -> Void = {
             try $0.write(to: $1, options: $2)
         },
-        beforeRecoveryNotification: @escaping () -> Void = {}
+        beforeRecoveryNotification: @escaping () -> Void = {},
+        wipeFileManager: FileManager = .default
     ) {
         self.keychain = keychain
-        self.fileURL = fileURL ?? Self.defaultFileURL()
+        let requiresDisk = fileURL != nil || !TestEnvironment.isRunningTests
+        self.persistenceRequired = requiresDisk
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        self.wipeFileManager = wipeFileManager
         self.readData = readData
         self.writeData = writeData
         self.beforeRecoveryNotification = beforeRecoveryNotification
@@ -598,7 +604,8 @@ final class MessageOutboxStore {
     }
 
     /// Panic wipe: drop the queued mail and the key that could ever read it.
-    func wipe() {
+    @discardableResult
+    func wipe() -> Bool {
         lock.lock()
         diskState = .loaded
         cachedSnapshot = [:]
@@ -612,11 +619,10 @@ final class MessageOutboxStore {
         recoveryRouterSnapshot = [:]
         unreportedRecoveredSnapshot = nil
         lifecycleGeneration &+= 1
-        if let fileURL {
-            try? FileManager.default.removeItem(at: fileURL)
-        }
+        let removed = PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
         keychain.delete(key: Self.keychainKey, service: Self.keychainService)
         lock.unlock()
+        return removed
     }
 
     // MARK: - Internals

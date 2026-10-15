@@ -370,3 +370,29 @@ The follow-up changes neither the wire format nor cryptographic construction.
 Its synthetic regressions do not access the live Keychain or qualify phones,
 background radio, power loss or accessibility. Current local evidence is under
 `.validation/v1-readiness/`; preceding numerical results remain historical.
+
+
+## Accessible global wipe and personal-note generations
+
+The Wesh interface now exposes the existing global panic workflow from
+Settings > Privacy. A destructive confirmation describes local identity,
+contacts, history, files, drafts and the personal note, and explicitly excludes
+remote copies and a guarantee of physical storage erasure. Cancelling does not
+enter the wipe. A failed global wipe replaces ordinary navigation/import
+controls with a persistent recovery panel; retry requires the same confirmation
+and cannot bypass the pending transaction or reopen transport.
+
+The note's four existing preference keys keep their format. A MainActor owner
+replaces direct AppStorage bindings and carries an immutable generation in each
+editor event. Panic suspends and clears its RAM before storage cleanup; removal
+and empty readback of all four keys are required before global completion.
+Only a completed global wipe reopens the owner under another generation.
+Callbacks from before or during the wipe cannot restore note text after resume.
+Clearing the note alone also invalidates its older bindings.
+
+Tests use a dedicated synthetic defaults suite, RAM-only owners by default and
+mock dependencies for global failure/retry. Preference readback alone does not
+prove a physical durable erase; the existing global persistence barrier and its
+qualification limits remain. No live QA data is deleted by the automated tests.
+
+The global completion barrier also requires checked removal of the public archive, courier store, bridge deduplication record, board store, cached prekeys, group metadata and outgoing-message store. Every scoped removal is attempted; an unavailable required path, deletion error or unconfirmed absence keeps recovery pending. Shared-content cleanup flushes and verifies the envelope and legacy keys under the existing interprocess lock, using the same store injected into AppRuntime before startup recovery. The old gossip archive is permanently retired before cleanup, so delayed loads, saves and wipes cannot affect a new manager’s file. A panic-generation-bound delegate refuses old gossip work after panic while preserving ordinary stop/start behavior. These application-level deletion and readback checks do not guarantee power-loss durability or physical storage erasure.

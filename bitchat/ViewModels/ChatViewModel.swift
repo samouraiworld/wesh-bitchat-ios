@@ -173,6 +173,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published var currentTheme: AppTheme = .matrix
     @Published var isConnected = false
     @Published private(set) var panicRecoveryBlocked = false
+    @Published private(set) var weshPanicGeneration: UInt64 = 0
     var networkActivationAllowed: Bool { !panicRecoveryBlocked }
     @Published var nickname: String = "" {
         didSet {
@@ -332,6 +333,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     let keychain: KeychainManagerProtocol
     private let panicRecoveryOperations: PanicRecoveryOperations
     private let panicNetworkLifecycle: PanicNetworkLifecycle
+    private let panicPersistentStoreWipes: PanicPersistentStoreWipes
+    let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
     /// Private group membership: keys in the keychain, metadata on disk.
     let groupStore: GroupStore
@@ -1112,7 +1115,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations: ConversationStore? = nil,
         peerIdentityStore: PeerIdentityStore? = nil,
         locationPresenceStore: LocationPresenceStore? = nil,
-        locationManager: LocationChannelManager = .shared
+        locationManager: LocationChannelManager = .shared,
+        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
     ) {
         let livePanicRecoveryOperations = PanicRecoveryOperations.live()
         let startSuspendedForRecovery: Bool
@@ -1156,7 +1160,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             sfMetrics: .shared,
             panicRecoveryOperations: panicRecoveryOperations,
             panicNetworkLifecycle: .live,
-            weshPrivatePolicyEnabled: WeshMode.isActive
+            weshPrivatePolicyEnabled: WeshMode.isActive,
+            panicPersistentStoreWipes: panicPersistentStoreWipes
         )
     }
 
@@ -1178,7 +1183,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         panicMediaWipe: (() throws -> Void)? = nil,
         panicRecoveryOperations: PanicRecoveryOperations? = nil,
         panicNetworkLifecycle: PanicNetworkLifecycle = .noop,
-        weshPrivatePolicyEnabled: Bool = false
+        weshPrivatePolicyEnabled: Bool = false,
+        weshMeetingNote: WeshMeetingNoteStore? = nil,
+        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil,
+        groupStore: GroupStore? = nil
     ) {
         self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
@@ -1197,7 +1205,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicRecoveryOperations = panicRecoveryOperations
             ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
-        self.groupStore = GroupStore(keychain: keychain)
+        self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
+        self.weshMeetingNote = weshMeetingNote
+            ?? WeshMeetingNoteStore(defaults: TestEnvironment.isRunningTests ? nil : .standard)
+        self.groupStore = groupStore ?? GroupStore(keychain: keychain)
         self.idBridge = idBridge
         self.identityManager = identityManager
         self.conversations = conversations
@@ -1396,7 +1407,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     /// Radio availability only; it does not promise a peer or a recipient receipt.
     var canSendWeshPublic: Bool {
-        !isRecoveringNoiseIdentity
+        !panicRecoveryBlocked
+            && !isRecoveringNoiseIdentity
             && noiseIdentityAvailability == .available
             && (meshService as? MeshIdentityRecovering)?.isNoiseIdentityTrafficAllowed != false
             && bluetoothState == .poweredOn
@@ -1669,8 +1681,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @discardableResult
     func panicClearAllData(restartServices: Bool = true) -> Bool {
         panicRecoveryBlocked = true
+        weshPanicGeneration &+= 1
         isPanicResetting = true
         defer { isPanicResetting = false }
+        weshMeetingNote.suspendForPanic()
 
         // Stop internet and location-presence work before clearing identity or
         // state. These services cancel their subscriptions and delayed tasks,
@@ -1738,7 +1752,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         identityManager.clearAllIdentityData()
         peerIdentityStore.clearAll()
         WeshQRTrust.shared.clear()
-        ["wesh.publicDisclosureAccepted.v1", "wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        UserDefaults.standard.removeObject(forKey: "wesh.publicDisclosureAccepted.v1")
+        let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
         locationPresenceStore.reset()
         publicRateLimiter.reset()
 
@@ -1748,10 +1763,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Drop courier mail carried for third parties (memory and disk),
         // our own queued outbox, the carried public history, and the
         // counters describing all of it
-        CourierStore.shared.wipe()
-        BridgeCourierService.shared.wipe()
-        messageRouter.wipeOutbox()
-        GossipMessageArchive.wipeDefault()
+        let courierWipeCompleted = panicPersistentStoreWipes.courier()
+        let bridgeWipeCompleted = panicPersistentStoreWipes.bridge()
+        let outboxWipeCompleted = messageRouter.wipeOutbox()
+        let publicArchiveWipeCompleted = panicPersistentStoreWipes.publicArchive()
         StoreAndForwardMetrics.shared.reset()
 
         // Ambient-liveliness bookkeeping: sampled nearby-chat previews, the
@@ -1765,23 +1780,21 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         NostrRelaySettings.reset()
 
         // Drop private group keys and rosters (keychain + disk)
-        groupStore.wipe()
+        let groupWipeCompleted = groupStore.wipe()
         // Drop cached peers' prekey bundles (who we could write to is
         // metadata too). Our own prekey privates are keychain-backed and go
         // with deleteAllKeychainData above plus the identity reset below.
-        PrekeyBundleStore.shared.wipe()
+        let prekeysWipeCompleted = panicPersistentStoreWipes.prekeys()
         // Drop bulletin-board posts and tombstones (memory and disk); board
         // posts are signed with our identity key and persist for days.
-        BoardStore.shared.wipe()
+        let boardWipeCompleted = panicPersistentStoreWipes.board()
 
         // Drop any share-extension handoff staged in the app group. The normal
         // panic path clears this through AppChromeModel.onPanicWipe, but the
         // crash-recovery replay calls this method directly and would otherwise
         // let a staged envelope survive the wipe. Clearing here is idempotent
         // (it only removes the app-group key), so the double-clear is harmless.
-        if let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
-            SharedContentStore(defaults: sharedDefaults).discardAll()
-        }
+        let sharedContentWipeCompleted = panicPersistentStoreWipes.sharedContent()
 
         // Identity manager has cleared persisted identity data above
 
@@ -1840,7 +1853,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if keychainWipeCompleted {
+            if [keychainWipeCompleted, meetingNoteWipeCompleted, courierWipeCompleted,
+                bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
+                groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
+                sharedContentWipeCompleted].allSatisfy({ $0 }) {
                 try panicRecoveryOperations.complete()
                 panicCompleted = true
                 SecureLogger.info(
@@ -1882,6 +1898,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         ComposerDraftStore.completePanic(
             success: true, noiseKey: meshService.noiseStaticPublicKeyData()
         )
+        weshMeetingNote.completePanic()
 
         if restartServices {
             // All persistent state and media are gone. Bring each service back

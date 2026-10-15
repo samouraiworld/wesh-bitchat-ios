@@ -6,6 +6,11 @@ import Testing
 
 private final class ControlledSynchronizeDefaults: UserDefaults, @unchecked Sendable {
     var synchronizeResults: [Bool] = []
+    var refuseEnvelopeRemoval = false
+    override func removeObject(forKey defaultName: String) {
+        if refuseEnvelopeRemoval && defaultName == SharedContentStore.storageKey { return }
+        super.removeObject(forKey: defaultName)
+    }
     override func synchronize() -> Bool {
         if !synchronizeResults.isEmpty, !synchronizeResults.removeFirst() { return false }
         return super.synchronize()
@@ -19,6 +24,30 @@ private final class ImportedDraftKeyRecorder: @unchecked Sendable {
 
 @Suite("Share extension handoff", .serialized)
 struct SharedContentHandoffTests {
+    @Test("Panic discard requires absence after the locked flush and allows a checked retry")
+    func panicDiscardRejectsRetainedEnvelopeAndClearsAllKeysOnRetry() throws {
+        let context = makeStore()
+        defer {
+            context.defaults.removePersistentDomain(forName: context.suite)
+            try? FileManager.default.removeItem(at: context.lockURL)
+        }
+        let payload = SharedContentPayload.text("synthetic pending share")
+        try context.store.stage(payload)
+        let controlled = ControlledSynchronizeDefaults(suiteName: context.suite)!
+        for key in ["sharedContent", "sharedContentType", "sharedContentDate"] {
+            controlled.set("synthetic legacy fixture", forKey: key)
+        }
+        controlled.refuseEnvelopeRemoval = true
+        let store = SharedContentStore(defaults: controlled, lockURL: context.lockURL)
+        #expect(!store.discardAll())
+        #expect(controlled.data(forKey: SharedContentStore.storageKey) != nil)
+        controlled.refuseEnvelopeRemoval = false
+        #expect(store.discardAll())
+        for key in [SharedContentStore.storageKey, "sharedContent", "sharedContentType", "sharedContentDate"] {
+            #expect(controlled.object(forKey: key) == nil)
+        }
+    }
+
     private func makeStore() -> (suite: String, defaults: UserDefaults, lockURL: URL, store: SharedContentStore) {
         let suite = "SharedContentHandoffTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -471,7 +500,7 @@ struct SharedContentHandoffTests {
         #expect(unavailable.pending() == nil)
         #expect(unavailable.consume(id: payload.id) == nil)
         unavailable.discard(id: payload.id)
-        unavailable.discardAll()
+        #expect(!unavailable.discardAll())
         #expect(context.defaults.data(forKey: SharedContentStore.storageKey) == encoded)
     }
 
@@ -495,6 +524,11 @@ struct SharedContentHandoffTests {
         controlled.synchronizeResults = [true, false, true]
         store.discard(id: payload.id)
         #expect(store.pending() == payload)
+        controlled.synchronizeResults = [true, false, true]
+        #expect(!store.discardAll())
+        #expect(store.pending() == payload)
+        #expect(store.discardAll())
+        #expect(controlled.object(forKey: SharedContentStore.storageKey) == nil)
         let malformed = Data("invalid json".utf8)
         controlled.set(malformed, forKey: SharedContentStore.storageKey)
         controlled.synchronizeResults = [true, false, true]

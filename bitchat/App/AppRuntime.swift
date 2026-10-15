@@ -52,6 +52,20 @@ final class AppRuntime: ObservableObject {
         let locationPresenceStore = LocationPresenceStore()
         let locationManager = LocationChannelManager.shared
         self.conversations = conversations
+        let resolvedSharedContentStore: SharedContentStore?
+        if let sharedContentStore {
+            resolvedSharedContentStore = sharedContentStore
+        } else if !TestEnvironment.isRunningTests,
+                  let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
+            resolvedSharedContentStore = SharedContentStore(defaults: sharedDefaults)
+        } else {
+            resolvedSharedContentStore = nil
+        }
+        var persistentWipes = PanicPersistentStoreWipes()
+        persistentWipes.sharedContent = {
+            guard let resolvedSharedContentStore else { return TestEnvironment.isRunningTests }
+            return resolvedSharedContentStore.discardAll()
+        }
         self.chatViewModel = ChatViewModel(
             keychain: keychain,
             idBridge: idBridge,
@@ -59,7 +73,8 @@ final class AppRuntime: ObservableObject {
             conversations: conversations,
             peerIdentityStore: peerIdentityStore,
             locationPresenceStore: locationPresenceStore,
-            locationManager: locationManager
+            locationManager: locationManager,
+            panicPersistentStoreWipes: persistentWipes
         )
         self.publicChatModel = PublicChatModel(conversations: conversations)
         self.privateInboxModel = PrivateInboxModel(conversations: conversations)
@@ -87,14 +102,6 @@ final class AppRuntime: ObservableObject {
             peerIdentityStore: peerIdentityStore,
             locationPresenceStore: locationPresenceStore
         )
-        let resolvedSharedContentStore: SharedContentStore?
-        if let sharedContentStore {
-            resolvedSharedContentStore = sharedContentStore
-        } else if let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
-            resolvedSharedContentStore = SharedContentStore(defaults: sharedDefaults)
-        } else {
-            resolvedSharedContentStore = nil
-        }
         let sharedContentImportModel = SharedContentImportModel(store: resolvedSharedContentStore)
         self.sharedContentImportModel = sharedContentImportModel
         self.appChromeModel = AppChromeModel(

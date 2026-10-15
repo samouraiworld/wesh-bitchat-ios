@@ -19,14 +19,22 @@ import Foundation
 /// posture. Wiped on panic.
 final class GossipMessageArchive {
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
+    private let ioLock = NSLock()
+    private var retiredForPanic = false
 
-    init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultFileURL()
+    init(fileURL: URL? = nil, persistsToDisk: Bool = true, wipeFileManager: FileManager = .default) {
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        self.wipeFileManager = wipeFileManager
     }
 
     /// Raw binary packets, decoded and freshness-filtered by the caller.
     func load() -> [Data] {
-        guard let fileURL,
+        ioLock.lock(); defer { ioLock.unlock() }
+        guard !retiredForPanic, let fileURL,
               let data = try? Data(contentsOf: fileURL),
               let packets = try? JSONDecoder().decode([Data].self, from: data) else {
             return []
@@ -35,7 +43,8 @@ final class GossipMessageArchive {
     }
 
     func save(_ packets: [Data]) {
-        guard let fileURL else { return }
+        ioLock.lock(); defer { ioLock.unlock() }
+        guard !retiredForPanic, let fileURL else { return }
         guard !packets.isEmpty else {
             try? FileManager.default.removeItem(at: fileURL)
             return
@@ -56,13 +65,25 @@ final class GossipMessageArchive {
         }
     }
 
-    func wipe() {
-        guard let fileURL else { return }
-        try? FileManager.default.removeItem(at: fileURL)
+    @discardableResult
+    func wipe() -> Bool {
+        ioLock.lock(); defer { ioLock.unlock() }
+        // An old sync manager may still run a queued timeline-clear job.
+        // It must not erase a new manager's post-panic archive at this path.
+        guard !retiredForPanic else { return false }
+        return PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
+    }
+
+    /// Waits only for this archive's file IO. No delegate or engine queue is
+    /// entered while holding the lock, including on delayed sync-save jobs.
+    func retireForPanic() {
+        ioLock.lock(); defer { ioLock.unlock() }
+        retiredForPanic = true
     }
 
     /// Panic-wipe hook for callers that don't hold the live instance.
-    static func wipeDefault() {
+    @discardableResult
+    static func wipeDefault() -> Bool {
         GossipMessageArchive().wipe()
     }
 

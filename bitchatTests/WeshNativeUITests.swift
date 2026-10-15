@@ -5,8 +5,253 @@ import Foundation
 import Testing
 @testable import bitchat
 
+private final class WeshWipeFileManager: FileManager, @unchecked Sendable {
+    var refuseRemoval = false
+    var leaveFilePresent = false
+    var refuseProbe = false
+    override func removeItem(at URL: URL) throws {
+        if refuseRemoval { throw CocoaError(.fileWriteNoPermission) }
+        if !leaveFilePresent { try super.removeItem(at: URL) }
+    }
+    override func attributesOfItem(atPath path: String) throws -> [FileAttributeKey: Any] {
+        if refuseProbe { throw CocoaError(.fileReadNoPermission) }
+        return try super.attributesOfItem(atPath: path)
+    }
+}
+
 @Suite("Wesh native trust and public separation", .serialized)
 struct WeshNativeUITests {
+    @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "groups", "outbox"]) @MainActor
+    func panicFileStoresRejectUnlinkFailureAndAllowVerifiedRetry(kind: String) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("checked-wipe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("synthetic.json")
+        let bytes = Data("synthetic local fixture".utf8)
+        try bytes.write(to: url)
+        let files = WeshWipeFileManager()
+        files.refuseRemoval = true
+        let wipe: () -> Bool
+        switch kind {
+        case "gossip":
+            let store = GossipMessageArchive(fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        case "courier":
+            let store = CourierStore(fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        case "bridge":
+            let store = BridgeDropDedupStore(fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        case "prekeys":
+            let store = PrekeyBundleStore(fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        case "board":
+            let store = BoardStore(fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        case "groups":
+            let store = GroupStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        default:
+            let store = MessageOutboxStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
+            wipe = { store.wipe() }
+        }
+        #expect(!wipe())
+        #expect(try Data(contentsOf: url) == bytes)
+        files.refuseRemoval = false
+        files.leaveFilePresent = true
+        #expect(!wipe(), "An acknowledged unlink is insufficient while the file still exists")
+        files.leaveFilePresent = false
+        files.refuseProbe = true
+        #expect(!wipe(), "An unknown absence readback cannot confirm cleanup")
+        files.refuseProbe = false
+        #expect(wipe())
+        #expect(wipe(), "ENOENT is an explicitly absent file")
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func missingProductionPathIsNotAnEmptyStore() {
+        #expect(!PanicFileRemoval.remove(nil, required: true))
+        #expect(PanicFileRemoval.remove(nil, required: false))
+    }
+
+    @Test func retiredGossipArchiveCannotRestoreSaveOrWipeANewManagersFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("retired-gossip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("public.json")
+        let old = GossipMessageArchive(fileURL: url)
+        old.save([Data("old signed fixture".utf8)])
+        #expect(old.load().count == 1)
+        old.retireForPanic()
+        let current = GossipMessageArchive(fileURL: url)
+        #expect(current.wipe())
+        old.save([Data("late old save".utf8)])
+        #expect(old.load().isEmpty)
+        #expect(current.load().isEmpty)
+        let fresh = Data("new generation fixture".utf8)
+        current.save([fresh])
+        #expect(!old.wipe())
+        old.save([Data("late old rewrite".utf8)])
+        #expect(current.load() == [fresh])
+    }
+
+    @Test(arguments: ["courier", "bridge", "archive", "prekeys", "board", "share", "groups", "outbox"]) @MainActor
+    func everyPersistentStoreRefusalBlocksGlobalCommitAndAllStoresAreStillAttempted(failing: String) throws {
+        var failed = true
+        var attempts: [String] = []
+        func wipe(_ name: String) -> Bool { attempts.append(name); return !(failed && name == failing) }
+        let wipes = PanicPersistentStoreWipes(
+            courier: { wipe("courier") }, bridge: { wipe("bridge") },
+            publicArchive: { wipe("archive") }, prekeys: { wipe("prekeys") },
+            board: { wipe("board") }, sharedContent: { wipe("share") }
+        )
+        let keychain = MockKeychain()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("global-checked-wipe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("fixture.json")
+        try Data("synthetic persisted metadata".utf8).write(to: url)
+        let files = WeshWipeFileManager()
+        files.refuseRemoval = true
+        let group = failing == "groups" ? GroupStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
+        let outbox = failing == "outbox" ? MessageOutboxStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
+        let transport = MockTransport()
+        var committed = 0
+        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
+            PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
+        }, wipeMedia: { _ in }, complete: { committed += 1 })
+        let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: MockIdentityManager(keychain), transport: transport, outboxStore: outbox,
+            panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true,
+            panicPersistentStoreWipes: wipes, groupStore: group)
+        let starts = transport.startServicesCallCount
+        #expect(!vm.panicClearAllData())
+        #expect(attempts == ["courier", "bridge", "archive", "prekeys", "board", "share"])
+        #expect(committed == 0 && vm.panicRecoveryBlocked)
+        #expect(transport.startServicesCallCount == starts)
+        #expect(vm.weshMeetingNote.isSuspended)
+        failed = false
+        files.refuseRemoval = false
+        attempts.removeAll()
+        #expect(vm.panicClearAllData())
+        #expect(committed == 1 && !vm.panicRecoveryBlocked)
+        #expect(transport.startServicesCallCount == starts + 1)
+        #expect(attempts.count == 6)
+    }
+
+    @Test @MainActor func meetingNoteWipeRemovesEveryPersistedFieldAndRejectsOldEditorEvents() throws {
+        let suite = "wesh-note-wipe-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WeshMeetingNoteStore(defaults: defaults)
+        let oldGeneration = store.generation
+        #expect(store.edit(\.title, value: "Titre synthétique", generation: oldGeneration))
+        #expect(store.edit(\.place, value: "Repère synthétique", generation: oldGeneration))
+        #expect(store.edit(\.note, value: "Note synthétique", generation: oldGeneration))
+        #expect(store.editDate(123, generation: oldGeneration))
+        #expect(defaults.string(forKey: "wesh.meeting.title") == "Titre synthétique")
+        #expect(defaults.string(forKey: "wesh.meeting.place") == "Repère synthétique")
+        #expect(defaults.string(forKey: "wesh.meeting.note") == "Note synthétique")
+        #expect(defaults.double(forKey: "wesh.meeting.date") == 123)
+        store.suspendForPanic()
+        let suspendedGeneration = store.generation
+        #expect(store.content.title.isEmpty && store.content.place.isEmpty && store.content.note.isEmpty)
+        #expect(!store.edit(\.note, value: "Événement pendant effacement", generation: suspendedGeneration))
+        #expect(store.wipeForPanic())
+        for key in ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"] {
+            #expect(defaults.object(forKey: key) == nil)
+        }
+        store.completePanic()
+        #expect(store.edit(\.note, value: "Nouvelle note", generation: store.generation))
+        for generation in [oldGeneration, suspendedGeneration] {
+            #expect(!store.edit(\.title, value: "Ancien titre", generation: generation))
+            #expect(!store.edit(\.place, value: "Ancien lieu", generation: generation))
+            #expect(!store.edit(\.note, value: "Ancienne note", generation: generation))
+            #expect(!store.editDate(456, generation: generation))
+            #expect(!store.clear(generation: generation))
+        }
+        #expect(store.content.note == "Nouvelle note")
+        #expect(defaults.string(forKey: "wesh.meeting.note") == "Nouvelle note")
+        #expect(defaults.object(forKey: "wesh.meeting.title") == nil)
+        #expect(defaults.object(forKey: "wesh.meeting.place") == nil)
+        #expect(defaults.object(forKey: "wesh.meeting.date") == nil)
+    }
+
+    @Test @MainActor func clearingOneMeetingNoteAlsoInvalidatesItsOldBindings() {
+        let store = WeshMeetingNoteStore()
+        let generation = store.generation
+        #expect(store.edit(\.note, value: "À effacer", generation: generation))
+        #expect(store.clear(generation: generation))
+        #expect(!store.isSuspended)
+        #expect(store.content.note.isEmpty)
+        #expect(!store.edit(\.note, value: "Ancienne composition IME", generation: generation))
+        #expect(store.edit(\.note, value: "Nouveau texte", generation: store.generation))
+    }
+
+    @Test(arguments: [false, true]) @MainActor
+    func confirmedGlobalWipeKeepsAdmissionClosedUntilNoteErasureAndRetryCommit(failNote: Bool) {
+        var allowNoteErasure = !failNote
+        var eraseAttempts = 0
+        let note = WeshMeetingNoteStore(erasePersisted: {
+            eraseAttempts += 1
+            return allowNoteErasure
+        })
+        let oldGeneration = note.generation
+        #expect(note.edit(\.note, value: "Note synthétique privée", generation: oldGeneration))
+        let keychain = MockKeychain()
+        keychain.simulatedDeleteAllResult = failNote
+        let transport = MockTransport()
+        var begun = 0
+        var committed = 0
+        let operations = PanicRecoveryOperations(
+            isPending: { false },
+            begin: {
+                begun += 1
+                return PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
+            },
+            wipeMedia: { _ in },
+            complete: { committed += 1 }
+        )
+        let vm = ChatViewModel(
+            keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: MockIdentityManager(keychain), transport: transport,
+            panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true, weshMeetingNote: note
+        )
+        vm.bluetoothState = .poweredOn
+        let chrome = AppChromeModel(chatViewModel: vm, privateInboxModel: PrivateInboxModel(conversations: vm.conversations))
+        let starts = transport.startServicesCallCount
+        chrome.requestPanicWipe()
+        #expect(chrome.showPanicConfirmation)
+        #expect(begun == 0 && eraseAttempts == 0 && keychain.deleteAllCallCount == 0)
+        // Cancelling the confirmation never enters the destructive path.
+        chrome.showPanicConfirmation = false
+        #expect(note.content.note == "Note synthétique privée")
+        chrome.requestPanicWipe()
+        #expect(!chrome.panicClearAllData())
+        #expect(!chrome.showPanicConfirmation)
+        #expect(vm.panicRecoveryBlocked && note.isSuspended)
+        #expect(note.content.note.isEmpty)
+        #expect(committed == 0 && begun == 1 && eraseAttempts == 1)
+        #expect(transport.startServicesCallCount == starts)
+        #expect(!vm.canSendWeshPublic)
+        var draft = "Brouillon après refus"
+        #expect(!vm.sendWeshDraft(&draft, to: nil))
+        #expect(draft == "Brouillon après refus")
+        #expect(transport.sentMessages.isEmpty)
+        let failedGeneration = note.generation
+        #expect(!note.edit(\.note, value: "Retour ancien éditeur", generation: oldGeneration))
+        allowNoteErasure = true
+        keychain.simulatedDeleteAllResult = true
+        chrome.requestPanicWipe()
+        #expect(chrome.panicClearAllData())
+        #expect(!vm.panicRecoveryBlocked && !note.isSuspended)
+        #expect(committed == 1 && begun == 2 && eraseAttempts == 2)
+        #expect(vm.weshPanicGeneration == 2)
+        #expect(transport.startServicesCallCount == starts + 1)
+        #expect(note.edit(\.note, value: "Note après reprise", generation: note.generation))
+        #expect(!note.edit(\.note, value: "Ancienne vue", generation: failedGeneration))
+        #expect(note.content.note == "Note après reprise")
+    }
+
     @Test func noiseRecoveryNoticesExplainEveryUnavailableStateWithoutDestructiveAction() {
         #expect(WeshNoiseIdentityNotice(.available) == nil)
         for availability in [NoiseIdentityAvailability.storageUnavailable, .persistenceUnconfirmed, .recoveryRequired, .invalidated] {

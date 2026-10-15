@@ -462,6 +462,7 @@ final class BLEService: NSObject {
 
     // MARK: - Gossip Sync
     private var gossipSyncManager: GossipSyncManager?
+    private var gossipDelegate: GossipDelegate?
     private let requestSyncManager = RequestSyncManager()
     
     // MARK: - Maintenance Timer
@@ -796,7 +797,9 @@ final class BLEService: NSObject {
         // Only real Bluetooth sessions archive to disk; unit tests stay hermetic.
         let archive = meshBackgroundEnabled ? GossipMessageArchive() : nil
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: requestSyncManager, archive: archive)
-        manager.delegate = self
+        let delegate = makeGossipDelegate()
+        gossipDelegate = delegate
+        manager.delegate = delegate
         // Board posts sync from the board store (their retention owner) so
         // deleted/expired posts drop out of rounds immediately. Real sessions
         // only, matching the archive: unit tests stay hermetic.
@@ -813,6 +816,47 @@ final class BLEService: NSObject {
         }
         gossipSyncManager = manager
     }
+
+    /// The proxy survives a retained old sync job, but never grants that job
+    /// admission under a post-panic identity. Normal stop/start retains its
+    /// manager, so availability (rather than a retired service epoch) gates it.
+    private final class GossipDelegate: GossipSyncManager.Delegate {
+        weak var service: BLEService?
+        let panicGeneration: UInt64?
+
+        init(_ service: BLEService) {
+            self.service = service
+            panicGeneration = service.capturePanicLifecycleGeneration()
+        }
+
+        private func admitted<T>(_ fallback: T, perform: (BLEService) -> T) -> T {
+            guard let service else { return fallback }
+            return service.onEngine {
+                guard service.isTransportTrafficAllowed,
+                      panicGeneration != nil,
+                      service.capturePanicLifecycleGeneration() == panicGeneration else { return fallback }
+                return perform(service)
+            }
+        }
+
+        func sendPacket(_ packet: BitchatPacket) {
+            admitted(()) { $0.broadcastPacket(packet) }
+        }
+
+        func sendPacket(to peerID: PeerID, packet: BitchatPacket) {
+            admitted(()) { _ = $0.sendPacketDirected(packet, to: peerID) }
+        }
+
+        func signPacketForBroadcast(_ packet: BitchatPacket) -> BitchatPacket {
+            admitted(packet) { $0.noiseService.signPacket(packet) ?? packet }
+        }
+
+        func getConnectedPeers() -> [PeerID] {
+            admitted([]) { $0.peerRegistry.connectedPeerIDs }
+        }
+    }
+
+    private func makeGossipDelegate() -> GossipDelegate { GossipDelegate(self) }
 
     // No advertising policy to set; we never include Local Name in adverts.
     
@@ -832,7 +876,7 @@ final class BLEService: NSObject {
     func suspendForPanicReset() {
         setPanicSuspended(true)
         noisePacketHandler.resetForPanic()
-        gossipSyncManager?.stop()
+        gossipSyncManager?.retireForPanic()
         gossipSyncManager = nil
         // Stop the radio and drain CoreBluetooth's delegate queue first. A
         // callback may already have passed its initial suspension check; the
@@ -870,7 +914,7 @@ final class BLEService: NSObject {
         currentNickname: String,
         restartServices: Bool = true
     ) {
-        gossipSyncManager?.stop()
+        gossipSyncManager?.retireForPanic()
         gossipSyncManager = nil
         // Discard deferred pre-panic ciphertext behind any in-flight receive
         // handlers so none can repopulate the handler's bounded queue.
@@ -3460,6 +3504,10 @@ extension BLEService {
 
     func _test_privateMediaAdmissionEntryCount() -> Int {
         privateMediaTransferAdmissions.count
+    }
+
+    func _test_makeGossipDelegate() -> GossipSyncManager.Delegate {
+        makeGossipDelegate()
     }
 
     @discardableResult

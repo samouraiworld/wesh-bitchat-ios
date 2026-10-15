@@ -92,13 +92,18 @@ final class BoardStore {
     private var tombstones: [StoredTombstone] = []
     private let queue = DispatchQueue(label: "chat.bitchat.board.store")
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
     private let now: () -> Date
 
     /// - Parameter fileURL: Overrides the on-disk location (tests). Ignored
     ///   when `persistsToDisk` is false.
-    init(persistsToDisk: Bool = true, fileURL: URL? = nil, now: @escaping () -> Date = Date.init) {
+    init(persistsToDisk: Bool = true, fileURL: URL? = nil, now: @escaping () -> Date = Date.init, wipeFileManager: FileManager = .default) {
         self.now = now
-        self.fileURL = persistsToDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.wipeFileManager = wipeFileManager
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
         loadFromDisk()
     }
 
@@ -147,18 +152,19 @@ final class BoardStore {
     // MARK: - Maintenance
 
     /// Panic wipe: drop all board data from memory and disk.
-    func wipe() {
-        queue.sync {
+    @discardableResult
+    func wipe() -> Bool {
+        let removed = queue.sync {
             posts.removeAll()
             tombstones.removeAll()
-            if let fileURL {
-                try? FileManager.default.removeItem(at: fileURL)
-            }
+            let removed = PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
             publishSnapshotLocked()
+            return removed
         }
         DispatchQueue.main.async { [weak self] in
             self?.didWipe.send()
         }
+        return removed
     }
 
     // MARK: - Internals (call only on `queue`)

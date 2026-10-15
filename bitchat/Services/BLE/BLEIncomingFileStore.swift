@@ -2,6 +2,43 @@ import BitLogger
 import BitFoundation
 import Foundation
 
+/// A nil URL is success only for an explicitly memory-only store. Checking
+/// attributes preserves permission/protection failures that fileExists hides.
+enum PanicFileRemoval {
+    static func remove(_ url: URL?, required: Bool, fileManager: FileManager = .default) -> Bool {
+        guard let url else { return !required }
+        do { try fileManager.removeItem(at: url) }
+        catch { if !isMissing(error) { return false } }
+        do {
+            _ = try fileManager.attributesOfItem(atPath: url.path)
+            return false
+        } catch { return isMissing(error) }
+    }
+
+    private static func isMissing(_ error: Error) -> Bool {
+        let value = error as NSError
+        return (value.domain == NSCocoaErrorDomain
+                && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(value.code))
+            || (value.domain == NSPOSIXErrorDomain && value.code == Int(ENOENT))
+    }
+}
+
+/// Test injection replaces every default-path operation; no live app-group or
+/// Application Support path needs to be opened by a panic integration test.
+@MainActor
+struct PanicPersistentStoreWipes {
+    var courier: @MainActor () -> Bool = { CourierStore.shared.wipe() }
+    var bridge: @MainActor () -> Bool = { BridgeCourierService.shared.wipe() }
+    var publicArchive: @MainActor () -> Bool = { GossipMessageArchive.wipeDefault() }
+    var prekeys: @MainActor () -> Bool = { PrekeyBundleStore.shared.wipe() }
+    var board: @MainActor () -> Bool = { BoardStore.shared.wipe() }
+    var sharedContent: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        guard let defaults = UserDefaults(suiteName: BitchatApp.groupID) else { return false }
+        return SharedContentStore(defaults: defaults).discardAll()
+    }
+}
+
 struct PanicRecoveryIntent {
     let fileMarkerEstablished: Bool
     let externalMarkerEstablished: Bool

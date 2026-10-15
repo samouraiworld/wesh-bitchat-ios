@@ -135,7 +135,9 @@ final class AppChromeModel: ObservableObject {
         showPanicConfirmation = true
     }
 
-    func panicClearAllData() {
+    @discardableResult
+    func panicClearAllData() -> Bool {
+        showPanicConfirmation = false
         // A wipe invalidates everything on screen, and its outcome must be
         // visible: the success message and the failed-wipe banner both live
         // on the root timeline, so a sheet left up (the App Info danger-zone
@@ -148,7 +150,7 @@ final class AppChromeModel: ObservableObject {
 
         prepareForPanic?()
         onPanicWipe()
-        chatViewModel.panicClearAllData()
+        return chatViewModel.panicClearAllData()
     }
 
     private func bind(privateInboxModel: PrivateInboxModel) {
