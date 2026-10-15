@@ -608,6 +608,81 @@ enum WeshDraftStoragePresentation {
     }
 }
 
+/// One-shot focus intents belong to the current presentation and editor revision.
+/// Editing feedback never requests focus or dismisses the keyboard.
+struct WeshComposerFeedbackState: Sendable {
+    enum FocusTarget: Equatable, Sendable { case feedback, composer }
+    struct FocusRequest: Equatable, Sendable {
+        let revision: UInt64
+        let target: FocusTarget
+    }
+
+    private(set) var message = ""
+    private(set) var isEditingRejection = false
+    private(set) var revision: UInt64 = 0
+    private(set) var pendingFocus: FocusRequest?
+    private(set) var isPresented = false
+    private var keyboardVisible = false
+
+    var readyFocus: FocusRequest? {
+        guard isPresented, let pendingFocus,
+              pendingFocus.target == .composer || !keyboardVisible else { return nil }
+        return pendingFocus
+    }
+
+    mutating func appear() {
+        isPresented = true
+        invalidateFocus()
+    }
+
+    mutating func disappear() {
+        isPresented = false
+        keyboardVisible = false
+        invalidateFocus()
+    }
+
+    mutating func edited(rejection: String?) {
+        invalidateFocus()
+        message = rejection ?? ""
+        isEditingRejection = rejection != nil
+    }
+
+    mutating func showAction(_ message: String) {
+        display(message, target: .feedback)
+    }
+
+    mutating func showImportedDraft(_ message: String, focusComposer: Bool) {
+        display(message, target: focusComposer ? .composer : nil)
+    }
+
+    mutating func keyboardWillShow() { keyboardVisible = true }
+    mutating func keyboardDidHide() { keyboardVisible = false }
+
+    mutating func composerBecameFocused() {
+        if pendingFocus?.target == .feedback { invalidateFocus() }
+    }
+
+    mutating func consume(_ request: FocusRequest) -> FocusTarget? {
+        guard readyFocus == request else { return nil }
+        pendingFocus = nil
+        return request.target
+    }
+
+    private mutating func display(_ message: String, target: FocusTarget?) {
+        invalidateFocus()
+        self.message = message
+        isEditingRejection = false
+        if isPresented, let target {
+            pendingFocus = FocusRequest(revision: revision, target: target)
+        }
+    }
+
+    private mutating func invalidateFocus() {
+        revision &+= 1
+        pendingFocus = nil
+    }
+}
+
 private struct WeshConversation: View {
     let runtime: AppRuntime
     let peerID: PeerID?
@@ -619,7 +694,7 @@ private struct WeshConversation: View {
     @State private var draftGeneration: UInt64 = 0
     @State private var reviewedShare: SharedContentOffer?
     @State private var replacingSharedDraft = false
-    @State private var sharedFeedback = ""
+    @State private var composerFeedback = WeshComposerFeedbackState()
     @State private var handledSharedReview = false
     @AccessibilityFocusState(for: .voiceOver) private var sharedFeedbackFocused: Bool
     @EnvironmentObject private var publicChat: PublicChatModel
@@ -665,9 +740,11 @@ private struct WeshConversation: View {
         Binding(get: { draft }, set: { value in
             if composerDrafts.admitDisplayedText(value, for: draftKey, generation: draftGeneration) {
                 draft = value
+                composerFeedback.edited(rejection: nil)
             } else {
-                showSharedFeedback("Cette modification dépasse la limite du brouillon ou ne peut pas être conservée. Le texte précédent reste affiché.")
+                composerFeedback.edited(rejection: "Cette modification dépasse la limite du brouillon ou ne peut pas être conservée. Le texte précédent reste affiché.")
             }
+            sharedFeedbackFocused = false
         })
     }
     private var draftStatus: ComposerDraftStatus {
@@ -704,15 +781,6 @@ private struct WeshConversation: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        if !sharedFeedback.isEmpty {
-                            Text(sharedFeedback).font(.body).foregroundStyle(theme.secondary)
-                                .accessibilityFocused($sharedFeedbackFocused)
-                            if let sharedContentID, sharedImport.offer?.id == sharedContentID,
-                               canImportShare,
-                               (sharedImport.offer?.payload.composerText.count ?? 0) <= ComposerDraftStore.maxDraftLength {
-                                Button("Relire le partage", action: prepareSharedDraft).frame(minHeight: 44)
-                            }
-                        }
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 5) {
@@ -796,6 +864,17 @@ private struct WeshConversation: View {
                         }.frame(minHeight: 44)
                     }
                 }
+                if !composerFeedback.message.isEmpty {
+                    Text(composerFeedback.message).font(.body).foregroundStyle(theme.secondary)
+                        .id(composerFeedback.revision)
+                        .accessibilityFocused($sharedFeedbackFocused)
+                    if !composerFeedback.isEditingRejection,
+                       let sharedContentID, sharedImport.offer?.id == sharedContentID,
+                       canImportShare,
+                       (sharedImport.offer?.payload.composerText.count ?? 0) <= ComposerDraftStore.maxDraftLength {
+                        Button("Relire le partage", action: prepareSharedDraft).frame(minHeight: 44)
+                    }
+                }
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField(isPrivate ? "Message privé" : "Message public", text: draftBinding,
                               prompt: Text(isPrivate ? "Message privé" : "Message public").foregroundColor(theme.secondary), axis: .vertical)
@@ -804,6 +883,7 @@ private struct WeshConversation: View {
                         .padding(14)
                         .overlay(RoundedRectangle(cornerRadius: theme.radius).strokeBorder(theme.line, lineWidth: 1))
                         .accessibilityLabel(isPrivate ? "Message privé" : "Message public")
+                        .accessibilityHint(composerFeedback.isEditingRejection ? composerFeedback.message : "")
                     Button {
                         if !isPrivate && !publicAccepted { publicWarning = true } else { send() }
                     } label: {
@@ -871,6 +951,7 @@ private struct WeshConversation: View {
             WeshInformationSheet(isPrivate: isPrivate)
         }
         .onAppear {
+            composerFeedback.appear()
             draftGeneration = composerDrafts.currentGeneration
             draft = composerDrafts.load(draftKey)
             if let peerID { privateChat.startConversation(with: peerID) }
@@ -880,17 +961,47 @@ private struct WeshConversation: View {
                 prepareSharedDraft()
             }
         }
-        .onDisappear { composerDrafts.flush() }
+        .onDisappear {
+            composerFeedback.disappear()
+            sharedFeedbackFocused = false
+            composerDrafts.flush()
+        }
+        .onChange(of: composerFocused) { focused in
+            if focused { composerFeedback.composerBecameFocused() }
+        }
+        .onChange(of: composerFeedback.readyFocus) { request in
+            guard let request else { return }
+            // Render the inline result before one guarded focus handoff.
+            DispatchQueue.main.async {
+                guard let target = composerFeedback.consume(request) else { return }
+                switch target {
+                case .feedback: sharedFeedbackFocused = true
+                case .composer: composerFocused = true
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            composerFeedback.keyboardWillShow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            composerFeedback.keyboardDidHide()
+        }
         .onReceive(composerDrafts.changes) { change in
             if change.reset, change.generation == composerDrafts.currentGeneration,
                draftGeneration != change.generation {
+                composerFeedback.edited(rejection: nil)
+                sharedFeedbackFocused = false
                 draft = ""; draftGeneration = change.generation
             } else if let restored = composerDrafts.restoredText(for: draftKey, from: change) {
+                composerFeedback.edited(rejection: nil)
+                sharedFeedbackFocused = false
                 draft = restored; draftGeneration = change.generation
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: WeshSharedContentReview.importedDraftNotification)) { notification in
             guard let key = notification.object as? ComposerDraftStore.Key, key == draftKey else { return }
+            composerFeedback.edited(rejection: nil)
+            sharedFeedbackFocused = false
             draftGeneration = composerDrafts.currentGeneration
             draft = composerDrafts.load(draftKey)
         }
@@ -930,17 +1041,17 @@ private struct WeshConversation: View {
         case .success(let text):
             draftGeneration = composerDrafts.currentGeneration
             draft = text
-            sharedFeedback = "Contenu ajouté au brouillon. Relisez-le avant d’envoyer."
-            // Let the confirmation alert dismiss before requesting the keyboard.
-            if onSharedDraftImported == nil { DispatchQueue.main.async { composerFocused = true } }
+            sharedFeedbackFocused = false
+            composerFeedback.showImportedDraft("Contenu ajouté au brouillon. Relisez-le avant d’envoyer.",
+                                               focusComposer: onSharedDraftImported == nil)
         case .failure(let issue): showSharedFeedback(issue.message)
         }
     }
 
     private func showSharedFeedback(_ message: String) {
         sharedFeedbackFocused = false
-        sharedFeedback = message
-        DispatchQueue.main.async { sharedFeedbackFocused = true }
+        composerFeedback.showAction(message)
+        composerFocused = false
     }
 }
 
@@ -1296,7 +1407,7 @@ private struct WeshInformationSheet: View {
                     Image(systemName: isPrivate ? "lock" : "antenna.radiowaves.left.and.right")
                         .font(.largeTitle).foregroundStyle(theme.accent).accessibilityHidden(true)
                     Text(isPrivate ? "Une vérification en personne." : "Un salon ouvert.")
-                        .font(.title2.weight(.semibold))
+                        .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     Text(isPrivate ? "Pour échanger, chacun doit scanner le QR de l’autre. L’identité vérifiée ici est liée à la connexion chiffrée de ce contact." : "Les participants peuvent voir, conserver et relayer vos messages. Un surnom ne prouve pas une identité.")
                     Text(isPrivate ? "La vérification sur ce téléphone ne prouve pas que votre contact vous a vérifié. En cas de changement d’identité ou de connexion, l’écriture est suspendue et votre brouillon est conservé." : "Le Bluetooth ne garantit aucune frontière géographique : un message peut être relayé au-delà des personnes proches. La diffusion ne confirme pas sa réception.")
                         .foregroundStyle(theme.secondary)
