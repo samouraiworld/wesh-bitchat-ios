@@ -340,3 +340,33 @@ mock Keychain data. Restart coverage recreates repository/backend instances;
 physical power-loss, device lock/unlock, reinstall/upgrade and phones remain
 unqualified. The earlier identity/Noise results and RC5 distribution hashes
 above remain historical evidence for their own sources.
+
+
+## V1 private admission and media lifecycle follow-up
+
+An enrolled private recipient is no longer sufficient for Wesh submission when
+local transport is stopped, Bluetooth is unavailable or Noise recovery is
+pending. Private admission now shares the public route's transport-availability
+check while remaining independent of public-room disclosure consent. It also
+requires the complete 32-byte Noise recipient key; a short alias cannot accept
+and clear a draft that the lower private-message sender would refuse. Genuine
+mock Noise sessions exercise the valid path before each negative regression.
+
+Both Wesh text routes accept at most 2,000 UTF-8 bytes, matching Android. The
+larger draft-storage limits remain unchanged: over-limit text is retained for
+editing, with actionable French feedback before submission. ASCII, accented and
+emoji boundaries are checked on public and private routes.
+
+Private media preflight applies the existing 256-fragment peer limit to the
+final encrypted packet as well as legacy file transfers. This prevents sending
+a large encrypted train that the Android reassembler would discard. Lifecycle
+checks stop and reject fragment work after transport stop/restart, including
+pending requests carrying their submission generation; they no longer turn a
+local refusal into completed progress. This is a local scheduling result, not
+proof of GATT receipt or remote delivery. Large public media interoperability
+remains unqualified; V1 Wesh composers expose text only.
+
+The follow-up changes neither the wire format nor cryptographic construction.
+Its synthetic regressions do not access the live Keychain or qualify phones,
+background radio, power loss or accessibility. Current local evidence is under
+`.validation/v1-readiness/`; preceding numerical results remain historical.

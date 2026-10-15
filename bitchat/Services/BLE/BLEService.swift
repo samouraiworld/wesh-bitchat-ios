@@ -2142,26 +2142,17 @@ final class BLEService: NSObject {
         // Encode once using a small per-type padding policy, then delegate by type
         let padForBLE = BLEOutboundPacketPolicy.padsBLEFrame(for: packetToSend.type)
 
-        // The 256-fragment ceiling exists to protect *current Android*
-        // receivers, which only ever receive private media over the directed
-        // raw-file migration fallback (they do not implement the encrypted
-        // 0x20 path). Encrypted private media (`noiseEncrypted`) is sent only to
-        // peers that advertised the `.privateMedia` capability — modern clients
-        // that assemble up to the full receiver ceiling (see
-        // `BLEFragmentAssemblyBuffer`'s 10,000-fragment guard) — so forcing them
-        // down to Android's 256 cap would needlessly reject iOS→iOS photos in
-        // the ~120–512 KiB range that work today. Restrict the low cap to the
-        // migration fallback (directed `fileTransfer`); public media is
-        // unaffected. Run the same planner the scheduler will use, after route
-        // application, and reject before reserving a transfer slot or writing
-        // any fragment.
-        // TODO(#1434): negotiate an explicit per-peer fragment limit so a future
-        // Android client that adopts the encrypted 0x20 path but still caps its
-        // reassembler can advertise its own ceiling instead of relying on the
-        // capability/type proxy above.
+        // Current Android peers advertise encrypted private media and still
+        // reject fragment sets above 256. The capability bit does not promise
+        // a larger reassembly limit, so both private-media wire shapes use
+        // that ceiling until an explicit per-peer limit is negotiated.
+        // Plan the final ciphertext/signed packet after route application:
+        // plaintext size alone misses encryption, signature and route costs.
+        // Public media and ordinary Noise traffic retain their existing policy.
         if let transferId,
            let recipientPeerID = PeerID(hexData: packetToSend.recipientID),
-           packetToSend.type == MessageType.fileTransfer.rawValue {
+           packetToSend.type == MessageType.fileTransfer.rawValue
+                || packetToSend.type == MessageType.noiseEncrypted.rawValue {
             let compatibilityRequest = BLEOutboundFragmentTransferRequest(
                 packet: packetToSend,
                 pad: padForBLE,
@@ -5592,7 +5583,8 @@ extension BLEService {
             directedPeer: directedOnlyPeer,
             transferId: transferId,
             requireDirectPeerLink: requireDirectPeerLink,
-            requireNoiseAuthenticatedPeerLink: requireNoiseAuthenticatedPeerLink
+            requireNoiseAuthenticatedPeerLink: requireNoiseAuthenticatedPeerLink,
+            servicesRequestGeneration: currentServicesRequestGeneration()
         )
 
         let result: BLEOutboundFragmentTransferScheduler.SubmitResult? = onEngine {
@@ -5662,6 +5654,12 @@ extension BLEService {
         _ request: BLEOutboundFragmentTransferRequest,
         reservedTransferId: String?
     ) -> Bool {
+        let servicesGeneration = request.servicesRequestGeneration ?? currentServicesRequestGeneration()
+        let unavailableReason = String(
+            localized: "content.delivery.reason.send_error",
+            defaultValue: "send error",
+            comment: "Failure reason when scheduled media fragments can no longer be sent"
+        )
         let releaseReservedSlot: (String) -> Void = { [weak self] id in
             guard let self = self else { return }
             TransferProgressManager.shared.cancel(id: id)
@@ -5671,6 +5669,15 @@ extension BLEService {
             self.messageQueue.async { [weak self] in
                 self?.startNextPendingTransferIfNeeded()
             }
+        }
+
+        guard isTransportTrafficAllowed,
+              currentServicesRequestGeneration() == servicesGeneration else {
+            if let id = reservedTransferId {
+                releaseReservedSlot(id)
+                TransferProgressManager.shared.rejectBeforeStart(id: id, reason: unavailableReason)
+            }
+            return false
         }
 
         guard let plan = BLEOutboundFragmentPlanner.makePlan(
@@ -5718,7 +5725,8 @@ extension BLEService {
         }
 
         let sendFragment: (BitchatPacket) -> Bool = { [weak self] fragmentPacket in
-            guard let self else { return false }
+            guard let self, self.isTransportTrafficAllowed,
+                  self.currentServicesRequestGeneration() == servicesGeneration else { return false }
             if request.requireDirectPeerLink, let directedPeer = request.directedPeer {
                 return self.sendPacketDirected(
                     fragmentPacket,
@@ -5728,7 +5736,8 @@ extension BLEService {
                 )
             }
             self.broadcastPacket(fragmentPacket)
-            return true
+            return self.isTransportTrafficAllowed
+                && self.currentServicesRequestGeneration() == servicesGeneration
         }
 
         // Strict courier handoff is transactional at the fragment-admission
@@ -5765,7 +5774,22 @@ extension BLEService {
                 if fragmentPacket.recipientID == nil || fragmentPacket.recipientID?.allSatisfy({ $0 == 0xFF }) == true {
                     self.gossipSyncManager?.onPublicPacketSeen(fragmentPacket)
                 }
-                _ = sendFragment(fragmentPacket)
+                guard sendFragment(fragmentPacket) else {
+                    if let transferId = transferIdentifier {
+                        let cancelled = onEngine {
+                            self.outboundFragmentTransfers.cancelTransfer(transferId)
+                        }
+                        if case let .active(_, workItems) = cancelled {
+                            workItems.forEach { $0.cancel() }
+                            TransferProgressManager.shared.rejectBeforeStart(
+                                id: transferId,
+                                reason: unavailableReason
+                            )
+                            self.startNextPendingTransferIfNeeded()
+                        }
+                    }
+                    return
+                }
                 if let transferId = transferIdentifier {
                     self.markFragmentSent(transferId: transferId)
                 }

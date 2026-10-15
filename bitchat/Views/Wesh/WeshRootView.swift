@@ -776,6 +776,10 @@ private struct WeshConversation: View {
     }
 
     private func send() {
+        guard draft.utf8.count <= WeshTextLimits.maximumUTF8Bytes else {
+            showSharedFeedback("Message trop long. Raccourcissez-le pour l’envoyer. Votre brouillon est conservé.")
+            return
+        }
         guard let snapshot = composerDrafts.submission(for: draftKey, displayedText: draft, generation: draftGeneration) else {
             showSharedFeedback("Le brouillon a changé. Relisez le texte avant de l’envoyer.")
             return

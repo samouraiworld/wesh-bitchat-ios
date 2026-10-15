@@ -7,6 +7,11 @@ enum WeshMode {
     static var isActive = false
 }
 
+/// Common Wesh text admission bound; draft storage may retain longer text.
+enum WeshTextLimits {
+    static let maximumUTF8Bytes = 2000
+}
+
 /// QR enrollment is separate from upstream manual verification and transitive vouches.
 @MainActor
 final class WeshQRTrust: ObservableObject {
@@ -92,18 +97,19 @@ extension ChatViewModel {
 
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
-        guard noiseIdentityAvailability == .available else { return false }
-        guard meshService.noiseStaticPublicKeyData().count == 32,
-              meshService.noiseSigningPublicKeyData().count == 32 else { return false }
+        // Transport availability is shared; public disclosure is checked only
+        // by the public send API, not by this private identity gate.
+        guard canSendWeshPublic,
+              let requestedKey = peerID.noiseKey, requestedKey.count == 32 else { return false }
         guard identityManager.isPersistenceAvailable,
               !identityManager.hasPendingPersistenceChanges else { return false }
-        if let pinned = peerID.noiseKey, identityManager.isBlocked(fingerprint: pinned.sha256Fingerprint()) { return false }
+        if identityManager.isBlocked(fingerprint: requestedKey.sha256Fingerprint()) { return false }
         let shortID = getShortIDForNoiseKey(peerID)
         guard !isPeerBlocked(shortID) else { return false }
         let sessionKey = noiseSessionPublicKeyData(for: shortID)
         guard let sessionKey, getFingerprint(for: shortID) == sessionKey.sha256Fingerprint() else { return false }
         return WeshQRTrust.canSend(sessionKey: sessionKey, qrFingerprints: WeshQRTrust.shared.fingerprints,
-                                  locallyVerified: peerIdentityStore.isVerified(sessionKey.sha256Fingerprint()), requestedKey: peerID.noiseKey)
+                                  locallyVerified: peerIdentityStore.isVerified(sessionKey.sha256Fingerprint()), requestedKey: requestedKey)
     }
 
     @MainActor @discardableResult

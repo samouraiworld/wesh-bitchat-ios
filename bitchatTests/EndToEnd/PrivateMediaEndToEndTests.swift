@@ -977,7 +977,7 @@ struct PrivateMediaEndToEndTests {
     }
 
     @Test
-    func consentedLegacySendRejectsAboveAndroidFragmentCapButEncryptedDoesNot() async throws {
+    func legacyAndEncryptedPrivateMediaRejectAboveAndroidFragmentCap() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("private-media-fragment-cap-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1026,24 +1026,150 @@ struct PrivateMediaEndToEndTests {
             allowLegacyFallback: true
         )
 
-        // The directed raw-file migration fallback (Android-style peer without
-        // the .privateMedia capability) still honors the 256-fragment ceiling.
-        let legacyRejected = await TestHelpers.waitUntil(
-            { rejections.contains(legacyID) },
+        // Bit 8 is advertised by current Android even though its receiver
+        // still caps both raw and encrypted private media at 256 fragments.
+        let bothRejected = await TestHelpers.waitUntil(
+            { rejections.contains(legacyID) && rejections.contains(encryptedID) },
             timeout: TestConstants.longTimeout
         )
-        #expect(legacyRejected)
+        #expect(bothRejected)
         #expect(rejections.reason(for: legacyID)?.contains("256") == true)
+        #expect(rejections.reason(for: encryptedID)?.contains("256") == true)
+        #expect(tap.snapshot().isEmpty)
+        #expect(alice._test_privateMediaTransferState(transferId: encryptedID).activeScheduler == 0)
+        #expect(alice._test_privateMediaTransferState(transferId: legacyID).pendingScheduler == 0)
 
-        // Encrypted private media to a .privateMedia-capable peer is NOT forced
-        // down to Android's 256 cap: it uses the full receiver ceiling and
-        // proceeds to fragment/emit (a 130 KiB file exceeds 256 fragments).
-        let encryptedEmitted = await TestHelpers.waitUntil(
-            { !tap.snapshot().isEmpty },
-            timeout: TestConstants.longTimeout
+        // The private interoperability ceiling must not reject the same file
+        // as a public transfer, whose existing receiver policy is unchanged.
+        let publicID = "public-over-256-\(UUID().uuidString)"
+        alice.sendFileBroadcast(file, transferId: publicID)
+        await alice._test_drainPrivateMediaSendPipeline()
+        #expect(tap.snapshot().contains { $0.type == MessageType.fileTransfer.rawValue && $0.recipientID == nil })
+        #expect(!rejections.contains(publicID))
+        alice.cancelTransfer(publicID)
+        await alice._test_drainPrivateMediaSendPipeline()
+        _ = cancellable
+    }
+
+    @Test
+    func encryptedFragmentLimitUsesCiphertextEvenWhenPlaintextCompresses() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("private-media-ciphertext-cap-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let alice = makeService(baseDirectory: root.appendingPathComponent("alice", isDirectory: true))
+        let bob = makeService(baseDirectory: root.appendingPathComponent("bob", isDirectory: true))
+        try await establishSession(alice: alice, bob: bob)
+        let state = try authenticatedPeerStatePacket(from: bob, to: alice, capabilities: .privateMedia)
+        alice._test_handlePacket(state, fromPeerID: bob.myPeerID)
+        await alice._test_drainNoiseMessagePipeline()
+        #expect(alice.privateMediaSendPolicy(to: bob.myPeerID) == .encrypted)
+
+        // Compressing this public/raw payload would fit comfortably, but the
+        // actual Noise ciphertext does not inherit that compression ratio.
+        let content = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 130 * 1024)
+        let file = BitchatFilePacket(
+            fileName: "compressible.pdf", fileSize: UInt64(content.count),
+            mimeType: "application/pdf", content: content
         )
-        #expect(encryptedEmitted, "Encrypted send to a capable peer must not be blocked by the Android cap")
-        #expect(!rejections.contains(encryptedID))
+        let transferID = "ciphertext-over-256-\(UUID().uuidString)"
+        let tap = PacketTap()
+        alice._test_onOutboundPacket = tap.record
+        let rejections = TransferCancellationRecorder()
+        let cancellable = TransferProgressManager.shared.publisher.sink { rejections.record($0) }
+        alice.sendFilePrivate(file, to: bob.myPeerID, transferId: transferID, allowLegacyFallback: false)
+        #expect(await TestHelpers.waitUntil(
+            { rejections.contains(transferID) },
+            timeout: TestConstants.longTimeout
+        ))
+        #expect(rejections.reason(for: transferID)?.contains("256") == true)
+        #expect(tap.snapshot().isEmpty)
+        _ = cancellable
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func stoppedScheduledMediaFailsWithoutCompletingOrReviving(isPrivate: Bool, restartBeforeFragments: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("media-fragment-stop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scheduler = BLEEngineManualScheduler()
+        let alice = makeService(
+            baseDirectory: root.appendingPathComponent("alice", isDirectory: true),
+            engineScheduler: scheduler
+        )
+        let bob = makeService(baseDirectory: root.appendingPathComponent("bob", isDirectory: true))
+        if isPrivate { try await establishSession(alice: alice, bob: bob) }
+        let file = BitchatFilePacket(
+            fileName: "stopped.pdf", fileSize: 8_201, mimeType: "application/pdf",
+            content: Data("%PDF-1.7\n".utf8) + Data(repeating: 0x42, count: 8_192)
+        )
+        let transferID = "stopped-fragments-\(UUID().uuidString)"
+        let tap = PacketTap()
+        alice._test_onOutboundPacket = tap.record
+        let events = FragmentProgressRecorder()
+        let cancellable = TransferProgressManager.shared.publisher.sink { events.record($0) }
+        if isPrivate {
+            alice.sendFilePrivate(file, to: bob.myPeerID, transferId: transferID, allowLegacyFallback: false)
+        } else {
+            alice.sendFileBroadcast(file, transferId: transferID)
+        }
+        await alice._test_drainPrivateMediaSendPipeline()
+        #expect(alice._test_privateMediaTransferState(transferId: transferID).activeScheduler == 1)
+        alice.stopServices()
+        // Restart before executing any scheduled fragment: the old generation
+        // must remain rejected even though traffic is available again.
+        if restartBeforeFragments { alice.startServices() }
+        scheduler.advance(by: 60)
+        await alice._test_drainPrivateMediaSendPipeline()
+        #expect(await TestHelpers.waitUntil(
+            { events.rejectedIDs.contains(transferID) }, timeout: TestConstants.longTimeout
+        ))
+        #expect(!events.completedIDs.contains(transferID))
+        #expect(tap.snapshot().allSatisfy { $0.type != MessageType.fragment.rawValue })
+        #expect(alice._test_privateMediaTransferState(transferId: transferID).activeScheduler == 0)
+        scheduler.advance(by: 60)
+        await alice._test_drainPrivateMediaSendPipeline()
+        #expect(!events.completedIDs.contains(transferID))
+        _ = cancellable
+    }
+
+    @Test
+    func pendingMediaKeepsSubmissionGenerationAcrossStopAndRestart() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("media-pending-stop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scheduler = BLEEngineManualScheduler()
+        let alice = makeService(baseDirectory: root, engineScheduler: scheduler)
+        let tap = PacketTap()
+        alice._test_onOutboundPacket = tap.record
+        let events = FragmentProgressRecorder()
+        let cancellable = TransferProgressManager.shared.publisher.sink { events.record($0) }
+        let ids = (0...TransportConfig.bleMaxConcurrentTransfers).map { "pending-\($0)-\(UUID().uuidString)" }
+        for (index, id) in ids.enumerated() {
+            let content = Data("%PDF-1.7\n".utf8) + Data(repeating: UInt8(0x41 + index), count: 8_192)
+            alice.sendFileBroadcast(
+                BitchatFilePacket(
+                    fileName: "pending-\(index).pdf", fileSize: UInt64(content.count),
+                    mimeType: "application/pdf", content: content
+                ),
+                transferId: id
+            )
+        }
+        await alice._test_drainPrivateMediaSendPipeline()
+        let before = alice._test_privateMediaTransferState(transferId: ids[0])
+        #expect(before.activeScheduler == TransportConfig.bleMaxConcurrentTransfers)
+        #expect(before.pendingScheduler == 1)
+        alice.stopServices()
+        alice.startServices()
+        scheduler.advance(by: 60)
+        #expect(await TestHelpers.waitUntil(
+            { Set(ids).isSubset(of: events.rejectedIDs) }, timeout: TestConstants.longTimeout
+        ))
+        await alice._test_drainPrivateMediaSendPipeline()
+        let after = alice._test_privateMediaTransferState(transferId: ids[0])
+        #expect(after.activeScheduler == 0)
+        #expect(after.pendingScheduler == 0)
+        #expect(Set(ids).isDisjoint(with: events.completedIDs))
+        #expect(tap.snapshot().allSatisfy { $0.type != MessageType.fragment.rawValue })
         _ = cancellable
     }
 
@@ -1403,7 +1529,8 @@ struct PrivateMediaEndToEndTests {
 
     private func makeService(
         baseDirectory: URL,
-        identityManager: SecureIdentityStateManagerProtocol? = nil
+        identityManager: SecureIdentityStateManagerProtocol? = nil,
+        engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
     ) -> BLEService {
         let keychain = MockKeychain()
         return BLEService(
@@ -1411,7 +1538,8 @@ struct PrivateMediaEndToEndTests {
             idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: identityManager ?? MockIdentityManager(keychain),
             initializeBluetoothManagers: false,
-            incomingFileStore: BLEIncomingFileStore(baseDirectory: baseDirectory)
+            incomingFileStore: BLEIncomingFileStore(baseDirectory: baseDirectory),
+            engineScheduler: engineScheduler
         )
     }
 
@@ -1675,6 +1803,25 @@ private final class MessageCaptureDelegate: BitchatDelegate, @unchecked Sendable
     func didDisconnectFromPeer(_ peerID: PeerID) {}
     func didUpdatePeerList(_ peers: [PeerID]) {}
     func didUpdateBluetoothState(_ state: CBManagerState) {}
+}
+
+private final class FragmentProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rejected: Set<String> = []
+    private var completed: Set<String> = []
+
+    var rejectedIDs: Set<String> { lock.withLock { rejected } }
+    var completedIDs: Set<String> { lock.withLock { completed } }
+
+    func record(_ event: TransferProgressManager.Event) {
+        lock.withLock {
+            switch event {
+            case .rejected(let id, _): rejected.insert(id)
+            case .completed(let id, _): completed.insert(id)
+            default: break
+            }
+        }
+    }
 }
 
 private final class TransferCancellationRecorder: @unchecked Sendable {

@@ -123,6 +123,189 @@ struct WeshNativeUITests {
             weshPrivatePolicyEnabled: true)
     }
 
+    @Test @MainActor func privateDraftSurvivesStoppedTrafficAndNeedsExplicitResubmission() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let consentKey = "wesh.publicDisclosureAccepted.v1"
+            let previous = UserDefaults.standard.object(forKey: consentKey)
+            UserDefaults.standard.set(false, forKey: consentKey)
+            defer {
+                if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+                else { UserDefaults.standard.removeObject(forKey: consentKey) }
+            }
+            fixture.transport.isNoiseIdentityTrafficAllowed = false
+            assertPrivateDraftRetained(fixture)
+            fixture.transport.isNoiseIdentityTrafficAllowed = true
+            #expect(fixture.vm.canSendWeshPrivate(to: fixture.peer))
+            #expect(fixture.transport.sentPrivateMessages.isEmpty)
+            var draft = "Synthetic private draft"
+            #expect(fixture.vm.sendWeshDraft(&draft, to: fixture.peer))
+            #expect(draft.isEmpty)
+            #expect(fixture.transport.sentPrivateMessages.count == 1)
+        }
+    }
+
+    @Test @MainActor func unavailableBluetoothPreservesAnEnrolledPrivateDraft() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let states: [CBManagerState] = [.unknown, .resetting, .poweredOff, .unauthorized, .unsupported]
+            for state in states {
+                fixture.vm.bluetoothState = state
+                assertPrivateDraftRetained(fixture)
+            }
+            fixture.vm.bluetoothState = .poweredOn
+            #expect(fixture.vm.canSendWeshPrivate(to: fixture.peer))
+        }
+    }
+
+    @Test @MainActor func unavailableNoisePreservesAnEnrolledPrivateDraft() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let states: [NoiseIdentityAvailability] = [.storageUnavailable, .persistenceUnconfirmed, .recoveryRequired, .invalidated]
+            for state in states {
+                fixture.transport.noiseIdentityAvailabilityOverride = state
+                fixture.vm.didReceiveTransportEvent(.noiseIdentityAvailabilityUpdated(state))
+                assertPrivateDraftRetained(fixture)
+            }
+        }
+    }
+
+    @Test @MainActor func pendingNoiseRetryPreservesAnEnrolledPrivateDraft() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            fixture.transport.simulatedNoiseIdentityRetryResult = true
+            fixture.vm.retryNoiseIdentityRecovery()
+            #expect(fixture.vm.isRecoveringNoiseIdentity)
+            assertPrivateDraftRetained(fixture)
+            #expect(await TestHelpers.waitUntil({ !fixture.vm.isRecoveringNoiseIdentity }, timeout: TestConstants.longTimeout))
+            #expect(fixture.vm.canSendWeshPrivate(to: fixture.peer))
+            #expect(fixture.transport.sentPrivateMessages.isEmpty)
+        }
+    }
+
+    @Test @MainActor func shortPrivateAliasCannotAcceptOrClearAnEnrolledDraft() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            var draft = "Synthetic pinned draft"
+            #expect(!fixture.vm.canSendWeshPrivate(to: fixture.shortID))
+            #expect(!fixture.vm.sendWeshDraft(&draft, to: fixture.shortID))
+            #expect(draft == "Synthetic pinned draft")
+            #expect(fixture.transport.sentPrivateMessages.isEmpty)
+        }
+    }
+
+    @Test @MainActor func revokedOrBlockedEnrollmentPreservesThePrivateDraft() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            assertPrivateDraftRetained(fixture)
+            WeshQRTrust.shared.record(sessionKey: fixture.key, nickname: "Synthetic peer")
+            fixture.identity.setBlocked(fixture.key.sha256Fingerprint(), isBlocked: true)
+            assertPrivateDraftRetained(fixture)
+            fixture.identity.setBlocked(fixture.key.sha256Fingerprint(), isBlocked: false)
+            fixture.vm.peerIdentityStore.setVerified(fixture.key.sha256Fingerprint(), verified: false)
+            assertPrivateDraftRetained(fixture)
+        }
+    }
+
+    @Test @MainActor func aDifferentEnrolledKeyCannotUseTheExistingPrivateSession() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let differentKey = Data(repeating: 0x39, count: 32)
+            let differentPeer = PeerID(hexData: differentKey)
+            WeshQRTrust.shared.record(sessionKey: differentKey, nickname: "Synthetic other peer")
+            defer { WeshQRTrust.shared.remove(sessionKey: differentKey) }
+            fixture.vm.peerIdentityStore.setVerified(differentKey.sha256Fingerprint(), verified: true)
+            fixture.vm.cacheStablePeerID(differentPeer, for: fixture.shortID)
+            var draft = "Synthetic pinned draft"
+            #expect(!fixture.vm.canSendWeshPrivate(to: differentPeer))
+            #expect(!fixture.vm.sendWeshDraft(&draft, to: differentPeer))
+            #expect(draft == "Synthetic pinned draft")
+            #expect(fixture.transport.sentPrivateMessages.isEmpty)
+        }
+    }
+
+    @Test @MainActor func privateTextLimitCountsUTF8BytesAndRetainsOversizedDrafts() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            for text in [String(repeating: "a", count: 2000), String(repeating: "é", count: 1000), String(repeating: "😀", count: 500)] {
+                var oversized = text + "a"
+                let before = fixture.transport.sentPrivateMessages.count
+                #expect(!fixture.vm.sendWeshDraft(&oversized, to: fixture.peer))
+                #expect(oversized == text + "a")
+                #expect(fixture.transport.sentPrivateMessages.count == before)
+                var exact = text
+                #expect(fixture.vm.sendWeshDraft(&exact, to: fixture.peer))
+                #expect(exact.isEmpty)
+                #expect(fixture.transport.sentPrivateMessages.last?.content == text)
+            }
+        }
+    }
+
+    @Test @MainActor func publicTextLimitCountsUTF8BytesAndRetainsOversizedDrafts() {
+        let consentKey = "wesh.publicDisclosureAccepted.v1"
+        let previous = UserDefaults.standard.object(forKey: consentKey)
+        UserDefaults.standard.set(true, forKey: consentKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+            else { UserDefaults.standard.removeObject(forKey: consentKey) }
+        }
+        let transport = MockTransport()
+        let vm = makeNoiseRecoveryViewModel(transport)
+        vm.bluetoothState = .poweredOn
+        for text in [String(repeating: "a", count: 2000), String(repeating: "é", count: 1000), String(repeating: "😀", count: 500)] {
+            var oversized = text + "a"
+            let before = transport.sentMessages.count
+            #expect(!vm.sendWeshDraft(&oversized, to: nil))
+            #expect(oversized == text + "a")
+            #expect(transport.sentMessages.count == before)
+            var exact = text
+            #expect(vm.sendWeshDraft(&exact, to: nil))
+            #expect(exact.isEmpty)
+            #expect(transport.sentMessages.last?.content == text)
+        }
+    }
+
+    @MainActor private struct VerifiedPrivateFixture {
+        let vm: ChatViewModel
+        let transport: MockTransport
+        let identity: MockIdentityManager
+        let peer: PeerID
+        let shortID: PeerID
+        let key: Data
+    }
+
+    @MainActor private func withVerifiedPrivateFixture(
+        _ body: (VerifiedPrivateFixture) async throws -> Void
+    ) async throws {
+        let transport = MockTransport()
+        let remote = NoiseEncryptionService(keychain: MockKeychain())
+        let key = try #require(remote.getStaticPublicKeyData())
+        let shortID = PeerID(publicKey: key)
+        let localID = PeerID(publicKey: try #require(transport.mockNoiseService.getStaticPublicKeyData()))
+        let first = try transport.mockNoiseService.initiateHandshake(with: shortID)
+        let second = try #require(try remote.processHandshakeMessage(from: localID, message: first))
+        let third = try #require(try transport.mockNoiseService.processHandshakeMessage(from: shortID, message: second))
+        _ = try remote.processHandshakeMessage(from: localID, message: third)
+        let storage = MockKeychain()
+        let identity = MockIdentityManager(storage)
+        let vm = ChatViewModel(keychain: storage,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: identity, transport: transport, weshPrivatePolicyEnabled: true)
+        let peer = PeerID(hexData: key)
+        transport.connectedPeers.formUnion([shortID, peer])
+        transport.peerFingerprints[shortID] = key.sha256Fingerprint()
+        vm.cacheStablePeerID(peer, for: shortID)
+        vm.peerIdentityStore.setVerified(key.sha256Fingerprint(), verified: true)
+        vm.bluetoothState = .poweredOn
+        WeshQRTrust.shared.record(sessionKey: key, nickname: "Synthetic peer")
+        defer { WeshQRTrust.shared.remove(sessionKey: key) }
+        try #require(vm.canSendWeshPrivate(to: peer))
+        try await body(VerifiedPrivateFixture(vm: vm, transport: transport, identity: identity,
+                                              peer: peer, shortID: shortID, key: key))
+    }
+
+    @MainActor private func assertPrivateDraftRetained(_ fixture: VerifiedPrivateFixture) {
+        var draft = "Synthetic retained draft"
+        #expect(!fixture.vm.canSendWeshPrivate(to: fixture.peer))
+        #expect(!fixture.vm.sendWeshDraft(&draft, to: fixture.peer))
+        #expect(draft == "Synthetic retained draft")
+        #expect(fixture.transport.sentPrivateMessages.isEmpty)
+        #expect(fixture.transport.sentMessages.isEmpty)
+    }
+
     @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)

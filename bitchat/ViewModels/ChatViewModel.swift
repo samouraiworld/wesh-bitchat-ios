@@ -1357,7 +1357,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     @discardableResult
     func sendWeshText(_ content: String, to peerID: PeerID?) -> Bool {
-        guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return false }
+        guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              content.utf8.count <= WeshTextLimits.maximumUTF8Bytes else { return false }
         if let peerID {
             guard canSendWeshPrivate(to: peerID) else { return false }
             startPrivateChat(with: peerID)
