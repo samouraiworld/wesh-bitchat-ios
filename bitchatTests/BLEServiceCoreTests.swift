@@ -12,6 +12,81 @@ import BitFoundation
 @testable import bitchat
 
 struct BLEServiceCoreTests {
+    @Test @MainActor
+    func unavailableIdentityEventsArriveOutsideTheClosedMessageIngressAndRetryFailure() async {
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let ble = makeService(keychain: storage)
+        let events = NoiseIdentityEventRecorder()
+        ble.eventDelegate = events
+        #expect(ble.noiseIdentityAvailability == .storageUnavailable)
+        #expect(!ble._test_isPanicIngressOpen)
+        #expect(await TestHelpers.waitUntil({ events.states.count >= 1 }, timeout: TestConstants.longTimeout))
+        #expect(events.states.last == .storageUnavailable)
+        let count = events.states.count
+        ble.recoverNoiseIdentityForForeground()
+        #expect(await TestHelpers.waitUntil({ events.states.count > count }, timeout: TestConstants.longTimeout))
+        #expect(events.states.last == .storageUnavailable)
+        #expect(storage.identitySaveCount == 0)
+    }
+
+    @Test @MainActor
+    func failedPendingJournalDeletionLeavesOldIdentityInvalidatedUntilAnotherPanic() async {
+        let storage = MockKeychain()
+        let ble = makeService(keychain: storage)
+        let original = ble.noiseIdentityFingerprint()
+        let saves = storage.identitySaveCount
+        storage.identityDeleteFault = { key, _ in key == "noiseIdentityPending.v1" ? false : nil }
+        ble.suspendForPanicReset()
+        ble.resetIdentityForPanic(currentNickname: "Synthetic", restartServices: false)
+        ble.completePanicReset(restartServices: false)
+        #expect(ble.noiseIdentityAvailability == .invalidated)
+        #expect(ble.noiseStaticPublicKeyData().isEmpty)
+        #expect(storage.identitySaveCount == saves)
+        let restored = await withCheckedContinuation { continuation in
+            ble.retryNoiseIdentityRecovery { result in continuation.resume(returning: result) }
+        }
+        #expect(!restored)
+        #expect(storage.identitySaveCount == saves)
+        #expect(!ble.isTransportTrafficAllowed)
+
+        storage.identityDeleteFault = nil
+        ble.suspendForPanicReset()
+        ble.resetIdentityForPanic(currentNickname: "Synthetic", restartServices: false)
+        ble.completePanicReset(restartServices: false)
+        #expect(ble.noiseIdentityAvailability == .available)
+        #expect(!ble.noiseIdentityFingerprint().isEmpty)
+        #expect(ble.noiseIdentityFingerprint() != original)
+        #expect(!ble.areServicesRequested)
+        #expect(!ble.isTransportTrafficAllowed)
+    }
+
+    @Test
+    func explicitStopDuringProtectedStorageRecoveryPreventsDeferredStartup() async {
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let scheduler = BLEEngineManualScheduler()
+        let ble = makeService(keychain: storage, engineScheduler: scheduler)
+        let gate = NoiseIdentityStorageGate()
+        defer { gate.release() }
+        storage.simulatedReadError = nil
+        storage.identitySaveFault = { key, _, _ in
+            if key == "noiseIdentityPending.v1" { gate.block() }
+            return nil
+        }
+        let startup = Task.detached { ble.startServices() }
+        #expect(await TestHelpers.waitUntil({ gate.hasBlocked }, timeout: TestConstants.longTimeout))
+        let stopping = Task.detached { ble.stopServices() }
+        #expect(await TestHelpers.waitUntil({ !ble.areServicesRequested }, timeout: TestConstants.longTimeout))
+        gate.release()
+        await startup.value
+        await stopping.value
+        #expect(ble.noiseIdentityAvailability == .available)
+        #expect(!ble.isTransportTrafficAllowed)
+        #expect(scheduler.pendingCount == 0)
+        #expect(ble.centralManager == nil && ble.peripheralManager == nil)
+    }
+
 
     @Test
     func unavailableNoiseBlocksRadioIdentityAndOutboundPackets() async {
@@ -77,7 +152,7 @@ struct BLEServiceCoreTests {
         ble.startServices()
         #expect(ble.areServicesRequested)
         #expect(ble.isTransportIdentityAvailable)
-        #expect(keychain.identitySaveCount == 2)
+        #expect(keychain.identitySaveCount == 3)
     }
 
 
@@ -1751,5 +1826,34 @@ private final class TransportEventCaptureDelegate: TransportEventDelegate {
     func didReceiveTransportEvent(_ event: TransportEvent) {
         guard case .messageReceived(let message) = event else { return }
         messageIDs.append(message.id)
+    }
+}
+
+@MainActor
+private final class NoiseIdentityEventRecorder: TransportEventDelegate {
+    private(set) var states: [NoiseIdentityAvailability] = []
+    func didReceiveTransportEvent(_ event: TransportEvent) {
+        if case .noiseIdentityAvailabilityUpdated(let state) = event { states.append(state) }
+    }
+}
+
+private final class NoiseIdentityStorageGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var entered = false
+    private var released = false
+    var hasBlocked: Bool {
+        condition.lock(); defer { condition.unlock() }
+        return entered
+    }
+    func block() {
+        condition.lock(); defer { condition.unlock() }
+        entered = true
+        condition.broadcast()
+        while !released { condition.wait() }
+    }
+    func release() {
+        condition.lock(); defer { condition.unlock() }
+        released = true
+        condition.broadcast()
     }
 }

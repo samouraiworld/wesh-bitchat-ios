@@ -91,7 +91,7 @@ Evidence is ignored: `.validation/identity-cache-persistence-record.json`,
 `.validation/identity-cache-persistence-full.xcresult`. The test simulator is
 shut down without wiping data; no physical-device, archive or export result.
 
-## Noise identity availability and recovery
+## Noise identity availability and recovery (historical source 9303959f)
 
 The next source removes Noise's temporary-key and malformed-key replacement
 fallbacks. Both legacy private-key items must be readable and valid before the
@@ -164,3 +164,80 @@ No version change, upload or distribution was performed.
 
 The dedicated test simulator was already Shutdown when shutdown was requested;
 `simctl list devices booted` confirmed no booted simulator. No data was wiped.
+
+## Journaled Noise identity recovery (new source)
+
+New first-use identities write a local Keychain journal before either legacy
+private-key item. Its layout is exactly 73 bytes: `WESHNOIS`, version byte 1,
+32 Noise private-key bytes and 32 signing private-key bytes. The journal is
+read back unchanged before any legacy write. Both legacy items must then be
+explicitly absent or exactly equal to the journal; only missing items are
+written. Both exact private values must be read back before public keys,
+fingerprints, signatures or sessions become available. No secret values are
+logged. The account uses the existing application-owned Keychain service and
+accessibility class; no new service, entitlement or cloud copy is introduced.
+
+A later process can finish the exact journaled pair after interruption before
+or between legacy writes. Both confirmed legacy values authorize best-effort
+journal cleanup. A cleanup failure may leave a matching journal without
+blocking that confirmed identity. A malformed/unknown journal, a divergent
+legacy value, or an orphaned legacy half without a journal is preserved and
+never repaired by inventing a key or overwriting existing bytes. Valid legacy
+pairs without a journal retain their keys and load without migration writes.
+Unconfirmed RAM candidates are retried unchanged before journal confirmation.
+
+The core exposes five reasons: available, storage unavailable, persistence
+unconfirmed, recovery required and invalidated. They carry no key material.
+The Wesh recovery presentation uses these reasons and offers an explicit
+storage retry. Foreground/manual recovery respects the current request to run
+services, including an explicit stop while storage work is in flight, and
+panic suspension. A retry never performs a destructive reset. Existing
+unrecoverable legacy data stays preserved; no new erase/reset action or claim
+of restoring an unknown missing key is added to that panel.
+
+Panic invalidates the context and pending RAM pair before deletion, attempts
+the journal and both legacy deletions even if one fails, and returns the
+combined result. BLE retains the invalidated service when identity cleanup
+fails so a surviving journal cannot resurrect the old identity on that reset
+path. The application-level pending-panic transaction remains responsible for
+its broader Keychain/media cleanup gates.
+
+The journal is local recovery data, not an atomic multi-item Keychain
+transaction or interprocess compare-and-swap. Success/readback does not
+establish physical power-loss, lock/update, reinstall or hardware behavior.
+Noise/wire formats and existing valid cryptographic identities are unchanged.
+All new fault/restart/panic tests use mock storage and synthetic identities;
+no real Keychain access, physical phone or interactive accessibility result is
+claimed. Earlier validation and RC5 artifacts above remain historical evidence
+for their respective source revisions.
+
+New-source targeted validation: **156/156 passed** (144 Swift Testing +12
+XCTest), zero failures/skips/expected failures, Xcode exit 0 and xcresult Passed.
+This includes all 13 added journal tests and the 9 added transport/presentation
+recovery tests. The initial build failed before any test ran because of a
+duplicate observed-property declaration; that declaration was corrected before
+the frozen passing build. Its log and result bundle remain separate evidence.
+No test was disabled; verbose failure diagnostic collection was disabled.
+
+The complete **unfiltered collection passed 2410/2410** (2178 Swift Testing
++232 XCTest), zero failures/skips/expected failures, Xcode exit 0 and xcresult
+Passed. The 156 targeted cases are included in that total. Compared with the
+historical 2388 collection, 22 cases were added; the existing interrupted-first-use
+test now checks exact journal recovery after service recreation. Full testing
+used `test-without-building` with no only/skip arguments and the same compiled
+products as the passing targeted build. All 14 changed Swift-file SHA256 values,
+the changed-source inventory, and all 3 compiled-product SHA256 values still
+match afterward. The 39 inherited runtime warnings all originate in off-tree
+`ViewSmokeTests`; they do not establish live accessibility behavior.
+
+New evidence remains ignored under `.validation/noise-recovery-record.json`,
+`.validation/noise-recovery-targeted-final.xcresult` and
+`.validation/noise-recovery-full.xcresult`, with their logs and summaries.
+A fresh RC5 preservation check confirmed the old ZIP and IPA hashes and the
+exact 119-file archived inventory unchanged:
+`.validation/noise-recovery-rc5-artifact-recheck.json`. The journal/recovery
+source is absent from those older distribution artifacts. No archive, export,
+version bump, upload or distribution was performed.
+
+The dedicated test simulator was already Shutdown when shutdown was requested;
+the subsequent inventory confirmed no booted simulator. No data was wiped.

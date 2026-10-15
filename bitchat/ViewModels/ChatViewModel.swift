@@ -394,6 +394,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published var showBluetoothAlert = false
     @Published var bluetoothAlertMessage = ""
     @Published var bluetoothState: CBManagerState = .unknown
+    @Published private(set) var noiseIdentityAvailability: NoiseIdentityAvailability = .available
+    @Published private(set) var isRecoveringNoiseIdentity = false
+    @Published private(set) var noiseIdentityRetryFailed = false
     @Published private(set) var legacyPrivateMediaConsentRequest: LegacyPrivateMediaConsentRequest?
     @MainActor private var queuedPrivateChatClears: [
         PendingPrivateChatClear
@@ -1202,6 +1205,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.locationPresenceStore = locationPresenceStore
         self.locationManager = locationManager
         self.meshService = transport
+        self.noiseIdentityAvailability = (transport as? MeshIdentityRecovering)?.noiseIdentityAvailability ?? .available
         self.commandProcessor = services.commandProcessor
         self.messageRouter = services.messageRouter
         self.privateChatManager = services.privateChatManager
@@ -1370,9 +1374,31 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         return true
     }
 
+    /// Storage recovery never submits a message or clears a composer draft.
+    @MainActor
+    func retryNoiseIdentityRecovery() {
+        guard !isRecoveringNoiseIdentity else { return }
+        guard !panicRecoveryBlocked, let recovery = meshService as? MeshIdentityRecovering else {
+            noiseIdentityRetryFailed = true
+            return
+        }
+        isRecoveringNoiseIdentity = true
+        noiseIdentityRetryFailed = false
+        recovery.retryNoiseIdentityRecovery { [weak self, weak recovery] reportedSuccess in
+            guard let self else { return }
+            self.isRecoveringNoiseIdentity = false
+            let latest = recovery?.noiseIdentityAvailability ?? .storageUnavailable
+            self.noiseIdentityAvailability = latest
+            self.noiseIdentityRetryFailed = !reportedSuccess || latest != .available || self.panicRecoveryBlocked
+        }
+    }
+
     /// Radio availability only; it does not promise a peer or a recipient receipt.
     var canSendWeshPublic: Bool {
-        bluetoothState == .poweredOn
+        !isRecoveringNoiseIdentity
+            && noiseIdentityAvailability == .available
+            && (meshService as? MeshIdentityRecovering)?.isNoiseIdentityTrafficAllowed != false
+            && bluetoothState == .poweredOn
             && meshService.noiseStaticPublicKeyData().count == 32
             && meshService.noiseSigningPublicKeyData().count == 32
     }
@@ -2201,6 +2227,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         case .bluetoothStateUpdated(let state):
             updateBluetoothState(state)
+        case .noiseIdentityAvailabilityUpdated(let availability):
+            noiseIdentityAvailability = availability
+            if availability == .available { noiseIdentityRetryFailed = false }
         }
     }
 

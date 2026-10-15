@@ -14,11 +14,11 @@ struct NoiseEncryptionTests {
         let signing = try #require(service.getSigningPublicKeyData())
         #expect(noise.count == 32 && signing.count == 32)
         #expect(service.isIdentityAvailable)
-        #expect(storage.identitySaveCount == 2)
+        #expect(storage.identitySaveCount == 3)
         let restored = NoiseEncryptionService(keychain: storage)
         #expect(restored.getStaticPublicKeyData() == noise)
         #expect(restored.getSigningPublicKeyData() == signing)
-        #expect(storage.identitySaveCount == 2)
+        #expect(storage.identitySaveCount == 3)
     }
 
     @Test func loadsExistingIdentityWithoutRewriting() throws {
@@ -54,13 +54,13 @@ struct NoiseEncryptionTests {
                 #expect(service.getIdentityFingerprint() == nil)
                 #expect(service.staticIdentityPublicKey == nil)
                 #expect(service.signingPublicKey == nil)
-                #expect(storage.identitySaveCount == 2)
+                #expect(storage.identitySaveCount == 3)
                 storage.identityReadFault = nil
                 #expect(service.retryIdentityPersistence())
                 #expect(service.getStaticPublicKeyData() == noise)
                 #expect(service.getSigningPublicKeyData() == signing)
-                #expect(storage.identitySaveCount == 2)
-                #expect(storage.identityDeleteCount == 0)
+                #expect(storage.identitySaveCount == 3)
+                #expect(storage.identityDeleteCount == 1)
             }
         }
     }
@@ -74,7 +74,7 @@ struct NoiseEncryptionTests {
             #expect(storage.identitySaveCount == 0)
             storage.identityReadFault = nil
             #expect(service.retryIdentityPersistence())
-            #expect(storage.identitySaveCount == 2)
+            #expect(storage.identitySaveCount == 3)
         }
     }
 
@@ -87,8 +87,8 @@ struct NoiseEncryptionTests {
             #expect(!service.isIdentityAvailable)
             #expect(!service.retryIdentityPersistence())
             #expect(storage.getIdentityKey(forKey: key) == Data([1, 2, 3]))
-            #expect(storage.identitySaveCount == 2)
-            #expect(storage.identityDeleteCount == 0)
+            #expect(storage.identitySaveCount == 3)
+            #expect(storage.identityDeleteCount == 1)
         }
     }
 
@@ -100,8 +100,9 @@ struct NoiseEncryptionTests {
             _ = storage.deleteIdentityKey(forKey: missing)
             let service = NoiseEncryptionService(keychain: storage)
             #expect(!service.isIdentityAvailable)
+            #expect(service.identityAvailability == .recoveryRequired)
             #expect(!service.retryIdentityPersistence())
-            #expect(storage.identitySaveCount == 2)
+            #expect(storage.identitySaveCount == 3)
             _ = storage.saveIdentityKey(missingData, forKey: missing)
             #expect(service.retryIdentityPersistence())
             #expect(service.getStaticPublicKeyData() == original.getStaticPublicKeyData())
@@ -171,41 +172,50 @@ struct NoiseEncryptionTests {
         let service = NoiseEncryptionService(keychain: storage)
         let persistedNoise = try #require(storage.getIdentityKey(forKey: "noiseStaticKey"))
         #expect(service.getStaticPublicKeyData() == nil)
-        #expect(storage.identitySaveCount == 2)
+        #expect(storage.identitySaveCount == 3)
         storage.identitySaveFault = nil
         #expect(service.retryIdentityPersistence())
-        #expect(storage.identitySaveCount == 3)
+        #expect(storage.identitySaveCount == 4)
         #expect(storage.getIdentityKey(forKey: "noiseStaticKey") == persistedNoise)
         #expect(storage.getIdentityKey(forKey: "ed25519SigningKey") == attemptedSigning)
     }
 
-    @Test func processRestartAfterPartialCreationPreservesOrphanInsteadOfInventingAKey() {
+    @Test func processRestartAfterPartialCreationCompletesExactJournaledPair() throws {
         let storage = MockKeychain()
         storage.identitySaveFault = { key, _, _ in key == "ed25519SigningKey" ? .accessDenied : nil }
         var interrupted: NoiseEncryptionService? = NoiseEncryptionService(keychain: storage)
         #expect(interrupted?.isIdentityAvailable == false)
+        let journal = try #require(storage.getIdentityKey(forKey: "noiseIdentityPending.v1"))
+        let originalNoise = try #require(storage.getIdentityKey(forKey: "noiseStaticKey"))
+        let expectedSigning = Data(journal[41..<73])
         interrupted = nil
         storage.identitySaveFault = nil
         let restarted = NoiseEncryptionService(keychain: storage)
-        #expect(!restarted.isIdentityAvailable)
-        #expect(!restarted.retryIdentityPersistence())
-        #expect(storage.identitySaveCount == 2)
-        #expect(storage.getIdentityKey(forKey: "noiseStaticKey") != nil)
-        #expect(storage.getIdentityKey(forKey: "ed25519SigningKey") == nil)
+        #expect(restarted.isIdentityAvailable)
+        #expect(restarted.retryIdentityPersistence())
+        #expect(storage.identitySaveCount == 4)
+        #expect(storage.getIdentityKey(forKey: "noiseStaticKey") == originalNoise)
+        #expect(storage.getIdentityKey(forKey: "ed25519SigningKey") == expectedSigning)
+        #expect(storage.getIdentityKey(forKey: "noiseIdentityPending.v1") == nil)
     }
 
     @Test func saveSuccessRequiresExactReadbackOfBothKeys() {
         for key in ["noiseStaticKey", "ed25519SigningKey"] {
             for readbackFailure: KeychainReadResult in [.deviceLocked, .success(Data(repeating: 7, count: 32)), .itemNotFound] {
                 let storage = MockKeychain()
-                storage.identityReadFault = { name, count in name == key && count >= 3 ? readbackFailure : nil }
+                var readsForKey = 0
+                storage.identityReadFault = { name, _ in
+                    guard name == key else { return nil }
+                    readsForKey += 1
+                    return readsForKey >= 3 ? readbackFailure : nil
+                }
                 let service = NoiseEncryptionService(keychain: storage)
                 #expect(!service.isIdentityAvailable)
                 #expect(service.signData(Data([1])) == nil)
-                #expect(storage.identitySaveCount == 2)
+                #expect(storage.identitySaveCount == 3)
                 storage.identityReadFault = nil
                 #expect(service.retryIdentityPersistence())
-                #expect(storage.identitySaveCount == 2)
+                #expect(storage.identitySaveCount == 3)
             }
         }
     }
@@ -237,7 +247,7 @@ struct NoiseEncryptionTests {
         #expect(storage.identitySaveCount == 1)
         storage.identityReadFault = nil
         #expect(service.retryIdentityPersistence())
-        #expect(storage.identitySaveCount == 3)
+        #expect(storage.identitySaveCount == 4)
     }
 
     @Test func duplicateSaveCannotPublishUnconfirmedGeneratedKeys() {
@@ -259,7 +269,7 @@ struct NoiseEncryptionTests {
         #expect(service.isIdentityAvailable)
         #expect(service.getIdentityFingerprint() == original)
         #expect(service.signData(Data([1])) != nil)
-        #expect(storage.identitySaveCount == 2)
+        #expect(storage.identitySaveCount == 3)
     }
 
     @Test func panicInvalidatesMemoryAndForbidsResurrectionOnSameInstance() {
@@ -270,8 +280,8 @@ struct NoiseEncryptionTests {
         #expect(service.getStaticPublicKeyData() == nil)
         #expect(service.signData(Data([1])) == nil)
         #expect(!service.retryIdentityPersistence())
-        #expect(storage.identitySaveCount == 2)
-        #expect(storage.identityDeleteCount == 3)
+        #expect(storage.identitySaveCount == 3)
+        #expect(storage.identityDeleteCount == 5)
     }
 
     @Test func concurrentFirstUseInstancesReuseOnePersistedPair() {
@@ -284,7 +294,7 @@ struct NoiseEncryptionTests {
         #expect(results.values.count == 8)
         #expect(results.values.allSatisfy { $0 != nil })
         #expect(Set(results.values).count == 1)
-        #expect(storage.identitySaveCount == 2)
+        #expect(storage.identitySaveCount == 3)
     }
 }
 

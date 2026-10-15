@@ -92,6 +92,7 @@ extension ChatViewModel {
 
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
+        guard noiseIdentityAvailability == .available else { return false }
         guard meshService.noiseStaticPublicKeyData().count == 32,
               meshService.noiseSigningPublicKeyData().count == 32 else { return false }
         guard identityManager.isPersistenceAvailable,

@@ -14,7 +14,7 @@ import BitFoundation
 
 /// Mock Transport implementation for testing ChatViewModel in isolation.
 /// Records all method calls and allows test code to verify interactions.
-final class MockTransport: Transport, PrivateMediaDeletionPersisting,
+final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeletionPersisting,
     MeshFileTransferring, MeshVerifying, MeshCourierTransporting,
     MeshDiagnosing, MeshPublicArchiving, MeshVoiceStreaming,
     MeshGroupMessaging, MeshBoardBroadcasting {
@@ -29,6 +29,27 @@ final class MockTransport: Transport, PrivateMediaDeletionPersisting,
     var myNickname: String = "TestUser"
 
     private let peerSnapshotSubject = CurrentValueSubject<[TransportPeerSnapshot], Never>([])
+
+    var isNoiseIdentityTrafficAllowed = true
+    var noiseIdentityAvailabilityOverride: NoiseIdentityAvailability?
+    var simulatedNoiseIdentityRetryResult: Bool?
+    var simulatedNoiseIdentityRetryAvailability: NoiseIdentityAvailability?
+    private(set) var noiseIdentityRetryCount = 0
+
+    var noiseIdentityAvailability: NoiseIdentityAvailability {
+        noiseIdentityAvailabilityOverride ?? mockNoiseService.identityAvailability
+    }
+
+    func retryNoiseIdentityRecovery(completion: @escaping @MainActor (Bool) -> Void) {
+        noiseIdentityRetryCount += 1
+        Task { @MainActor [weak self] in
+            guard let self else { completion(false); return }
+            if let next = self.simulatedNoiseIdentityRetryAvailability {
+                self.noiseIdentityAvailabilityOverride = next
+            }
+            completion(self.simulatedNoiseIdentityRetryResult ?? (self.noiseIdentityAvailability == .available))
+        }
+    }
 
     // MARK: - Recording Properties (for test assertions)
 

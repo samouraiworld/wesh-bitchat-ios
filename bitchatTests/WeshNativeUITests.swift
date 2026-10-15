@@ -7,6 +7,122 @@ import Testing
 
 @Suite("Wesh native trust and public separation", .serialized)
 struct WeshNativeUITests {
+    @Test func noiseRecoveryNoticesExplainEveryUnavailableStateWithoutDestructiveAction() {
+        #expect(WeshNoiseIdentityNotice(.available) == nil)
+        for availability in [NoiseIdentityAvailability.storageUnavailable, .persistenceUnconfirmed, .recoveryRequired, .invalidated] {
+            let notice = WeshNoiseIdentityNotice(availability)
+            #expect(notice?.message.isEmpty == false)
+            #expect(notice?.title.isEmpty == false)
+            #expect(notice?.allowsRetry == (availability != .invalidated))
+            #expect(notice?.message.contains("Réglages") == false)
+        }
+    }
+
+    @Test @MainActor func unavailableNoisePreservesPublicDraftDespitePoweredOnRadioAndValidKeys() {
+        for availability in [NoiseIdentityAvailability.storageUnavailable, .persistenceUnconfirmed, .recoveryRequired, .invalidated] {
+            let transport = MockTransport()
+            transport.noiseIdentityAvailabilityOverride = availability
+            let vm = makeNoiseRecoveryViewModel(transport)
+            vm.bluetoothState = .poweredOn
+            var draft = "Brouillon conservé"
+            #expect(vm.noiseIdentityAvailability == availability)
+            #expect(!vm.canSendWeshPublic)
+            #expect(!vm.sendWeshDraft(&draft, to: nil))
+            #expect(draft == "Brouillon conservé")
+            #expect(transport.sentMessages.isEmpty)
+        }
+    }
+
+    @Test @MainActor func failedNoiseRetryIsCoalescedAndPropagatesToChromeWithoutSending() async {
+        let transport = MockTransport()
+        transport.noiseIdentityAvailabilityOverride = .storageUnavailable
+        transport.simulatedNoiseIdentityRetryResult = false
+        let vm = makeNoiseRecoveryViewModel(transport)
+        let chrome = AppChromeModel(chatViewModel: vm, privateInboxModel: PrivateInboxModel(conversations: vm.conversations))
+        vm.bluetoothState = .poweredOn
+        vm.retryNoiseIdentityRecovery()
+        vm.retryNoiseIdentityRecovery()
+        #expect(vm.isRecoveringNoiseIdentity)
+        #expect(transport.noiseIdentityRetryCount == 1)
+        #expect(await TestHelpers.waitUntil({ !vm.isRecoveringNoiseIdentity && chrome.noiseIdentityRetryFailed }, timeout: TestConstants.longTimeout))
+        #expect(chrome.noiseIdentityAvailability == .storageUnavailable)
+        #expect(!vm.canSendWeshPublic)
+        var draft = "Ne pas envoyer"
+        #expect(!vm.sendWeshDraft(&draft, to: nil))
+        #expect(draft == "Ne pas envoyer")
+        #expect(transport.sentMessages.isEmpty)
+    }
+
+    @Test @MainActor func reportedNoiseRetrySuccessCannotHideAnUnavailableIdentity() async {
+        let transport = MockTransport()
+        transport.noiseIdentityAvailabilityOverride = .recoveryRequired
+        transport.simulatedNoiseIdentityRetryResult = true
+        let vm = makeNoiseRecoveryViewModel(transport)
+        vm.retryNoiseIdentityRecovery()
+        #expect(await TestHelpers.waitUntil({ !vm.isRecoveringNoiseIdentity }, timeout: TestConstants.longTimeout))
+        #expect(vm.noiseIdentityRetryFailed)
+        #expect(vm.noiseIdentityAvailability == .recoveryRequired)
+        #expect(!vm.canSendWeshPublic)
+        #expect(transport.sentMessages.isEmpty)
+    }
+
+    @Test @MainActor func confirmedNoiseRecoveryUpdatesChromeWithoutSubmittingTheDraft() async {
+        let transport = MockTransport()
+        transport.noiseIdentityAvailabilityOverride = .persistenceUnconfirmed
+        transport.simulatedNoiseIdentityRetryAvailability = .available
+        transport.simulatedNoiseIdentityRetryResult = true
+        let vm = makeNoiseRecoveryViewModel(transport)
+        let chrome = AppChromeModel(chatViewModel: vm, privateInboxModel: PrivateInboxModel(conversations: vm.conversations))
+        vm.bluetoothState = .poweredOn
+        let draft = "Envoi toujours explicite"
+        vm.retryNoiseIdentityRecovery()
+        #expect(await TestHelpers.waitUntil({ !vm.isRecoveringNoiseIdentity && chrome.noiseIdentityAvailability == .available }, timeout: TestConstants.longTimeout))
+        #expect(!vm.noiseIdentityRetryFailed)
+        #expect(vm.canSendWeshPublic)
+        #expect(draft == "Envoi toujours explicite")
+        #expect(transport.sentMessages.isEmpty)
+    }
+
+    @Test @MainActor func recoveryAfterExplicitStopCannotClearAPublicDraftOrRestartRadio() async {
+        let consentKey = "wesh.publicDisclosureAccepted.v1"
+        let previous = UserDefaults.standard.object(forKey: consentKey)
+        UserDefaults.standard.set(true, forKey: consentKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+            else { UserDefaults.standard.removeObject(forKey: consentKey) }
+        }
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let transport = BLEService(keychain: storage,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(storage), initializeBluetoothManagers: false)
+        let keychain = MockKeychain()
+        let vm = ChatViewModel(keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain), transport: transport,
+            weshPrivatePolicyEnabled: true)
+        transport.stopServices()
+        vm.bluetoothState = .poweredOn
+        storage.simulatedReadError = nil
+        vm.retryNoiseIdentityRecovery()
+        #expect(await TestHelpers.waitUntil({ !vm.isRecoveringNoiseIdentity }, timeout: TestConstants.longTimeout))
+        #expect(vm.noiseIdentityAvailability == .available)
+        #expect(!transport.areServicesRequested)
+        #expect(!vm.canSendWeshPublic)
+        var draft = "Attendre une reprise explicite"
+        #expect(!vm.sendWeshDraft(&draft, to: nil))
+        #expect(draft == "Attendre une reprise explicite")
+        #expect(transport.centralManager == nil && transport.peripheralManager == nil)
+    }
+
+    @MainActor private func makeNoiseRecoveryViewModel(_ transport: MockTransport) -> ChatViewModel {
+        let keychain = MockKeychain()
+        return ChatViewModel(keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain), transport: transport,
+            weshPrivatePolicyEnabled: true)
+    }
+
     @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)

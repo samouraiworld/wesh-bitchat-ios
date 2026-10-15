@@ -144,6 +144,15 @@ enum EncryptionStatus: Equatable {
     }
 }
 
+/// Storage status for the local Noise identity. This never contains key data.
+enum NoiseIdentityAvailability: Equatable {
+    case available
+    case storageUnavailable
+    case persistenceUnconfirmed
+    case recoveryRequired
+    case invalidated
+}
+
 // MARK: - Noise Encryption Service
 
 /// Manages end-to-end encryption for BitChat using the Noise Protocol Framework.
@@ -161,13 +170,37 @@ final class NoiseEncryptionService {
     private struct PendingIdentity {
         let noiseKey: Curve25519.KeyAgreement.PrivateKey
         let signingKey: Curve25519.Signing.PrivateKey
+
+        // Fixed layout: magic (8), schema version (1), Noise private key (32),
+        // signing private key (32). No trailing, optional or unknown fields.
+        private static let magic = Data("WESHNOIS".utf8)
+        private static let version: UInt8 = 1
+        var journalData: Data {
+            var data = Self.magic
+            data.append(Self.version)
+            data.append(noiseKey.rawRepresentation)
+            data.append(signingKey.rawRepresentation)
+            return data
+        }
+        static func decodeJournal(_ data: Data) -> PendingIdentity? {
+            guard data.count == 73 else { return nil }
+            let bytes = Array(data) // Normalize indices of any Data slice.
+            guard Data(bytes.prefix(8)) == magic, bytes[8] == version,
+                  let noise = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: Data(bytes[9..<41])),
+                  let signing = try? Curve25519.Signing.PrivateKey(rawRepresentation: Data(bytes[41..<73])) else {
+                return nil
+            }
+            return PendingIdentity(noiseKey: noise, signingKey: signing)
+        }
     }
+    private static let pendingIdentityKey = "noiseIdentityPending.v1"
     private let identityLock = NSLock()
     /// Serializes legacy two-item initialization across service instances in this process.
     private static let persistenceLock = NSLock()
     private var context: IdentityContext?
     private var pendingIdentity: PendingIdentity?
     private var identityInvalidated = false
+    private var availability: NoiseIdentityAvailability = .storageUnavailable
     private let managerFactory: (Curve25519.KeyAgreement.PrivateKey) -> NoiseSessionManager
 
     private var identityContext: IdentityContext? {
@@ -176,6 +209,11 @@ final class NoiseEncryptionService {
         return context
     }
     var isIdentityAvailable: Bool { identityContext != nil }
+    var identityAvailability: NoiseIdentityAvailability {
+        identityLock.lock()
+        defer { identityLock.unlock() }
+        return availability
+    }
     var staticIdentityPublicKey: Curve25519.KeyAgreement.PublicKey? {
         identityContext?.noiseKey.publicKey
     }
@@ -283,10 +321,10 @@ final class NoiseEncryptionService {
         startRekeyTimer()
     }
 
-    /// Retry unavailable protected storage without rotating a usable identity.
-    /// Legacy partial/corrupt pairs are preserved. A fresh pair interrupted by
-    /// process death between the two legacy items needs explicit recovery;
-    /// silently inventing the missing half would change the device identity.
+    /// Retry protected storage without rotating a usable identity. Fresh pairs
+    /// are journaled and read back before either legacy item is written, so a
+    /// later process can complete the exact pair. Legacy orphans without that
+    /// journal remain preserved for explicit recovery.
     @discardableResult
     func retryIdentityPersistence() -> Bool {
         identityLock.lock()
@@ -296,52 +334,100 @@ final class NoiseEncryptionService {
         Self.persistenceLock.lock()
         defer { Self.persistenceLock.unlock() }
 
-        let noiseResult = keychain.getIdentityKeyWithResult(forKey: "noiseStaticKey")
-        let signingResult = keychain.getIdentityKeyWithResult(forKey: "ed25519SigningKey")
+        var noiseResult = keychain.getIdentityKeyWithResult(forKey: "noiseStaticKey")
+        var signingResult = keychain.getIdentityKeyWithResult(forKey: "ed25519SigningKey")
+        let journalResult = keychain.getIdentityKeyWithResult(forKey: Self.pendingIdentityKey)
+        guard !Self.isReadFailure(noiseResult), !Self.isReadFailure(signingResult),
+              !Self.isReadFailure(journalResult) else {
+            availability = .storageUnavailable
+            return false
+        }
 
         let loaded: PendingIdentity
-        if let pending = pendingIdentity {
-            // Never overwrite a divergent key, malformed bytes or a read error.
-            // Both reads must authorize any pending write before either occurs.
-            guard Self.matchesOrMissing(noiseResult, expected: pending.noiseKey.rawRepresentation),
-                  Self.matchesOrMissing(signingResult, expected: pending.signingKey.rawRepresentation) else {
+        let hasJournal: Bool
+        switch journalResult {
+        case .success(let journal):
+            guard let journalIdentity = PendingIdentity.decodeJournal(journal) else {
+                availability = .recoveryRequired
                 return false
             }
-            loaded = pending
-            if case .itemNotFound = noiseResult {
-                guard case .success = keychain.saveIdentityKeyWithResult(
-                    pending.noiseKey.rawRepresentation, forKey: "noiseStaticKey"
-                ) else { return false }
+            // An unconfirmed RAM candidate never authorizes replacing a
+            // divergent journal. A new instance can inspect the durable state.
+            if let pendingIdentity, pendingIdentity.journalData != journal {
+                availability = .recoveryRequired
+                return false
             }
-            if case .itemNotFound = signingResult {
-                guard case .success = keychain.saveIdentityKeyWithResult(
-                    pending.signingKey.rawRepresentation, forKey: "ed25519SigningKey"
-                ) else { return false }
-            }
-        } else {
+            loaded = journalIdentity
+            hasJournal = true
+        case .itemNotFound:
             switch (noiseResult, signingResult) {
             case (.success(let noiseData), .success(let signingData)):
                 guard let noise = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: noiseData),
                       let signing = try? Curve25519.Signing.PrivateKey(rawRepresentation: signingData) else {
+                    availability = .recoveryRequired
                     return false
                 }
                 loaded = PendingIdentity(noiseKey: noise, signingKey: signing)
+                hasJournal = false
             case (.itemNotFound, .itemNotFound):
-                let fresh = PendingIdentity(
+                let fresh = pendingIdentity ?? PendingIdentity(
                     noiseKey: Curve25519.KeyAgreement.PrivateKey(),
                     signingKey: Curve25519.Signing.PrivateKey()
                 )
                 pendingIdentity = fresh
-                // Retain the exact pair privately on any failure for a bounded
-                // same-instance retry. Nothing may sign/handshake with it yet.
+                // No legacy writes or public context before exact journal
+                // readback, including on a nominal success without storage.
                 guard case .success = keychain.saveIdentityKeyWithResult(
-                    fresh.noiseKey.rawRepresentation, forKey: "noiseStaticKey"
-                ) else { return false }
-                guard case .success = keychain.saveIdentityKeyWithResult(
-                    fresh.signingKey.rawRepresentation, forKey: "ed25519SigningKey"
-                ) else { return false }
+                    fresh.journalData, forKey: Self.pendingIdentityKey
+                ), case .success(let storedJournal) = keychain.getIdentityKeyWithResult(forKey: Self.pendingIdentityKey),
+                      storedJournal == fresh.journalData else {
+                    availability = .persistenceUnconfirmed
+                    return false
+                }
                 loaded = fresh
+                hasJournal = true
+                // Recheck both compatibility items after journal persistence;
+                // neither may have changed to a divergent or unreadable value.
+                noiseResult = keychain.getIdentityKeyWithResult(forKey: "noiseStaticKey")
+                signingResult = keychain.getIdentityKeyWithResult(forKey: "ed25519SigningKey")
             default:
+                availability = .recoveryRequired
+                return false
+            }
+        default:
+            availability = .storageUnavailable
+            return false
+        }
+
+        guard !Self.isReadFailure(noiseResult), !Self.isReadFailure(signingResult) else {
+            availability = .storageUnavailable
+            return false
+        }
+        guard Self.matchesOrMissing(noiseResult, expected: loaded.noiseKey.rawRepresentation),
+              Self.matchesOrMissing(signingResult, expected: loaded.signingKey.rawRepresentation) else {
+            availability = .recoveryRequired
+            return false
+        }
+        if let pendingIdentity,
+           pendingIdentity.noiseKey.rawRepresentation != loaded.noiseKey.rawRepresentation
+            || pendingIdentity.signingKey.rawRepresentation != loaded.signingKey.rawRepresentation {
+            availability = .recoveryRequired
+            return false
+        }
+        pendingIdentity = loaded
+        if case .itemNotFound = noiseResult {
+            guard hasJournal, case .success = keychain.saveIdentityKeyWithResult(
+                loaded.noiseKey.rawRepresentation, forKey: "noiseStaticKey"
+            ) else {
+                availability = .persistenceUnconfirmed
+                return false
+            }
+        }
+        if case .itemNotFound = signingResult {
+            guard hasJournal, case .success = keychain.saveIdentityKeyWithResult(
+                loaded.signingKey.rawRepresentation, forKey: "ed25519SigningKey"
+            ) else {
+                availability = .persistenceUnconfirmed
                 return false
             }
         }
@@ -349,7 +435,14 @@ final class NoiseEncryptionService {
         guard case .success(let noiseReadback) = keychain.getIdentityKeyWithResult(forKey: "noiseStaticKey"),
               noiseReadback == loaded.noiseKey.rawRepresentation,
               case .success(let signingReadback) = keychain.getIdentityKeyWithResult(forKey: "ed25519SigningKey"),
-              signingReadback == loaded.signingKey.rawRepresentation else { return false }
+              signingReadback == loaded.signingKey.rawRepresentation else {
+            availability = .persistenceUnconfirmed
+            return false
+        }
+        // Both compatibility values are now durable and exact. Cleanup failure
+        // may leave a matching journal for next launch; it never grants a write
+        // over divergent data or prevents use of the confirmed legacy pair.
+        if hasJournal { _ = keychain.deleteIdentityKey(forKey: Self.pendingIdentityKey) }
 
         let manager = managerFactory(loaded.noiseKey)
         manager.onSessionEstablished = { [weak self, weak manager] peerID, key, generation in
@@ -369,7 +462,15 @@ final class NoiseEncryptionService {
         }
         context = IdentityContext(noiseKey: loaded.noiseKey, signingKey: loaded.signingKey, sessionManager: manager)
         pendingIdentity = nil
+        availability = .available
         return true
+    }
+
+    private static func isReadFailure(_ result: KeychainReadResult) -> Bool {
+        switch result {
+        case .success, .itemNotFound: return false
+        default: return true
+        }
     }
 
     private static func matchesOrMissing(_ result: KeychainReadResult, expected: Data) -> Bool {
@@ -548,23 +649,37 @@ final class NoiseEncryptionService {
     }
 
     /// Clear persistent identity (for panic mode)
-    func clearPersistentIdentity() {
+    @discardableResult
+    func clearPersistentIdentity() -> Bool {
         identityLock.lock()
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
         let previous = context
         context = nil
         pendingIdentity = nil
         identityInvalidated = true
+        availability = .invalidated
         identityLock.unlock()
         previous?.sessionManager.removeAllSessions()
         // Clear from keychain
+        // Attempt every deletion even if one fails. A surviving journal must
+        // not authorize resurrecting this invalidated instance after panic.
+        let deletedJournal = keychain.deleteIdentityKey(forKey: Self.pendingIdentityKey)
         let deletedStatic = keychain.deleteIdentityKey(forKey: "noiseStaticKey")
         let deletedSigning = keychain.deleteIdentityKey(forKey: "ed25519SigningKey")
-        SecureLogger.logKeyOperation(.delete, keyType: "identity keys", success: deletedStatic && deletedSigning)
+        let deletedIdentity = deletedJournal && deletedStatic && deletedSigning
+        SecureLogger.logKeyOperation(.delete, keyType: "identity keys", success: deletedIdentity)
         // One-time prekey privates go with the identity they were bound to.
         localPrekeys.wipe()
-        SecureLogger.warning("Panic mode activated - identity cleared", category: .security)
+        SecureLogger.warning(
+            deletedIdentity
+                ? "Panic mode activated - identity cleared"
+                : "Panic mode activated - identity unavailable; persistent cleanup incomplete",
+            category: .security
+        )
         // Stop rekey timer
         stopRekeyTimer()
+        return deletedIdentity
     }
     
     /// Sign data with our Ed25519 signing key

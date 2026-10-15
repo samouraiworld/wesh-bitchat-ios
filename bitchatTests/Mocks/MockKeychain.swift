@@ -17,6 +17,7 @@ final class MockKeychain: KeychainManagerProtocol {
     // Per-instance faults; no real Keychain operations are used by these tests.
     var identityReadFault: ((String, Int) -> KeychainReadResult?)?
     var identitySaveFault: ((String, Data, Int) -> KeychainSaveResult?)?
+    var identityDeleteFault: ((String, Int) -> Bool?)?
     private(set) var identityReadCount = 0
     private(set) var identitySaveCount = 0
     private(set) var identityDeleteCount = 0
@@ -39,6 +40,7 @@ final class MockKeychain: KeychainManagerProtocol {
 
     func deleteIdentityKey(forKey key: String) -> Bool {
         identityDeleteCount += 1
+        if let result = identityDeleteFault?(key, identityDeleteCount), !result { return false }
         storage.removeValue(forKey: key)
         return true
     }

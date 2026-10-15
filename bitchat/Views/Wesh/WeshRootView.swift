@@ -6,6 +6,60 @@ import SwiftUI
 import UIKit
 #endif
 
+/// User-facing recovery copy; no action here can erase or replace identity data.
+struct WeshNoiseIdentityNotice: Equatable {
+    let title: String
+    let message: String
+    let allowsRetry: Bool
+
+    init?(_ availability: NoiseIdentityAvailability) {
+        switch availability {
+        case .available:
+            return nil
+        case .storageUnavailable:
+            title = "Identité indisponible"
+            message = "Wesh ne peut pas lire ses clés sur ce téléphone. Déverrouillez-le, puis réessayez. L’envoi et votre QR sont suspendus."
+            allowsRetry = true
+        case .persistenceUnconfirmed:
+            title = "Identité en attente"
+            message = "La sauvegarde de vos clés n’est pas confirmée. L’envoi et votre QR restent suspendus. Réessayer ne remplace pas vos clés existantes."
+            allowsRetry = true
+        case .recoveryRequired:
+            title = "Identité à récupérer"
+            message = "Les données d’identité conservées sont incomplètes ou ne correspondent pas. Gardez-les sur ce téléphone. Réessayer ne les efface pas."
+            allowsRetry = true
+        case .invalidated:
+            title = "Identité suspendue"
+            message = "Votre identité locale a été désactivée. L’envoi et votre QR restent indisponibles. Une reprise ne peut pas annuler un effacement demandé."
+            allowsRetry = false
+        }
+    }
+}
+
+private struct WeshNoiseIdentityRecoveryPanel: View {
+    @EnvironmentObject private var chrome: AppChromeModel
+    @Environment(\.weshTheme) private var theme
+    var body: some View {
+        if let notice = WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(notice.title, systemImage: "lock.trianglebadge.exclamationmark")
+                    .font(.headline).accessibilityAddTraits(.isHeader)
+                Text(notice.message).font(.subheadline).foregroundStyle(theme.secondary)
+                if notice.allowsRetry {
+                    Button(chrome.isRecoveringNoiseIdentity ? "Reprise en cours…" : "Réessayer") {
+                        chrome.retryNoiseIdentityRecovery()
+                    }.frame(minHeight: 44).disabled(chrome.isRecoveringNoiseIdentity)
+                        .accessibilityHint("Retenter la lecture et la sauvegarde de l’identité, sans effacer les données ni envoyer de message")
+                }
+                if chrome.noiseIdentityRetryFailed {
+                    Text("La reprise n’a pas abouti. L’identité reste indisponible.")
+                        .font(.footnote).foregroundStyle(theme.secondary)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 struct WeshRootView: View {
     let runtime: AppRuntime
     @ObservedObject private var sharedImport: SharedContentImportModel
@@ -292,6 +346,10 @@ private struct WeshInbox: View {
 
     var body: some View {
         List {
+            if chrome.noiseIdentityAvailability != .available {
+                Section { WeshNoiseIdentityRecoveryPanel() }
+                    .listRowBackground(theme.canvas)
+            }
             Section {
                 NavigationLink {
                     WeshConversation(runtime: runtime, peerID: nil, title: "Salon local")
@@ -548,7 +606,10 @@ private struct WeshConversation: View {
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
-                if !canSend {
+                if chrome.noiseIdentityAvailability != .available {
+                    WeshNoiseIdentityRecoveryPanel()
+                    Text("Votre brouillon reste ici.").font(.footnote).foregroundStyle(theme.secondary)
+                } else if !canSend {
                     Text(isPrivate ? "Votre brouillon reste ici. Vérifiez le contact et la connexion pour envoyer." : bluetoothSummary(chrome.bluetoothState))
                         .font(.footnote).foregroundStyle(theme.secondary)
                     if !isPrivate && chrome.bluetoothState == .unauthorized {
@@ -763,6 +824,7 @@ private struct WeshContactSheet: View {
     @Environment(\.weshTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var verification: VerificationModel
+    @EnvironmentObject private var chrome: AppChromeModel
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var showingScanner = false
     @State private var scanning = false
@@ -794,7 +856,9 @@ private struct WeshContactSheet: View {
                         mode("Scanner", scanner: true)
                     }.padding(4).overlay(RoundedRectangle(cornerRadius: theme.radius + 4).strokeBorder(theme.line, lineWidth: 1))
 
-                    if showingScanner {
+                    if chrome.noiseIdentityAvailability != .available {
+                        WeshNoiseIdentityRecoveryPanel()
+                    } else if showingScanner {
                         if scannedKey != nil { verificationResult }
                         else {
                             if !status.isEmpty { resultMessage(status) }
@@ -837,7 +901,11 @@ private struct WeshContactSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Ajouter un contact").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fermer") { dismiss() }.frame(minHeight: 44) } }
-            .onAppear { qr = verification.myQRString() }
+            .onAppear { qr = chrome.noiseIdentityAvailability == .available ? verification.myQRString() : "" }
+            .onChange(of: chrome.noiseIdentityAvailability) { availability in
+                qr = availability == .available ? verification.myQRString() : ""
+                if availability != .available { scanning = false; progress = .unavailable }
+            }
             .onReceive(renewal) { _ in qr = verification.myQRString() }
             .onReceive(progressRefresh) { _ in refreshProgress() }
             .onChange(of: trust.fingerprints) { _ in refreshProgress() }
@@ -972,6 +1040,11 @@ private struct WeshContactSheet: View {
         scannedAttemptNonce = nil
         scannedName = ""
         progress = .unavailable
+        guard chrome.noiseIdentityAvailability == .available else {
+            status = WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability)?.message ?? "Identité indisponible."
+            focusResult()
+            return
+        }
         guard runtime.chatViewModel.identityManager.isPersistenceAvailable else {
             status = "Contacts indisponibles, réessayez."
             focusResult()
@@ -1466,6 +1539,13 @@ private struct WeshConnectionSettings: View {
     @Environment(\.weshTheme) private var theme
     var body: some View {
         Form {
+            Section {
+                if chrome.noiseIdentityAvailability == .available {
+                    WeshValueRow("Identité locale", value: "Disponible")
+                } else {
+                    WeshNoiseIdentityRecoveryPanel()
+                }
+            }.listRowBackground(theme.canvas)
             Section {
                 Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
                 if chrome.bluetoothState == .unauthorized { Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44) }

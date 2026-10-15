@@ -353,6 +353,8 @@ final class BLEService: NSObject {
     private var panicLifecycleGeneration: UInt64 = 0
     private var servicesRequested = true
     private var servicesRequestGeneration: UInt64 = 0
+    private let identityPublicationLock = NSLock()
+    private var identityPublicationVersion: UInt64 = 0
     
     // MARK: - Identity
     
@@ -625,6 +627,7 @@ final class BLEService: NSObject {
         if servicesRequested != requested { servicesRequestGeneration &+= 1 }
         servicesRequested = requested
         panicLifecycleLock.unlock()
+        publishNoiseIdentityAvailability()
     }
 
     var areServicesRequested: Bool {
@@ -637,22 +640,72 @@ final class BLEService: NSObject {
     /// current lifecycle choice permits radio startup afterward.
     @discardableResult
     func retryNoiseIdentityPersistence() -> Bool {
-        onEngine {
+        let available = onEngine {
             guard !isPanicSuspended else { return false }
             let wasAvailable = noiseService.isIdentityAvailable
             guard noiseService.retryIdentityPersistence() else { return false }
             if !wasAvailable { refreshPeerIdentity() }
             return true
         }
+        publishNoiseIdentityAvailability()
+        return available
     }
 
     /// Foreground recovery preserves an explicit stop. A ready context never
     /// rotates here; only a previously unavailable identity may resume startup.
     func recoverNoiseIdentityForForeground() {
-        guard areServicesRequested else { return }
-        let wasAvailable = noiseService.isIdentityAvailable
-        guard retryNoiseIdentityPersistence() else { return }
-        if !wasAvailable { startServices() }
+        onEngine {
+            guard areServicesRequested else { return }
+            let wasAvailable = noiseService.isIdentityAvailable
+            guard retryNoiseIdentityPersistence() else { return }
+            if !wasAvailable { resumeRequestedServices() }
+        }
+    }
+
+    var isNoiseIdentityTrafficAllowed: Bool { onEngine { isTransportTrafficAllowed } }
+
+    var noiseIdentityAvailability: NoiseIdentityAvailability {
+        onEngine { isPanicSuspended ? .invalidated : noiseService.identityAvailability }
+    }
+
+    /// State events bypass the closed message ingress. Snapshot on the engine,
+    /// then reject superseded publications on MainActor without waiting there
+    /// for a protected-storage operation that may still be blocked.
+    private func publishNoiseIdentityAvailability() {
+        identityPublicationLock.lock()
+        identityPublicationVersion &+= 1
+        let version = identityPublicationVersion
+        identityPublicationLock.unlock()
+        messageQueue.async { [weak self] in
+            guard let self else { return }
+            let state: NoiseIdentityAvailability = self.isPanicSuspended ? .invalidated : self.noiseService.identityAvailability
+            Task { @MainActor [weak self] in
+                guard let self, self.isCurrentIdentityPublication(version) else { return }
+                self.deliverTransportEvent(.noiseIdentityAvailabilityUpdated(self.isPanicSuspended ? .invalidated : state))
+            }
+        }
+    }
+
+    private func isCurrentIdentityPublication(_ version: UInt64) -> Bool {
+        identityPublicationLock.lock()
+        defer { identityPublicationLock.unlock() }
+        return identityPublicationVersion == version
+    }
+
+    func retryNoiseIdentityRecovery(completion: @escaping @MainActor (Bool) -> Void) {
+        messageQueue.async { [weak self] in
+            guard let self else {
+                Task { @MainActor in completion(false) }
+                return
+            }
+            let wasAvailable = self.noiseService.isIdentityAvailable
+            let restored = self.retryNoiseIdentityPersistence()
+            if restored && !wasAvailable { self.resumeRequestedServices() }
+            Task { @MainActor [weak self] in
+                guard let self else { completion(false); return }
+                completion(restored && self.noiseIdentityAvailability == .available)
+            }
+        }
     }
 
     private func setPanicSuspended(_ suspended: Bool) {
@@ -662,6 +715,7 @@ final class BLEService: NSObject {
         }
         _isPanicSuspended = suspended
         panicLifecycleLock.unlock()
+        publishNoiseIdentityAvailability()
     }
 
     private func capturePanicLifecycleGeneration() -> UInt64? {
@@ -871,7 +925,10 @@ final class BLEService: NSObject {
         // refreshPeerIdentity() executes inline here via its re-entrancy check.
         onEngine {
             noiseService.clearEphemeralStateForPanic()
-            noiseService.clearPersistentIdentity()
+            guard noiseService.clearPersistentIdentity() else {
+                refreshPeerIdentity()
+                return
+            }
 
             let newNoise = NoiseEncryptionService(
                 keychain: keychain,
@@ -881,6 +938,7 @@ final class BLEService: NSObject {
             configureNoiseServiceCallbacks(for: newNoise)
             refreshPeerIdentity()
         }
+        publishNoiseIdentityAvailability()
         // Keep the transport silent until the application-level transaction
         // has also removed its media and committed both recovery markers.
         // Set through the identity store directly (not setNickname(_:), which
@@ -953,7 +1011,9 @@ final class BLEService: NSObject {
     // MARK: Delegates
 
     weak var delegate: BitchatDelegate?
-    weak var eventDelegate: TransportEventDelegate?
+    weak var eventDelegate: TransportEventDelegate? {
+        didSet { publishNoiseIdentityAvailability() }
+    }
     weak var peerEventsDelegate: TransportPeerEventsDelegate?
 
     func currentPeerSnapshots() -> [TransportPeerSnapshot] {
@@ -1000,8 +1060,15 @@ final class BLEService: NSObject {
 
     func startServices() {
         setServicesRequested(true)
+        resumeRequestedServices()
+    }
+
+    private func resumeRequestedServices() {
+        guard areServicesRequested else { return }
         let servicesGeneration = currentServicesRequestGeneration()
-        guard retryNoiseIdentityPersistence() else { return }
+        guard retryNoiseIdentityPersistence(),
+              isTransportTrafficAllowed,
+              currentServicesRequestGeneration() == servicesGeneration else { return }
         guard let lifecycleGeneration =
                 capturePanicLifecycleGeneration() else { return }
         initializeBluetoothManagersIfNeeded()
@@ -1013,9 +1080,17 @@ final class BLEService: NSObject {
         // and cache cleanup would never resume until app restart.
         startMaintenanceTimer()
 
-        // Start BLE services if not already running
-        if centralManager?.state == .poweredOn {
-            centralManager?.scanForPeripherals(
+        // A stop can arrive while protected-storage recovery is suspended.
+        guard isTransportTrafficAllowed,
+              currentServicesRequestGeneration() == servicesGeneration else { return }
+        // Revalidate at the actual radio handoff: stop may race recovery or
+        // the asynchronous CoreBluetooth queue hop.
+        bleQueue.async { [weak self] in
+            guard let self, self.isTransportTrafficAllowed,
+                  self.currentServicesRequestGeneration() == servicesGeneration,
+                  self.isCurrentPanicLifecycleGeneration(lifecycleGeneration),
+                  self.centralManager?.state == .poweredOn else { return }
+            self.centralManager?.scanForPeripherals(
                 withServices: [BLEService.serviceUUID],
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
             )

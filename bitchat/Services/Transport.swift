@@ -81,6 +81,7 @@ enum TransportEvent: @unchecked Sendable {
     case peerSnapshotsUpdated([TransportPeerSnapshot])
     case messageDeliveryStatusUpdated(messageID: String, status: DeliveryStatus)
     case bluetoothStateUpdated(CBManagerState)
+    case noiseIdentityAvailabilityUpdated(NoiseIdentityAvailability)
 }
 
 /// Downgrade-safe decision for a private-media recipient. Callers ask before
@@ -300,6 +301,8 @@ extension BitchatDelegate {
             didUpdateMessageDeliveryStatus(messageID, status: status)
         case .bluetoothStateUpdated(let state):
             didUpdateBluetoothState(state)
+        case .noiseIdentityAvailabilityUpdated:
+            break
         }
     }
 }
@@ -316,3 +319,5 @@ extension BLEService: MeshPublicArchiving {}
 extension BLEService: BluetoothStateReporting {}
 extension BLEService: PanicResettingTransport {}
 extension BLEService: MeshBridgingTransport {}
+
+extension BLEService: MeshIdentityRecovering {}
