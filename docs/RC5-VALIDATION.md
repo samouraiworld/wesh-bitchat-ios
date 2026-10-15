@@ -1,5 +1,7 @@
 # RC5 local validation — Wesh 0.1.0 (6)
 
+Subsequent source development: [Nostr identity persistence follow-up](IDENTITY-PERSISTENCE-FOLLOWUP.md). This patch is separate from the RC5 artifacts and results below.
+
 The candidate uses frozen source
 `140030a19965ee7dd2fa0bfb3b0988359e32d697` on `feat/wesh-native-ui`, in
 [draft PR #2](https://github.com/samouraiworld/wesh-bitchat-ios/pull/2).
