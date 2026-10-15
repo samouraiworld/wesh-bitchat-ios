@@ -13,6 +13,50 @@ import BitFoundation
 struct UnifiedPeerServiceTests {
 
     @Test @MainActor
+    func unavailableIdentityCacheClosesBlockDecisionsAndRefusesMutations() {
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let identity = SecureIdentityStateManager(storage)
+        let transport = MockTransport()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let key = Data(repeating: 0xA6, count: 32)
+        let peer = PeerID(hexData: key)
+        #expect(service.isBlocked(peer))
+        #expect(service.setBlocked(peer, blocked: true) == nil)
+        #expect(!service.unblock(fingerprint: key.sha256Fingerprint()))
+        #expect(transport.purgedArchivePeers.isEmpty)
+
+        storage.simulatedReadError = nil
+        identity.forceSave()
+        #expect(!service.isBlocked(peer))
+        #expect(service.setBlocked(peer, blocked: true) == key.sha256Fingerprint())
+    }
+
+    @Test @MainActor
+    func unconfirmedBlockStaysEffectiveAndUnconfirmedUnblockStaysClosed() {
+        let storage = MockKeychain()
+        let identity = SecureIdentityStateManager(storage)
+        let transport = MockTransport()
+        let service = UnifiedPeerService(meshService: transport, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()), identityManager: identity)
+        let key = Data(repeating: 0xA8, count: 32)
+        let peer = PeerID(hexData: key)
+        storage.simulatedSaveError = .accessDenied
+        #expect(service.setBlocked(peer, blocked: true) == nil)
+        #expect(service.isBlocked(peer))
+        #expect(transport.purgedArchivePeers.contains(peer))
+        #expect(!service.unblock(fingerprint: key.sha256Fingerprint()))
+        #expect(service.isBlocked(peer))
+        #expect(service.setBlocked(peer, blocked: false) == nil)
+        #expect(service.isBlocked(peer))
+
+        storage.simulatedSaveError = nil
+        identity.forceSave()
+        #expect(service.unblock(fingerprint: key.sha256Fingerprint()))
+        #expect(!service.isBlocked(peer))
+        #expect(!SecureIdentityStateManager(storage).isBlocked(fingerprint: key.sha256Fingerprint()))
+    }
+
+    @Test @MainActor
     func fullNoiseIdentity_blocksOfflineNonFavoriteWithoutTransportResolution() {
         let transport = MockTransport()
         let identity = TestIdentityManager()

@@ -11,6 +11,25 @@ import Testing
 @Suite("Private media end to end", .serialized)
 struct PrivateMediaEndToEndTests {
     @Test
+    func unavailableIdentityCacheCannotAuthorizeLegacyMediaFallback() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("private-media-unavailable-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let identity = SecureIdentityStateManager(storage)
+        let service = makeService(baseDirectory: root, identityManager: identity)
+        let key = Data(repeating: 0x79, count: 32)
+        let peer = PeerID(publicKey: key)
+        service._test_seedConnectedPeer(peer, nickname: "Test", noisePublicKey: key)
+        #expect(service.privateMediaSendPolicy(to: peer) == .blockedDowngrade)
+
+        storage.simulatedReadError = nil
+        identity.forceSave()
+        #expect(service.privateMediaSendPolicy(to: peer) == .legacyRequiresConsent)
+    }
+
+    @Test
     func privateMediaCancellationTombstonesAreCountBounded() async {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("private-media-tombstone-bound-\(UUID().uuidString)", isDirectory: true)

@@ -1172,6 +1172,9 @@ final class BLEService: NSObject {
     }
 
     func privateMediaSendPolicy(to peerID: PeerID) -> PrivateMediaSendPolicy {
+        // Unknown durable pins cannot authorize the legacy raw-media fallback.
+        guard identityManager.isPersistenceAvailable,
+              !identityManager.hasPendingPersistenceChanges else { return .blockedDowngrade }
         let normalizedPeerID = peerID.toShort()
         let state: (
             capabilities: PeerCapabilities,

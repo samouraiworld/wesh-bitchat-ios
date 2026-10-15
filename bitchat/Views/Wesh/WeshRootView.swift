@@ -972,6 +972,11 @@ private struct WeshContactSheet: View {
         scannedAttemptNonce = nil
         scannedName = ""
         progress = .unavailable
+        guard runtime.chatViewModel.identityManager.isPersistenceAvailable else {
+            status = "Contacts indisponibles, réessayez."
+            focusResult()
+            return
+        }
         if let scannedURL = URL(string: value),
            let parsed = VerificationService.VerificationQR.fromURL(scannedURL),
            let ownURL = URL(string: qr),

@@ -296,9 +296,10 @@ struct ChatLifecycleCoordinatorContextTests {
         #expect(context.forceSaveIdentityCount == 1)
         #expect(context.verifyIdentityKeyExistsCount == 1)
 
-        // Becoming active with no open chat only refreshes Bluetooth state.
+        // Becoming active retries identity storage even with no open chat.
         coordinator.handleDidBecomeActive()
         #expect(context.refreshBluetoothStateCount == 1)
+        #expect(context.forceSaveIdentityCount == 2)
         #expect(context.managerReadMarks.isEmpty)
 
         // With an open chat the read pass runs immediately (manager-level) and
@@ -307,6 +308,7 @@ struct ChatLifecycleCoordinatorContextTests {
         context.selectedPrivateChatPeer = peerID
         coordinator.handleDidBecomeActive()
         #expect(context.refreshBluetoothStateCount == 2)
+        #expect(context.forceSaveIdentityCount == 3)
         #expect(context.managerReadMarks == [peerID])
 
         // The mock executes scheduled work synchronously, so the delayed

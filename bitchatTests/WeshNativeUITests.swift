@@ -7,6 +7,33 @@ import Testing
 
 @Suite("Wesh native trust and public separation", .serialized)
 struct WeshNativeUITests {
+    @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
+        let previousContacts = WeshQRTrust.shared.contacts
+        let key = Data(repeating: 0x76, count: 32)
+        let peer = PeerID(hexData: key)
+        WeshQRTrust.shared.record(sessionKey: key, nickname: "Contact test")
+        defer {
+            WeshQRTrust.shared.clear()
+            for contact in previousContacts {
+                if let restored = Data(hexString: contact.noiseKeyHex) {
+                    WeshQRTrust.shared.record(sessionKey: restored, nickname: contact.nickname)
+                }
+            }
+        }
+        let storage = MockKeychain()
+        storage.simulatedReadError = .deviceLocked
+        let identity = SecureIdentityStateManager(storage)
+        let vm = ChatViewModel(keychain: MockKeychain(),
+            idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: identity, transport: MockTransport(), weshPrivatePolicyEnabled: true)
+        #expect(!vm.canImportWeshSharedContent(to: peer))
+        #expect(!vm.canSendWeshPrivate(to: peer))
+        storage.simulatedReadError = nil
+        vm.handleDidBecomeActive()
+        #expect(identity.isPersistenceAvailable)
+        #expect(vm.canImportWeshSharedContent(to: peer))
+    }
+
     @Test func timelineUsesCalendarDaysAcrossMidnightAndDaylightSaving() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "Europe/Paris"))

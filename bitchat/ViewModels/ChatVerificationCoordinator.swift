@@ -13,6 +13,8 @@ import Security
 @MainActor
 protocol ChatVerificationContext: AnyObject {
     // MARK: Fingerprints & verification state
+    var isIdentityStateAvailable: Bool { get }
+    var hasPendingIdentityStateChanges: Bool { get }
     func getFingerprint(for peerID: PeerID) -> String?
     /// The UI-facing verified-fingerprint set (peer identity store backed).
     var verifiedFingerprints: Set<String> { get set }
@@ -83,6 +85,9 @@ extension ChatViewModel: ChatVerificationContext {
     // `ChatViewModel` members. The members below flatten nested service
     // accesses into intent-named calls.
 
+    var isIdentityStateAvailable: Bool { identityManager.isPersistenceAvailable }
+    var hasPendingIdentityStateChanges: Bool { identityManager.hasPendingPersistenceChanges }
+
     func persistedVerifiedFingerprints() -> Set<String> {
         identityManager.getVerifiedFingerprints()
     }
@@ -146,6 +151,8 @@ extension ChatViewModel: ChatVerificationContext {
 }
 
 extension ChatVerificationContext {
+    var isIdentityStateAvailable: Bool { true }
+    var hasPendingIdentityStateChanges: Bool { false }
     func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {}
 }
 
@@ -181,6 +188,7 @@ final class ChatVerificationCoordinator {
 
     /// Progress belongs to this scan's challenge, never a previous enrollment.
     func qrProgress(for noiseKey: Data, attemptNonce: Data? = nil) -> QRProgress {
+        guard context.isIdentityStateAvailable else { return .unavailable }
         guard noiseKey.count == 32 else { return .unavailable }
         let hex = noiseKey.hexEncodedString().lowercased()
         if let pending = pendingQRVerifications.values.first(where: {
@@ -189,7 +197,8 @@ final class ChatVerificationCoordinator {
             guard attemptNonce == nil || attemptNonce == pending.nonceA else { return .unavailable }
             return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
         }
-        guard let completedNonce = completedQRNonces[hex],
+        guard !context.hasPendingIdentityStateChanges,
+              let completedNonce = completedQRNonces[hex],
               attemptNonce == nil || attemptNonce == completedNonce,
               context.isVerifiedFingerprint(noiseKey.sha256Fingerprint()),
               !weshMode || WeshQRTrust.shared.fingerprints.contains(noiseKey.sha256Fingerprint()) else { return .unavailable }
@@ -219,10 +228,13 @@ final class ChatVerificationCoordinator {
     }
 
     func verifyFingerprint(for peerID: PeerID) {
+        guard context.isIdentityStateAvailable else { return }
         guard let fingerprint = context.getFingerprint(for: peerID) else { return }
 
         context.setIdentityVerified(fingerprint: fingerprint, verified: true)
         context.saveIdentityState()
+        guard context.isIdentityStateAvailable,
+              !context.hasPendingIdentityStateChanges else { return }
         context.setStoredVerified(fingerprint, verified: true)
         context.updateEncryptionStatus(for: peerID)
         // Verifying a peer is a vouch trigger: push attestations to my other
@@ -231,9 +243,11 @@ final class ChatVerificationCoordinator {
     }
 
     func unverifyFingerprint(for peerID: PeerID) {
+        guard context.isIdentityStateAvailable else { return }
         guard let fingerprint = context.getFingerprint(for: peerID) else { return }
         context.setIdentityVerified(fingerprint: fingerprint, verified: false)
         context.saveIdentityState()
+        // Revocation is effective locally even when the durable write must retry.
         context.setStoredVerified(fingerprint, verified: false)
         context.updateEncryptionStatus(for: peerID)
     }
@@ -339,6 +353,7 @@ final class ChatVerificationCoordinator {
     }
 
     func beginQRVerification(with qr: VerificationService.VerificationQR) -> Bool {
+        guard context.isIdentityStateAvailable else { return false }
         let targetNoise = qr.noiseKeyHex.lowercased()
         guard let peer = context.unifiedPeers.first(where: {
             $0.noisePublicKey.hexEncodedString().lowercased() == targetNoise
@@ -416,6 +431,7 @@ final class ChatVerificationCoordinator {
     }
 
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data) {
+        guard context.isIdentityStateAvailable else { return }
         guard let response = VerificationService.shared.parseVerifyResponse(payload),
               let pending = pendingQRVerifications[peerID],
               response.noiseKeyHex.lowercased() == pending.noiseKeyHex.lowercased(),
@@ -433,18 +449,18 @@ final class ChatVerificationCoordinator {
         )
         guard isValid else { return }
 
-        pendingQRVerifications.removeValue(forKey: peerID)
-
         guard let sessionKey = context.noiseSessionPublicKeyData(for: peerID),
               sessionKey.count == 32, sessionKey.hexEncodedString().lowercased() == pending.noiseKeyHex.lowercased(),
               let fingerprint = context.getFingerprint(for: peerID), fingerprint == sessionKey.sha256Fingerprint() else { return }
-        if weshMode { WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname) }
-        completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
-
         let shortFingerprint = fingerprint.prefix(8)
         SecureLogger.info("🔐 Marking verified fingerprint: \(shortFingerprint)", category: .security)
         context.setIdentityVerified(fingerprint: fingerprint, verified: true)
         context.saveIdentityState()
+        guard context.isIdentityStateAvailable,
+              !context.hasPendingIdentityStateChanges else { return }
+        pendingQRVerifications.removeValue(forKey: peerID)
+        if weshMode { WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname) }
+        completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
         context.setStoredVerified(fingerprint, verified: true)
 
         let peerName = context.unifiedPeer(for: peerID)?.nickname

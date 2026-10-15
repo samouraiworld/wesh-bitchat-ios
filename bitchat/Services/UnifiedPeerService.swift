@@ -270,6 +270,8 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
     
     /// Check if peer is blocked
     func isBlocked(_ peerID: PeerID) -> Bool {
+        guard identityManager.isPersistenceAvailable,
+              !identityManager.hasPendingPersistenceChanges else { return true }
         // Get fingerprint
         guard let fingerprint = getFingerprint(for: peerID) else { return false }
         
@@ -288,9 +290,10 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
     /// peer is offline — including offline favorites — so the exact tapped peer
     /// is (un)blocked unambiguously instead of being re-resolved by a
     /// display-name string that two peers could share.
-    /// - Returns: the resolved fingerprint, or `nil` if the identity is unknown.
+    /// - Returns: the resolved fingerprint only after confirmed persistence, or `nil`.
     @discardableResult
     func setBlocked(_ peerID: PeerID, blocked: Bool) -> String? {
+        guard identityManager.isPersistenceAvailable else { return nil }
         guard let fingerprint = getFingerprint(for: peerID) else {
             SecureLogger.warning(
                 "⚠️ Cannot \(blocked ? "block" : "unblock") - unknown identity for peer: \(peerID)",
@@ -299,6 +302,13 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
             return nil
         }
         identityManager.setBlocked(fingerprint, isBlocked: blocked)
+        if !blocked && identityManager.hasPendingPersistenceChanges {
+            // A failed unblock must keep this session closed while storage retries.
+            identityManager.setBlocked(fingerprint, isBlocked: true)
+            updatePeers()
+            return nil
+        }
+        guard identityManager.isBlocked(fingerprint: fingerprint) == blocked else { return nil }
         if blocked {
             // Purge while the fingerprint↔peerID mapping is still known: the
             // archived-echo seed filter can't resolve offline strangers, so
@@ -314,18 +324,26 @@ final class UnifiedPeerService: ObservableObject, TransportPeerEventsDelegate {
             }
         }
         updatePeers()
-        return fingerprint
+        // A block remains effective in RAM even when its write needs a retry.
+        return identityManager.hasPendingPersistenceChanges ? nil : fingerprint
     }
 
     /// Unblocks the exact persisted identity even when its peer is offline.
     /// Names and ephemeral routing aliases never participate in resolution.
     @discardableResult
     func unblock(fingerprint: String) -> Bool {
+        guard identityManager.isPersistenceAvailable else { return false }
         guard fingerprint.utf8.count == 64,
               let bytes = Data(hexString: fingerprint), bytes.count == 32 else { return false }
         let canonicalFingerprint = bytes.hexEncodedString()
         guard identityManager.getBlockedFingerprints().contains(canonicalFingerprint) else { return false }
         identityManager.setBlocked(canonicalFingerprint, isBlocked: false)
+        guard !identityManager.hasPendingPersistenceChanges,
+              !identityManager.isBlocked(fingerprint: canonicalFingerprint) else {
+            identityManager.setBlocked(canonicalFingerprint, isBlocked: true)
+            updatePeers()
+            return false
+        }
         updatePeers()
         return true
     }

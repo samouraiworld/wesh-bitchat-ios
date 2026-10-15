@@ -43,3 +43,50 @@ Evidence remains ignored: `.validation/nostr-identity-persistence-record.json`,
 `.validation/nostr-identity-persistence-tests-fixed.xcresult` and
 `.validation/nostr-identity-full-tests.xcresult`. Existing off-tree smoke-test
 and build warnings do not establish live focus or speech behavior.
+
+## Identity-cache and writer follow-up
+
+The next development source preserves unreadable/malformed identity caches and
+refuses persistent mutations until a confirmed load. Key generation requires
+both key and cache to be explicitly absent. Failed writes remain pending in
+RAM; trust and blocking decisions stay conservative until exact readback.
+Foreground activation retries load/write before private decisions and refreshes
+peers after recovery. Wesh send/import, QR enrollment, legacy-media fallback
+and block/unblock reporting use availability and pending-write state. A panic
+wipe invalidates the cached encryption key before further persistence.
+
+The simple, detailed and custom-service Keychain writers now update existing
+items, add only after itemNotFound and retry a duplicate creation with one
+bounded update. They do not delete before writing. This follows Apple's
+[update query and attributes pattern](https://developer.apple.com/documentation/security/updating-and-deleting-keychain-items).
+Existing access groups, non-synchronizing policy and accessibility are retained.
+This closes the application-level delete/add loss window; it is not a
+transaction across several items or managers, a power-loss guarantee, or a
+physical unlock/update qualification. Unit faults use injected operations and
+mock storage only; they never read or mutate the real Keychain.
+
+The earlier legacy-writer limitation above describes the previous source.
+Concurrent get-or-create, Noise identity fallback, process-death draft loss,
+upstream geohash success feedback and physical accessibility remain separate
+work. Refused mutations before a successful cache load must be requested
+again; malformed/orphaned data is preserved, not silently recovered or erased.
+
+Latest complete validation: **2364/2364 passed** (2134 Swift Testing +230
+XCTest), zero failures/skips/expected failures, no only/skip filters, Xcode
+exit0 and xcresult Passed. The **145/145 targeted cases are included**, not
+added. Twenty-four new behavior tests cover the manager11, writer6 and caller7
+boundaries. All15 frozen Swift hashes match the compiled products and the
+post-test sources. The39 inherited off-tree runtime warnings remain, with no
+live focus or speech qualification.
+
+Intermediate attempts remain separate: a runner stopped before any cases,
+a lifecycle visibility compile error, and a failed test fixture that wrongly
+assumed empty JSON was an invalid legacy schema. The fixture was corrected to
+an invalid field type; that failed runner did not finalize and was terminated.
+The corrected targeted/full results above are the passing reference. Verbose
+diagnostic collection was disabled on those runs; no test was disabled.
+
+Evidence is ignored: `.validation/identity-cache-persistence-record.json`,
+`.validation/identity-cache-persistence-targeted-verified.xcresult` and
+`.validation/identity-cache-persistence-full.xcresult`. The test simulator is
+shut down without wiping data; no physical-device, archive or export result.

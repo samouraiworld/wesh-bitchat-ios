@@ -27,6 +27,8 @@ import BitFoundation
 @MainActor
 private final class MockChatVerificationContext: ChatVerificationContext {
     // Fingerprints & verification state
+    var isIdentityStateAvailable = true
+    var hasPendingIdentityStateChanges = false
     var fingerprintsByPeerID: [PeerID: String] = [:]
     var verifiedFingerprints: Set<String> = []
     var persistedFingerprints: Set<String> = []
@@ -173,6 +175,79 @@ private func makeVerificationQR(noiseKeyHex: String) -> VerificationService.Veri
 /// `MockChatVerificationContext` with no `ChatViewModel`.
 @Suite(.serialized)
 struct ChatVerificationCoordinatorContextTests {
+
+    @Test @MainActor
+    func unavailableIdentityStateRefusesManualVerificationAndQRStart() {
+        let context = MockChatVerificationContext()
+        context.isIdentityStateAvailable = false
+        let peerID = PeerID(str: "1122334455667788")
+        let key = Data(repeating: 0x73, count: 32)
+        context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Test")]
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        coordinator.verifyFingerprint(for: peerID)
+        coordinator.unverifyFingerprint(for: peerID)
+        let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+            signKeyHex: String(repeating: "74", count: 32), npub: nil,
+            nickname: "Test", ts: 0, nonceB64: "", sigHex: "")
+        #expect(!coordinator.beginQRVerification(with: qr))
+        #expect(coordinator.qrProgress(for: key) == .unavailable)
+        #expect(context.identityVerifiedCalls.isEmpty)
+        #expect(context.storedVerifiedCalls.isEmpty)
+        #expect(context.triggeredHandshakes.isEmpty)
+        #expect(context.sentChallenges.isEmpty)
+    }
+
+    @Test @MainActor
+    func unconfirmedManualVerificationDoesNotPromoteTrustOrVouch() {
+        let context = MockChatVerificationContext()
+        context.hasPendingIdentityStateChanges = true
+        let peerID = PeerID(str: "1122334455667788")
+        context.fingerprintsByPeerID[peerID] = "synthetic-fingerprint"
+        let coordinator = ChatVerificationCoordinator(context: context)
+        coordinator.verifyFingerprint(for: peerID)
+        #expect(context.identityVerifiedCalls.count == 1)
+        #expect(context.storedVerifiedCalls.isEmpty)
+        #expect(context.updatedEncryptionStatusPeers.isEmpty)
+        #expect(context.vouchToConnectedVerifiedPeersCount == 0)
+    }
+
+    @Test @MainActor
+    func unconfirmedQRWriteRetainsAttemptWithoutEnrollmentAndCanRetry() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        let peerID = PeerID(str: "1122334455667788")
+        let context = MockChatVerificationContext()
+        context.hasPendingIdentityStateChanges = true
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Test")]
+        context.establishedNoiseSessions = [peerID]
+        context.noiseSessionKeysByPeerID[peerID] = key
+        context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+            signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+            nickname: "Test", ts: 0, nonceB64: "", sigHex: "")
+        #expect(coordinator.beginQRVerification(with: qr))
+        let nonce = try #require(context.sentChallenges.first?.nonceA)
+        let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: qr.noiseKeyHex, nonceA: nonce))
+        let response = try #require(NoisePayload.decode(encoded))
+        coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
+        #expect(context.storedVerifiedCalls.isEmpty)
+        #expect(context.postedLocalNotifications.isEmpty)
+        #expect(WeshQRTrust.shared.contacts.isEmpty)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: nonce) == .pending)
+
+        context.hasPendingIdentityStateChanges = false
+        coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
+        #expect(context.storedVerifiedCalls.map(\.verified) == [true])
+        #expect(WeshQRTrust.shared.fingerprints.contains(key.sha256Fingerprint()))
+        #expect(context.postedLocalNotifications.filter { $0.title == "Verified" }.count == 1)
+        #expect(context.sentChallenges.count == 1)
+    }
 
     @Test @MainActor
     func verifyAndUnverifyFingerprint_updateBothStoresAndStatus() async {

@@ -83,13 +83,17 @@ final class WeshQRTrust: ObservableObject {
 extension ChatViewModel {
     @MainActor
     func canImportWeshSharedContent(to peerID: PeerID) -> Bool {
-        WeshQRTrust.canPrepareDraft(to: peerID, contacts: WeshQRTrust.shared.contacts,
+        guard identityManager.isPersistenceAvailable,
+              !identityManager.hasPendingPersistenceChanges else { return false }
+        return WeshQRTrust.canPrepareDraft(to: peerID, contacts: WeshQRTrust.shared.contacts,
                                    qrFingerprints: WeshQRTrust.shared.fingerprints,
                                    blockedFingerprints: identityManager.getBlockedFingerprints())
     }
 
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
+        guard identityManager.isPersistenceAvailable,
+              !identityManager.hasPendingPersistenceChanges else { return false }
         if let pinned = peerID.noiseKey, identityManager.isBlocked(fingerprint: pinned.sha256Fingerprint()) { return false }
         let shortID = getShortIDForNoiseKey(peerID)
         guard !isPeerBlocked(shortID) else { return false }
