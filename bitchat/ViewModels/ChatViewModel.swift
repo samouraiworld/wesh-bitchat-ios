@@ -1371,7 +1371,11 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     }
 
     /// Radio availability only; it does not promise a peer or a recipient receipt.
-    var canSendWeshPublic: Bool { bluetoothState == .poweredOn }
+    var canSendWeshPublic: Bool {
+        bluetoothState == .poweredOn
+            && meshService.noiseStaticPublicKeyData().count == 32
+            && meshService.noiseSigningPublicKeyData().count == 32
+    }
 
     /// Composer drafts are cleared only after the explicit route accepts the send.
     @discardableResult

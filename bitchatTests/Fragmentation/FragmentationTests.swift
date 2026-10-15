@@ -25,7 +25,7 @@ struct FragmentationTests {
         // messages must carry a valid signature, so the reassembled packet is
         // signed and the sender's signing key is preseeded into the registry.
         let signer = NoiseEncryptionService(keychain: MockKeychain())
-        let signingKey = signer.getSigningPublicKeyData()
+        let signingKey = signer.getSigningPublicKeyData()!
         let remoteShortID = PeerID(str: "1122334455667788")
         let original = try #require(
             signer.signPacket(makeLargePublicPacket(senderShortHex: remoteShortID, size: 3_000)),
@@ -56,7 +56,7 @@ struct FragmentationTests {
         ble.delegate = capture
 
         let signer = NoiseEncryptionService(keychain: MockKeychain())
-        let signingKey = signer.getSigningPublicKeyData()
+        let signingKey = signer.getSigningPublicKeyData()!
         let remoteShortID = PeerID(str: "A1B2C3D4E5F60708")
         let original = try #require(
             signer.signPacket(makeLargePublicPacket(senderShortHex: remoteShortID, size: 2048)),
@@ -89,7 +89,7 @@ struct FragmentationTests {
         // gate as public messages), so sign the packet and preseed the
         // sender's signing key into the registry.
         let signer = NoiseEncryptionService(keychain: MockKeychain())
-        let signingKey = signer.getSigningPublicKeyData()
+        let signingKey = signer.getSigningPublicKeyData()!
         let remoteID = PeerID(str: "CAFEBABECAFEBABE")
         let fileContent = Data(repeating: 0x42, count: FileTransferLimits.maxPayloadBytes)
         let filePacket = BitchatFilePacket(

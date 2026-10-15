@@ -691,7 +691,7 @@ struct BLEAnnounceHandlerTests {
         // entry and persisted identity.
         let victim = NoiseEncryptionService(keychain: MockKeychain())
         let attacker = NoiseEncryptionService(keychain: MockKeychain())
-        let victimNoiseKey = victim.getStaticPublicKeyData()
+        let victimNoiseKey = victim.getStaticPublicKeyData()!
         let peerID = PeerID(publicKey: victimNoiseKey)
         let now = Date()
 
@@ -745,7 +745,7 @@ struct BLEAnnounceHandlerTests {
             let announcement = AnnouncementPacket(
                 nickname: nickname,
                 noisePublicKey: victimNoiseKey,
-                signingPublicKey: signer.getSigningPublicKeyData(),
+                signingPublicKey: signer.getSigningPublicKeyData()!,
                 directNeighbors: nil
             )
             let payload = try #require(announcement.encode())
@@ -766,7 +766,7 @@ struct BLEAnnounceHandlerTests {
         handler.handle(victimAnnounce, from: peerID)
 
         #expect(box.registry.info(for: peerID)?.nickname == "victim")
-        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData()!)
         #expect(box.persistedIdentities.count == 1)
 
         // Attacker announce with a valid self-signature must be rejected.
@@ -774,7 +774,7 @@ struct BLEAnnounceHandlerTests {
         handler.handle(attackerAnnounce, from: peerID)
 
         #expect(box.registry.info(for: peerID)?.nickname == "victim")
-        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData()!)
         #expect(box.persistedIdentities.count == 1)
 
         // The victim's subsequent announces (same pinned key) still work.
@@ -797,7 +797,7 @@ struct BLEAnnounceHandlerTests {
         // key) must be re-accepted.
         let victim = NoiseEncryptionService(keychain: MockKeychain())
         let attacker = NoiseEncryptionService(keychain: MockKeychain())
-        let victimNoiseKey = victim.getStaticPublicKeyData()
+        let victimNoiseKey = victim.getStaticPublicKeyData()!
         let peerID = PeerID(publicKey: victimNoiseKey)
         let now = Date()
 
@@ -866,7 +866,7 @@ struct BLEAnnounceHandlerTests {
             let announcement = AnnouncementPacket(
                 nickname: nickname,
                 noisePublicKey: victimNoiseKey,
-                signingPublicKey: signer.getSigningPublicKeyData(),
+                signingPublicKey: signer.getSigningPublicKeyData()!,
                 directNeighbors: nil
             )
             let payload = try #require(announcement.encode())
@@ -889,8 +889,8 @@ struct BLEAnnounceHandlerTests {
 
         // 1. Victim announces: pinned in the registry and persisted.
         handler.handle(try makeSignedAnnounce(nickname: "victim", signer: victim), from: peerID)
-        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData())
-        #expect(persistedIdentity()?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData()!)
+        #expect(persistedIdentity()?.signingPublicKey == victim.getSigningPublicKeyData()!)
 
         // 2. Registry entry disappears (eviction / restart).
         _ = box.registry.remove(peerID)
@@ -900,13 +900,13 @@ struct BLEAnnounceHandlerTests {
         //    pin, and neither the registry nor the persisted identity change.
         handler.handle(try makeSignedAnnounce(nickname: "attacker", signer: attacker), from: peerID)
         #expect(box.registry.info(for: peerID) == nil)
-        #expect(persistedIdentity()?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(persistedIdentity()?.signingPublicKey == victim.getSigningPublicKeyData()!)
         #expect(identityManager.getSocialIdentity(for: victimNoiseKey.sha256Fingerprint())?.claimedNickname == "victim")
 
         // 4. Victim re-announces with the same signing key: accepted again.
         handler.handle(try makeSignedAnnounce(nickname: "victim", signer: victim), from: peerID)
         #expect(box.registry.info(for: peerID)?.nickname == "victim")
-        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData()!)
 
         // 5. Simulated app restart: a fresh identity manager reloads the pin
         //    from the (mock) keychain, and a fresh registry starts empty. The
@@ -915,7 +915,7 @@ struct BLEAnnounceHandlerTests {
         let reloadedManager = SecureIdentityStateManager(identityKeychain)
         #expect(
             reloadedManager.getCryptoIdentitiesByPeerIDPrefix(peerID).first?.signingPublicKey
-                == victim.getSigningPublicKeyData()
+                == victim.getSigningPublicKeyData()!
         )
         box.registry = BLEPeerRegistry()
         let restartedHandler = BLEAnnounceHandler(environment: makeEnvironment(identityManager: reloadedManager))
@@ -923,12 +923,12 @@ struct BLEAnnounceHandlerTests {
         #expect(box.registry.info(for: peerID) == nil)
         #expect(
             reloadedManager.getCryptoIdentitiesByPeerIDPrefix(peerID).first?.signingPublicKey
-                == victim.getSigningPublicKeyData()
+                == victim.getSigningPublicKeyData()!
         )
 
         // ...while the victim is accepted after the restart.
         restartedHandler.handle(try makeSignedAnnounce(nickname: "victim", signer: victim), from: peerID)
-        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData())
+        #expect(box.registry.info(for: peerID)?.signingPublicKey == victim.getSigningPublicKeyData()!)
     }
 
     private func expectNoSideEffects(_ recorder: Recorder) {

@@ -150,15 +150,15 @@ final class MockTransport: Transport, PrivateMediaDeletionPersisting,
     }
 
     func noiseIdentityFingerprint() -> String {
-        mockNoiseService.getIdentityFingerprint()
+        mockNoiseService.getIdentityFingerprint() ?? ""
     }
 
     func noiseStaticPublicKeyData() -> Data {
-        mockNoiseService.getStaticPublicKeyData()
+        mockNoiseService.getStaticPublicKeyData() ?? Data()
     }
 
     func noiseSigningPublicKeyData() -> Data {
-        mockNoiseService.getSigningPublicKeyData()
+        mockNoiseService.getSigningPublicKeyData() ?? Data()
     }
 
     func noiseSignData(_ data: Data) -> Data? {

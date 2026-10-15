@@ -28,7 +28,7 @@ struct NoisePrekeyTests {
         let opened = try bob.openPrekeyPayload(sealed, prekeyID: prekey.id)
         #expect(opened.payload == payload)
         // The X pattern authenticates the sender: Bob learns Alice's real static key.
-        #expect(opened.senderStaticKey == alice.getStaticPublicKeyData())
+        #expect(opened.senderStaticKey == alice.getStaticPublicKeyData()!)
     }
 
     @Test func wrongPrekeyIDCannotOpen() throws {
@@ -107,7 +107,7 @@ struct NoisePrekeyTests {
         let bundle = try #require(bob.currentPrekeyBundle())
         let prekey = try #require(bundle.prekeys.first)
 
-        let staticSealed = try alice.sealCourierPayload(Data("x".utf8), recipientStaticKey: bob.getStaticPublicKeyData())
+        let staticSealed = try alice.sealCourierPayload(Data("x".utf8), recipientStaticKey: bob.getStaticPublicKeyData()!)
         #expect(throws: (any Error).self) {
             _ = try bob.openPrekeyPayload(staticSealed, prekeyID: prekey.id)
         }

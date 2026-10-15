@@ -22,7 +22,7 @@ extension BLEService: CBCentralManagerDelegate {
     #if os(iOS)
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         let restoredPeripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
-        guard !isPanicSuspended else {
+        guard isTransportIdentityAvailable && areServicesRequested else {
             central.stopScan()
             restoredPeripherals.forEach {
                 central.cancelPeripheralConnection($0)
@@ -78,11 +78,11 @@ extension BLEService: CBCentralManagerDelegate {
     #endif
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        emitTransportEvent(.bluetoothStateUpdated(central.state))
+        emitTransportEvent(.bluetoothStateUpdated(isTransportIdentityAvailable ? central.state : .unknown))
 
         switch central.state {
         case .poweredOn:
-            guard !isPanicSuspended else {
+            guard isTransportIdentityAvailable && areServicesRequested else {
                 central.stopScan()
                 return
             }
@@ -141,7 +141,7 @@ extension BLEService: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard !isPanicSuspended else {
+        guard isTransportIdentityAvailable && areServicesRequested else {
             central.cancelPeripheralConnection(peripheral)
             return
         }
@@ -233,7 +233,7 @@ extension BLEService: CBCentralManagerDelegate {
 
 extension BLEService: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         if let error = error {
             SecureLogger.error("❌ Error discovering services for \(peripheral.name ?? "Unknown"): \(error.localizedDescription)", category: .session)
             // Retry service discovery after a delay
@@ -260,7 +260,7 @@ extension BLEService: CBPeripheralDelegate {
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         if let error = error {
             SecureLogger.error("❌ Error discovering characteristics for \(peripheral.name ?? "Unknown"): \(error.localizedDescription)", category: .session)
             return
@@ -308,7 +308,7 @@ extension BLEService: CBPeripheralDelegate {
     }
     
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         if let error = error {
             SecureLogger.error("❌ Error receiving notification: \(error.localizedDescription)", category: .session)
             return
@@ -377,7 +377,7 @@ extension BLEService: CBPeripheralDelegate {
     }
     
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         // Resume queued writes for this peripheral - called when canSendWriteWithoutResponse becomes true again
         if logRateLimiter.shouldLog(key: "peripheral-ready:\(peripheral.identifier.uuidString)") {
             SecureLogger.debug("📤 Peripheral \(peripheral.name ?? peripheral.identifier.uuidString.prefix(8).description) ready for more writes", category: .session)
@@ -386,7 +386,7 @@ extension BLEService: CBPeripheralDelegate {
     }
     
     func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         SecureLogger.warning("⚠️ Services modified for \(peripheral.name ?? peripheral.identifier.uuidString)", category: .session)
 
         let shouldRediscover = BLEService.shouldRediscoverBitChatService(
@@ -407,7 +407,7 @@ extension BLEService: CBPeripheralDelegate {
     }
     
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         if let error = error {
             SecureLogger.error("❌ Error updating notification state: \(error.localizedDescription)", category: .session)
         } else {

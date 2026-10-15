@@ -24,7 +24,7 @@ extension BLEService: CBPeripheralManagerDelegate {
 
         switch peripheral.state {
         case .poweredOn:
-            guard !isPanicSuspended else {
+            guard isTransportIdentityAvailable && areServicesRequested else {
                 peripheral.stopAdvertising()
                 peripheral.removeAllServices()
                 characteristic = nil
@@ -87,7 +87,7 @@ extension BLEService: CBPeripheralManagerDelegate {
     
     #if os(iOS)
     func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
-        guard !isPanicSuspended else {
+        guard isTransportIdentityAvailable && areServicesRequested else {
             peripheral.stopAdvertising()
             peripheral.removeAllServices()
             characteristic = nil
@@ -119,7 +119,7 @@ extension BLEService: CBPeripheralManagerDelegate {
     #endif
     
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
-        guard !isPanicSuspended else {
+        guard isTransportIdentityAvailable && areServicesRequested else {
             peripheral.stopAdvertising()
             return
         }
@@ -138,7 +138,7 @@ extension BLEService: CBPeripheralManagerDelegate {
     }
     
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         let centralUUID = central.identifier.uuidString
         SecureLogger.debug("📥 Central subscribed: \(centralUUID.prefix(8))…", category: .session)
         linkStateStore.addSubscribedCentral(central)
@@ -178,7 +178,7 @@ extension BLEService: CBPeripheralManagerDelegate {
         linkStateStore.removeSubscribedCentral(central)
 
         // Ensure we're still advertising for other devices to find us
-        if !isPanicSuspended, peripheral.isAdvertising == false {
+        if isTransportIdentityAvailable && areServicesRequested, peripheral.isAdvertising == false {
             SecureLogger.debug("📡 Restarting advertising after central unsubscribed", category: .session)
             peripheral.startAdvertising(BLERadioController.advertisementData())
         }
@@ -189,7 +189,7 @@ extension BLEService: CBPeripheralManagerDelegate {
     }
     
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         drainPendingNotifications(logPrefix: "✅ Sent")
     }
 
@@ -204,6 +204,7 @@ extension BLEService: CBPeripheralManagerDelegate {
     func drainPendingNotifications(logPrefix: String) {
         bleQueue.async { [weak self] in
             guard let self = self,
+                  self.isTransportTrafficAllowed,
                   let characteristic = self.characteristic,
                   !self.pendingNotifications.isEmpty else { return }
 
@@ -220,6 +221,7 @@ extension BLEService: CBPeripheralManagerDelegate {
         var sentCount = 0
 
         for (index, notification) in pending.enumerated() {
+            guard isTransportTrafficAllowed else { break }
             let success = peripheralManager?.updateValue(
                 notification.data,
                 for: characteristic,
@@ -250,7 +252,7 @@ extension BLEService: CBPeripheralManagerDelegate {
         for request in requests {
             peripheral.respond(to: request, withResult: .success)
         }
-        guard !isPanicSuspended else { return }
+        guard isTransportIdentityAvailable && areServicesRequested else { return }
         
         // Process writes. For long writes, CoreBluetooth may deliver multiple CBATTRequest values with offsets.
         // Combine per-central request values by offset before decoding.

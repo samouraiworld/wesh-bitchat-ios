@@ -462,14 +462,16 @@ final class BridgeCourierService: ObservableObject {
             return
         }
         let date = now()
-        if let myKey = myNoiseKey?() {
+        if let myKey = myNoiseKey?(), myKey.count == 32 {
             myTagsHex = Set(CourierEnvelope.candidateTags(noiseStaticKey: myKey, around: date).map { $0.hexEncodedString() })
         } else {
             myTagsHex = []
         }
         // While bridging with internet, every device watches drops for its
         // verified local peers — the single-switch analogue of gateway duty.
-        let peers = (localVerifiedPeers?() ?? []).prefix(Limits.maxWatchedPeers)
+        let peers = (localVerifiedPeers?() ?? [])
+            .filter { $0.noiseKey.count == 32 }
+            .prefix(Limits.maxWatchedPeers)
         watchedPeerTags = peers.map { peer in
             (peer.peerID, Set(CourierEnvelope.candidateTags(noiseStaticKey: peer.noiseKey, around: date).map { $0.hexEncodedString() }))
         }

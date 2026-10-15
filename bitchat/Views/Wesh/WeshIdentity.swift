@@ -92,6 +92,8 @@ extension ChatViewModel {
 
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
+        guard meshService.noiseStaticPublicKeyData().count == 32,
+              meshService.noiseSigningPublicKeyData().count == 32 else { return false }
         guard identityManager.isPersistenceAvailable,
               !identityManager.hasPendingPersistenceChanges else { return false }
         if let pinned = peerID.noiseKey, identityManager.isBlocked(fingerprint: pinned.sha256Fingerprint()) { return false }

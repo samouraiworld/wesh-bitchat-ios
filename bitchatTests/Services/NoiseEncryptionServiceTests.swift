@@ -30,8 +30,8 @@ struct NoiseEncryptionServiceTests {
     @Test("Announce and packet signatures round-trip and detect tampering")
     func announceAndPacketSignaturesRoundTrip() throws {
         let service = NoiseEncryptionService(keychain: MockKeychain())
-        let signingPublicKey = service.getSigningPublicKeyData()
-        let noisePublicKey = service.getStaticPublicKeyData()
+        let signingPublicKey = service.getSigningPublicKeyData()!
+        let noisePublicKey = service.getStaticPublicKeyData()!
 
         let signature = try #require(
             service.buildAnnounceSignature(
@@ -91,8 +91,8 @@ struct NoiseEncryptionServiceTests {
     func handshakeEncryptionAndFingerprintLifecycle() async throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         let recorder = AuthenticationRecorder()
 
         #expect(alice.onPeerAuthenticated == nil)
@@ -141,8 +141,8 @@ struct NoiseEncryptionServiceTests {
         let receiver = NoiseEncryptionService(keychain: MockKeychain())
         let claimedAlice = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData())
-        let claimedAlicePeerID = PeerID(publicKey: claimedAlice.getStaticPublicKeyData())
+        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData()!)
+        let claimedAlicePeerID = PeerID(publicKey: claimedAlice.getStaticPublicKeyData()!)
         let recorder = AuthenticationRecorder()
         receiver.addOnPeerAuthenticatedHandler(recorder.record(peerID:fingerprint:))
 
@@ -176,8 +176,8 @@ struct NoiseEncryptionServiceTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let receiver = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData()!)
         let recorder = AuthenticationRecorder()
         receiver.addOnPeerAuthenticatedHandler(recorder.record(peerID:fingerprint:))
 
@@ -225,8 +225,8 @@ struct NoiseEncryptionServiceTests {
     func validOrdinaryRehandshakeReplacesEstablishedSession() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let receiver = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let receiverPeerID = PeerID(publicKey: receiver.getStaticPublicKeyData()!)
 
         try establishSessions(alice: alice, bob: receiver)
         alice.clearSession(for: receiverPeerID)
@@ -251,8 +251,8 @@ struct NoiseEncryptionServiceTests {
     func automaticRekeyHandshakeIsNotStranded() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
         let originalGeneration = try #require(alice.sessionGeneration(for: bobPeerID))
         var leaseRan = false
@@ -311,8 +311,8 @@ struct NoiseEncryptionServiceTests {
     func largePrivateFileNoiseRoundTrip() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
 
         let content = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x51, count: 96 * 1024)
@@ -360,8 +360,8 @@ struct NoiseEncryptionServiceTests {
     func duplicateHandshakeIfNeededPreservesFirstAttempt() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         let starts = HandshakeInitiationRecorder()
 
         DispatchQueue.concurrentPerform(iterations: 20) { _ in
@@ -403,8 +403,8 @@ struct NoiseEncryptionServiceTests {
         let aliceKeychain = MockKeychain()
         let alice = NoiseEncryptionService(keychain: aliceKeychain)
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
 
         let restartedAlice = NoiseEncryptionService(keychain: aliceKeychain)
@@ -719,8 +719,8 @@ struct NoiseEncryptionServiceTests {
             ordinaryReconnectRollbackCooldown: 0.3
         )
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         let recovery = HandshakeStartRecorder()
         bob.onHandshakeRecoveryRequired = { [weak bob] request in
             bob?.cancelHandshakeRecovery(request)
@@ -793,8 +793,8 @@ struct NoiseEncryptionServiceTests {
             // was answered as a fresh initiation.
             ordinaryResponderHandshakeTimeout: 1.0
         )
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
         alice.clearSession(for: bobPeerID)
 
@@ -977,8 +977,8 @@ struct NoiseEncryptionServiceTests {
             keychain: secondKeychain,
             recentInitiatorCompletionGracePeriod: unlosableGracePeriod
         )
-        let firstPeerID = PeerID(publicKey: first.getStaticPublicKeyData())
-        let secondPeerID = PeerID(publicKey: second.getStaticPublicKeyData())
+        let firstPeerID = PeerID(publicKey: first.getStaticPublicKeyData()!)
+        let secondPeerID = PeerID(publicKey: second.getStaticPublicKeyData()!)
 
         let lower: NoiseEncryptionService
         let higher: NoiseEncryptionService
@@ -1080,8 +1080,8 @@ struct NoiseEncryptionServiceTests {
     func atomicReconnectQueuesUntilOrdinaryHandshakeCompletes() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         try establishSessions(alice: alice, bob: bob)
         let oldCiphertext = try alice.encrypt(Data("old transport".utf8), for: bobPeerID)
@@ -1119,8 +1119,8 @@ struct NoiseEncryptionServiceTests {
     func inboundReconnectQuarantinesOldTransport() throws {
         let restarted = NoiseEncryptionService(keychain: MockKeychain())
         let retained = NoiseEncryptionService(keychain: MockKeychain())
-        let restartedPeerID = PeerID(publicKey: restarted.getStaticPublicKeyData())
-        let retainedPeerID = PeerID(publicKey: retained.getStaticPublicKeyData())
+        let restartedPeerID = PeerID(publicKey: restarted.getStaticPublicKeyData()!)
+        let retainedPeerID = PeerID(publicKey: retained.getStaticPublicKeyData()!)
 
         try establishSessions(alice: restarted, bob: retained)
         let inFlightOldCiphertext = try restarted.encrypt(
@@ -1180,8 +1180,8 @@ struct NoiseEncryptionServiceTests {
     func establishedSessionIgnoresNonInitialHandshakeGarbage() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
 
         #expect(
@@ -1206,8 +1206,8 @@ struct NoiseEncryptionServiceTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         try establishSessions(alice: alice, bob: bob)
 
@@ -1265,8 +1265,8 @@ struct NoiseEncryptionServiceTests {
             ordinaryResponderHandshakeTimeout: 1.0
         )
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         try establishSessions(alice: alice, bob: bob)
         let forgedMessage1 = try mallory.initiateHandshake(with: bobPeerID)
@@ -1303,8 +1303,8 @@ struct NoiseEncryptionServiceTests {
     func failedReconnectAuthorizationPreservesSession() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         try establishSessions(alice: alice, bob: bob)
         // The initiator exchange consumed two authorizations for this peer.
@@ -1369,8 +1369,8 @@ struct NoiseEncryptionServiceTests {
         let keychain = MockKeychain()
         let service = NoiseEncryptionService(keychain: keychain)
 
-        #expect(service.getStaticPublicKeyData().count == 32)
-        #expect(service.getSigningPublicKeyData().count == 32)
+        #expect(service.getStaticPublicKeyData()!.count == 32)
+        #expect(service.getSigningPublicKeyData()!.count == 32)
 
         service.clearPersistentIdentity()
 
@@ -1390,9 +1390,9 @@ struct NoiseEncryptionServiceTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(
-            publicKey: alice.getStaticPublicKeyData()
+            publicKey: alice.getStaticPublicKeyData()!
         )
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         let message1 = try alice.initiateHandshake(with: bobPeerID)
         #expect(
@@ -1433,9 +1433,9 @@ struct NoiseEncryptionServiceTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(
-            publicKey: alice.getStaticPublicKeyData()
+            publicKey: alice.getStaticPublicKeyData()!
         )
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         try establishSessions(alice: alice, bob: bob)
         let plaintext = Data([
             NoisePayloadType.privateMessage.rawValue,
@@ -1496,8 +1496,8 @@ struct NoiseEncryptionServiceTests {
         alice: NoiseEncryptionService,
         bob: NoiseEncryptionService
     ) throws {
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
         let message1 = try alice.initiateHandshake(with: bobPeerID)
         let response = try bob.processHandshakeMessage(from: alicePeerID, message: message1)
         let message2 = try #require(response, "Expected handshake response")
@@ -1531,8 +1531,8 @@ private func orderedServices(
         ordinaryResponderHandshakeTimeout:
             ordinaryResponderHandshakeTimeout
     )
-    let firstPeerID = PeerID(publicKey: first.getStaticPublicKeyData())
-    let secondPeerID = PeerID(publicKey: second.getStaticPublicKeyData())
+    let firstPeerID = PeerID(publicKey: first.getStaticPublicKeyData()!)
+    let secondPeerID = PeerID(publicKey: second.getStaticPublicKeyData()!)
     if firstPeerID < secondPeerID {
         return (first, firstPeerID, second, secondPeerID)
     }

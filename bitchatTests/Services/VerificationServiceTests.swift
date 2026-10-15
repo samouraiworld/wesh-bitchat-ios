@@ -2,6 +2,43 @@ import XCTest
 @testable import bitchat
 
 final class VerificationServiceTests: XCTestCase {
+    func test_unavailableNoiseCannotBuildOrReuseQRCode() throws {
+        let keychain = MockKeychain()
+        let transport = BLEService(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain),
+            initializeBluetoothManagers: false
+        )
+        let service = VerificationService()
+        service.configure(with: transport)
+        let nickname = "synthetic-noise-unavailable-\(UUID().uuidString)"
+        _ = try XCTUnwrap(service.buildMyQRString(nickname: nickname, npub: nil))
+        transport.suspendForPanicReset()
+        XCTAssertNil(service.buildMyQRString(nickname: nickname, npub: nil))
+    }
+
+    func test_lockedNoiseRefusesQRCodeAndRecoversPersistedKeys() throws {
+        let keychain = MockKeychain()
+        let original = NoiseEncryptionService(keychain: keychain)
+        let expectedKey = try XCTUnwrap(original.getStaticPublicKeyData())
+        keychain.simulatedReadError = .deviceLocked
+        let transport = BLEService(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain),
+            initializeBluetoothManagers: false
+        )
+        let service = VerificationService()
+        service.configure(with: transport)
+        XCTAssertNil(service.buildMyQRString(nickname: "synthetic recovery", npub: nil))
+        keychain.simulatedReadError = nil
+        XCTAssertTrue(transport.retryNoiseIdentityPersistence())
+        let encoded = try XCTUnwrap(service.buildMyQRString(nickname: "synthetic recovery", npub: nil))
+        let parsed = try XCTUnwrap(service.verifyScannedQR(encoded))
+        XCTAssertEqual(parsed.noiseKeyHex, expectedKey.hexEncodedString())
+    }
+
     func test_buildMyQRString_roundTripsSuccessfully() throws {
         let (service, noise) = makeService()
         let nickname = "alice-\(UUID().uuidString)"
@@ -12,8 +49,8 @@ final class VerificationServiceTests: XCTestCase {
 
         XCTAssertEqual(parsed.nickname, nickname)
         XCTAssertEqual(parsed.npub, npub)
-        XCTAssertEqual(parsed.noiseKeyHex, noise.getStaticPublicKeyData().hexEncodedString())
-        XCTAssertEqual(parsed.signKeyHex, noise.getSigningPublicKeyData().hexEncodedString())
+        XCTAssertEqual(parsed.noiseKeyHex, noise.getStaticPublicKeyData()!.hexEncodedString())
+        XCTAssertEqual(parsed.signKeyHex, noise.getSigningPublicKeyData()!.hexEncodedString())
     }
 
     func test_buildMyQRString_returnsCachedValueForSameInputs() throws {
@@ -97,7 +134,7 @@ final class VerificationServiceTests: XCTestCase {
                 noiseKeyHex: parsed.noiseKeyHex,
                 nonceA: parsed.nonceA,
                 signature: parsed.signature,
-                signerPublicKeyHex: noise.getSigningPublicKeyData().hexEncodedString()
+                signerPublicKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString()
             )
         )
         XCTAssertFalse(
@@ -105,7 +142,7 @@ final class VerificationServiceTests: XCTestCase {
                 noiseKeyHex: parsed.noiseKeyHex,
                 nonceA: Data([0xFF]),
                 signature: parsed.signature,
-                signerPublicKeyHex: noise.getSigningPublicKeyData().hexEncodedString()
+                signerPublicKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString()
             )
         )
     }
@@ -152,8 +189,8 @@ final class VerificationServiceTests: XCTestCase {
     ) throws -> String {
         var payload = VerificationService.VerificationQR(
             v: 1,
-            noiseKeyHex: noise.getStaticPublicKeyData().hexEncodedString(),
-            signKeyHex: noise.getSigningPublicKeyData().hexEncodedString(),
+            noiseKeyHex: noise.getStaticPublicKeyData()!.hexEncodedString(),
+            signKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString(),
             npub: npub,
             nickname: nickname,
             ts: ts,

@@ -13,6 +13,142 @@ import BitFoundation
 
 struct BLEServiceCoreTests {
 
+    @Test
+    func unavailableNoiseBlocksRadioIdentityAndOutboundPackets() async {
+        let keychain = MockKeychain()
+        keychain.simulatedReadError = .deviceLocked
+        let ble = makeService(keychain: keychain)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        ble.startServices()
+        ble.sendAnnounce(forceSend: true)
+        ble.sendMessage("synthetic unavailable send")
+        ble.broadcastNostrCarrier(Data([1]))
+        await ble._test_drainNoiseMessagePipeline()
+
+        #expect(!ble.isTransportIdentityAvailable)
+        #expect(ble.noiseIdentityFingerprint().isEmpty)
+        #expect(ble.noiseStaticPublicKeyData().isEmpty)
+        #expect(ble.noiseSigningPublicKeyData().isEmpty)
+        #expect(ble.myPeerID.id.isEmpty)
+        #expect(ble.radioIsPanicSuspended())
+        #expect(ble.centralManager == nil)
+        #expect(ble.peripheralManager == nil)
+        #expect(ble.getCurrentBluetoothState() == .unknown)
+        #expect(outbound.snapshot().isEmpty)
+        #expect(keychain.identitySaveCount == 0)
+    }
+
+    @Test
+    func foregroundRecoveryPublishesOriginalPersistedIdentity() {
+        let keychain = MockKeychain()
+        let original = NoiseEncryptionService(keychain: keychain)
+        let expectedKey = original.getStaticPublicKeyData()!
+        let expectedFingerprint = original.getIdentityFingerprint()!
+        let saves = keychain.identitySaveCount
+        keychain.simulatedReadError = .deviceLocked
+        let ble = makeService(keychain: keychain)
+        #expect(ble.noiseStaticPublicKeyData().isEmpty)
+
+        keychain.simulatedReadError = nil
+        ble.recoverNoiseIdentityForForeground()
+        #expect(ble.isTransportIdentityAvailable)
+        #expect(ble.noiseStaticPublicKeyData() == expectedKey)
+        #expect(ble.noiseIdentityFingerprint() == expectedFingerprint)
+        #expect(ble.myPeerID == PeerID(publicKey: expectedKey))
+        #expect(keychain.identitySaveCount == saves)
+    }
+
+    @Test
+    func foregroundRecoveryDoesNotUndoExplicitStop() {
+        let keychain = MockKeychain()
+        keychain.simulatedReadError = .deviceLocked
+        let scheduler = BLEEngineManualScheduler()
+        let ble = makeService(keychain: keychain, engineScheduler: scheduler)
+        ble.startServices()
+        ble.stopServices()
+        keychain.simulatedReadError = nil
+        ble.recoverNoiseIdentityForForeground()
+
+        #expect(!ble.areServicesRequested)
+        #expect(!ble.isTransportIdentityAvailable)
+        #expect(keychain.identitySaveCount == 0)
+        #expect(scheduler.pendingCount == 0)
+        ble.startServices()
+        #expect(ble.areServicesRequested)
+        #expect(ble.isTransportIdentityAvailable)
+        #expect(keychain.identitySaveCount == 2)
+    }
+
+
+    @Test
+    func explicitStopRejectsQueuedAndNewOutboundTrafficUntilRestart() async {
+        let scheduler = BLEEngineManualScheduler()
+        let ble = makeService(engineScheduler: scheduler)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        ble.startServices()
+        ble.stopServices()
+        ble.sendMessage("synthetic stopped message")
+        ble.sendAnnounce(forceSend: true)
+        ble.broadcastNostrCarrier(Data([1]))
+        scheduler.advance(by: TransportConfig.bleInitialAnnounceDelaySeconds + 1)
+        await ble._test_drainNoiseMessagePipeline()
+        #expect(ble.isTransportIdentityAvailable)
+        #expect(!ble.isTransportTrafficAllowed)
+        #expect(outbound.snapshot().isEmpty)
+
+        ble.startServices()
+        ble.sendMessage("synthetic restarted message")
+        await ble._test_drainNoiseMessagePipeline()
+        #expect(ble.isTransportTrafficAllowed)
+        #expect(outbound.count(ofType: .message) == 1)
+    }
+
+    @Test
+    func restartDoesNotReviveAnOldDelayedInitialAnnouncement() async {
+        let scheduler = BLEEngineManualScheduler()
+        let ble = makeService(engineScheduler: scheduler)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let delay = TransportConfig.bleInitialAnnounceDelaySeconds
+        ble.startServices()
+        scheduler.advance(by: delay / 2)
+        ble.stopServices()
+        ble.startServices()
+        scheduler.advance(by: delay / 2 + 0.01)
+        await ble._test_drainNoiseMessagePipeline()
+        #expect(outbound.count(ofType: .announce) == 0)
+        scheduler.advance(by: delay / 2)
+        await ble._test_drainNoiseMessagePipeline()
+        #expect(outbound.count(ofType: .announce) == 1)
+    }
+
+    @Test
+    func panicCompletionWithoutRestartKeepsCallbacksAndForegroundStopped() async {
+        let scheduler = BLEEngineManualScheduler()
+        let ble = makeService(engineScheduler: scheduler)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        ble.suspendForPanicReset()
+        ble.completePanicReset(restartServices: false)
+        ble.recoverNoiseIdentityForForeground()
+        ble.sendAnnounce(forceSend: true)
+        ble.broadcastNostrCarrier(Data([1]))
+        await ble._test_drainNoiseMessagePipeline()
+
+        #expect(!ble.isPanicSuspended)
+        #expect(ble.isTransportIdentityAvailable)
+        #expect(!ble.areServicesRequested)
+        #expect(!ble.isTransportTrafficAllowed)
+        #expect(ble.radioIsPanicSuspended())
+        #expect(scheduler.pendingCount == 0)
+        #expect(outbound.snapshot().isEmpty)
+        ble.startServices()
+        #expect(ble.isTransportTrafficAllowed)
+        #expect(!ble.radioIsPanicSuspended())
+    }
+
     /// Records ping completions (delivered on the main actor) so the
     /// injected-clock test can assert from its own thread.
     private final class MeshPingResultCollector: @unchecked Sendable {
@@ -79,7 +215,7 @@ struct BLEServiceCoreTests {
         let timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
         let unsigned = makePublicPacket(content: "Hello", sender: sender, timestamp: timestamp)
         let packet = try #require(signer.signPacket(unsigned), "Failed to sign public message")
-        let signingKey = signer.getSigningPublicKeyData()
+        let signingKey = signer.getSigningPublicKeyData()!
 
         ble._test_handlePacket(packet, fromPeerID: sender, signingPublicKey: signingKey)
         let receivedFirst = await TestHelpers.waitUntil(
@@ -124,8 +260,8 @@ struct BLEServiceCoreTests {
         let signer = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "Spoof",
-            noisePublicKey: signer.getStaticPublicKeyData(),
-            signingPublicKey: signer.getSigningPublicKeyData(),
+            noisePublicKey: signer.getStaticPublicKeyData()!,
+            signingPublicKey: signer.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let payload = try #require(announcement.encode(), "Failed to encode announcement")
@@ -156,7 +292,7 @@ struct BLEServiceCoreTests {
         let ble = makeService()
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
         let outbound = OutboundPacketTap()
         ble._test_onOutboundPacket = outbound.record
 
@@ -164,7 +300,7 @@ struct BLEServiceCoreTests {
         ble._test_handlePacket(
             unsigned,
             fromPeerID: alicePeerID,
-            signingPublicKey: alice.getSigningPublicKeyData()
+            signingPublicKey: alice.getSigningPublicKeyData()!
         )
 
         let unsignedRelayed = await TestHelpers.waitUntil(
@@ -180,7 +316,7 @@ struct BLEServiceCoreTests {
         ble._test_handlePacket(
             badSignature,
             fromPeerID: alicePeerID,
-            signingPublicKey: alice.getSigningPublicKeyData()
+            signingPublicKey: alice.getSigningPublicKeyData()!
         )
 
         let badSignatureRelayed = await TestHelpers.waitUntil(
@@ -195,7 +331,7 @@ struct BLEServiceCoreTests {
     func validSignedLeaveEvictsSessionAndRelays() async throws {
         let ble = makeService()
         let alice = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
 
         // Establish a real session so the leave regression also verifies that
         // stale secure-delivery state is retired, not just the peer-list row.
@@ -221,7 +357,7 @@ struct BLEServiceCoreTests {
         ble._test_handlePacket(
             signedLeave,
             fromPeerID: alicePeerID,
-            signingPublicKey: alice.getSigningPublicKeyData()
+            signingPublicKey: alice.getSigningPublicKeyData()!
         )
 
         let evicted = await TestHelpers.waitUntil(
@@ -307,8 +443,8 @@ struct BLEServiceCoreTests {
         let signer = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "alice",
-            noisePublicKey: signer.getStaticPublicKeyData(),
-            signingPublicKey: signer.getSigningPublicKeyData(),
+            noisePublicKey: signer.getStaticPublicKeyData()!,
+            signingPublicKey: signer.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let payload = try #require(announcement.encode(), "Failed to encode announcement")
@@ -354,8 +490,8 @@ struct BLEServiceCoreTests {
         let victimSigner = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "victim",
-            noisePublicKey: victimSigner.getStaticPublicKeyData(),
-            signingPublicKey: victimSigner.getSigningPublicKeyData(),
+            noisePublicKey: victimSigner.getStaticPublicKeyData()!,
+            signingPublicKey: victimSigner.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let payload = try #require(announcement.encode(), "Failed to encode announcement")
@@ -469,8 +605,8 @@ struct BLEServiceCoreTests {
         let victimSigner = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "victim",
-            noisePublicKey: victimSigner.getStaticPublicKeyData(),
-            signingPublicKey: victimSigner.getSigningPublicKeyData(),
+            noisePublicKey: victimSigner.getStaticPublicKeyData()!,
+            signingPublicKey: victimSigner.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let payload = try #require(announcement.encode(), "Failed to encode announcement")
@@ -523,8 +659,8 @@ struct BLEServiceCoreTests {
         let victim = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "victim",
-            noisePublicKey: victim.getStaticPublicKeyData(),
-            signingPublicKey: victim.getSigningPublicKeyData(),
+            noisePublicKey: victim.getStaticPublicKeyData()!,
+            signingPublicKey: victim.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let victimPeerID = PeerID(publicKey: announcement.noisePublicKey)
@@ -590,7 +726,7 @@ struct BLEServiceCoreTests {
     func replacementXXMessageOneWithPayloadCannotAuthenticateIngressLink() async throws {
         let ble = makeService()
         let victim = NoiseEncryptionService(keychain: MockKeychain())
-        let victimPeerID = PeerID(publicKey: victim.getStaticPublicKeyData())
+        let victimPeerID = PeerID(publicKey: victim.getStaticPublicKeyData()!)
 
         // Preserve a working victim session while an unauthenticated
         // replacement candidate arrives on a newly bound physical link.
@@ -688,7 +824,7 @@ struct BLEServiceCoreTests {
         let ble = makeService()
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
 
         // Establish BLE as responder so the following inbound reconnect is
         // not intentionally coalesced by the initiator-completion grace path.
@@ -858,7 +994,7 @@ struct BLEServiceCoreTests {
         let ble = makeService(noiseResponderHandshakeTimeout: 0.3)
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
 
         // Establish BLE as responder so the inbound reconnect below is not
         // coalesced by the initiator-completion grace path.
@@ -1069,8 +1205,8 @@ struct BLEServiceCoreTests {
         let signer = NoiseEncryptionService(keychain: MockKeychain())
         let announcement = AnnouncementPacket(
             nickname: "alice",
-            noisePublicKey: signer.getStaticPublicKeyData(),
-            signingPublicKey: signer.getSigningPublicKeyData(),
+            noisePublicKey: signer.getStaticPublicKeyData()!,
+            signingPublicKey: signer.getSigningPublicKeyData()!,
             directNeighbors: nil
         )
         let payload = try #require(announcement.encode(), "Failed to encode announcement")
@@ -1111,7 +1247,7 @@ struct BLEServiceCoreTests {
     func canDeliverSecurelyNormalizesFullNoiseKeyPeerIDs() async throws {
         let ble = makeService()
         let remote = NoiseEncryptionService(keychain: MockKeychain())
-        let remoteKey = remote.getStaticPublicKeyData()
+        let remoteKey = remote.getStaticPublicKeyData()!
         let shortID = PeerID(publicKey: remoteKey)
         let fullKeyID = PeerID(hexData: remoteKey)
         #expect(fullKeyID.toShort() == shortID)
@@ -1200,6 +1336,8 @@ struct BLEServiceCoreTests {
         #expect(outbound.count(ofType: .message) == 0)
 
         ble.completePanicReset(restartServices: false)
+        // Resume this hermetic transport explicitly; Bluetooth managers remain disabled.
+        ble.startServices()
         ble.sendPacket(packet)
         #expect(outbound.count(ofType: .message) == 1)
     }
@@ -1228,6 +1366,8 @@ struct BLEServiceCoreTests {
         #expect(delegate.messageIDs.isEmpty)
 
         ble.completePanicReset(restartServices: false)
+        // Resume this hermetic transport explicitly; Bluetooth managers remain disabled.
+        ble.startServices()
         ble._test_emitTransportEvent(.messageReceived(message))
         await Task.yield()
         #expect(delegate.messageIDs == [message.id])
@@ -1279,6 +1419,8 @@ struct BLEServiceCoreTests {
         // A packet captured under the reopened lifecycle still crosses the
         // same handoff, proving the test did not merely disable the hook.
         ble.completePanicReset(restartServices: false)
+        // Resume this hermetic transport explicitly; Bluetooth managers remain disabled.
+        ble.startServices()
         ble._test_handlePacketFromBLEQueue(packet, fromPeerID: sender)
         #expect(await TestHelpers.waitUntil(
             { gate.handoffCount == 1 },
@@ -1525,11 +1667,11 @@ private final class PanicIngressObserver: @unchecked Sendable {
 }
 
 private func makeService(
+    keychain: MockKeychain = MockKeychain(),
     noiseResponderHandshakeTimeout: TimeInterval =
         NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
     engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
 ) -> BLEService {
-    let keychain = MockKeychain()
     let identityManager = MockIdentityManager(keychain)
     let idBridge = NostrIdentityBridge(keychain: MockKeychainHelper())
     return BLEService(

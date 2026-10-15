@@ -90,3 +90,77 @@ Evidence is ignored: `.validation/identity-cache-persistence-record.json`,
 `.validation/identity-cache-persistence-targeted-verified.xcresult` and
 `.validation/identity-cache-persistence-full.xcresult`. The test simulator is
 shut down without wiping data; no physical-device, archive or export result.
+
+## Noise identity availability and recovery
+
+The next source removes Noise's temporary-key and malformed-key replacement
+fallbacks. Both legacy private-key items must be readable and valid before the
+service publishes either public key, a fingerprint, signing, courier/prekey
+operations, or a session manager. An unavailable service has no identity context;
+its core getters return nil and local-identity operations fail closed. The
+compatibility Transport getters expose empty absence values, which callers
+validate before QR enrollment, Wesh sending, radio startup or packet handoff.
+No fingerprint is derived from empty bytes and no empty-key announcement is sent.
+
+A new pair is generated only when both legacy items are explicitly absent.
+Both writes require success and both exact private values must be read back
+before publication. An interrupted save retains the exact unpublished pair in
+RAM for retry, writes only a still-missing item, and refuses divergent stored
+bytes or any read error. Loading and retry are serialized across service
+instances in this process. Once ready, the immutable keys and manager stay
+paired; foreground recovery does not rotate an active identity. Panic invalidates
+the context and pending pair before deletion and forbids retry on that instance.
+
+This retains the two-item legacy schema and its limitations: a process death
+between first-use writes can leave an orphaned half. A new process preserves
+that half and remains unavailable until explicit recovery restores the original
+pair; it never invents the missing key. There is no transaction across items,
+no cross-process Keychain compare-and-swap, and no new recovery UI or automatic
+migration. Existing valid identity and wire/cryptographic formats are unchanged.
+
+Foreground/start retries protected storage before BLE activation. Deferred
+startup resumes only while service use is still requested; an explicit stop or
+panic suspension stays stopped. Bluetooth restoration/state callbacks and
+packet handoffs also require identity availability. All new fault tests use
+mock storage and synthetic identities. No real Keychain, physical-device,
+VoiceOver, BLE interoperability or delivery qualification is implied.
+
+The current Wesh UI disables sending while Noise is unavailable, but reports
+Bluetooth as unknown rather than displaying a dedicated Noise-storage recovery
+reason. A dedicated recovery screen/retry control remains future work. The
+availability and foreground/start retry behavior above is implemented; no
+interactive or physical recovery qualification is claimed.
+
+Reviewed-source targeted validation: **189/189 passed** (177 Swift Testing +12
+XCTest), zero failures/skips/expected failures, Xcode exit0 and xcresult Passed.
+The frozen sources include the final panic-completion lifecycle correction;
+initial targeted141 and later180 passing runs precede those final fixes and
+remain separate intermediate evidence. The initial rekey-fallback collection
+literal compile error executed no tests and is preserved separately.
+
+Twenty-four added test cases relative to the previous full collection cover
+Noise storage/availability (16 cases replacing four previous cases: net+12),
+callers/radio/QR/courier and start/stop/panic boundaries (12 additional cases).
+The complete passing targeted set is included in the unfiltered collection;
+counts must never be added together. Evidence remains ignored under
+`.validation/noise-persistence-record.json` and
+`.validation/noise-persistence-targeted-reviewed.xcresult`.
+
+Final reviewed-source **unfiltered full validation: 2388/2388 passed** (2156
+Swift Testing +232 XCTest), zero failures/skips/expected failures, Xcode exit0
+and xcresult Passed. No only/skip arguments were supplied. The 189 targeted
+cases are included in that total. All26 frozen Swift-file SHA256 values and
+all three compiled-product SHA256 values (app executable, debug dylib and test
+bundle executable) still match after the run. The39 inherited off-tree
+ViewSmokeTests Environment/State warnings remain; no live accessibility result
+is claimed. Full evidence: `.validation/noise-persistence-full.xcresult`,
+its summary/log and `.validation/noise-persistence-record.json`.
+
+Independent artifact recheck confirmed the old RC5 ZIP and IPA against their
+manifest and all119 archived files unchanged; evidence is
+`.validation/noise-gatt-rc5-artifact-recheck.json`. This new source was neither
+archived nor exported and is absent from those older distribution artifacts.
+No version change, upload or distribution was performed.
+
+The dedicated test simulator was already Shutdown when shutdown was requested;
+`simctl list devices booted` confirmed no booted simulator. No data was wiped.

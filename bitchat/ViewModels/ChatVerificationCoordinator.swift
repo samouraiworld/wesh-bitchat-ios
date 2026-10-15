@@ -353,7 +353,8 @@ final class ChatVerificationCoordinator {
     }
 
     func beginQRVerification(with qr: VerificationService.VerificationQR) -> Bool {
-        guard context.isIdentityStateAvailable else { return false }
+        guard context.isIdentityStateAvailable,
+              context.noiseStaticPublicKeyData().count == 32 else { return false }
         let targetNoise = qr.noiseKeyHex.lowercased()
         guard let peer = context.unifiedPeers.first(where: {
             $0.noisePublicKey.hexEncodedString().lowercased() == targetNoise
@@ -398,7 +399,8 @@ final class ChatVerificationCoordinator {
     }
 
     func handleVerifyChallengePayload(from peerID: PeerID, payload: Data) {
-        guard let challenge = VerificationService.shared.parseVerifyChallenge(payload) else { return }
+        guard context.noiseStaticPublicKeyData().count == 32,
+              let challenge = VerificationService.shared.parseVerifyChallenge(payload) else { return }
 
         let myNoiseHex = context.noiseStaticPublicKeyData()
             .hexEncodedString()

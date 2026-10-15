@@ -14,6 +14,13 @@ final class MockKeychain: KeychainManagerProtocol {
     private var storage: [String: Data] = [:]
     private var serviceStorage: [String: [String: Data]] = [:]
 
+    // Per-instance faults; no real Keychain operations are used by these tests.
+    var identityReadFault: ((String, Int) -> KeychainReadResult?)?
+    var identitySaveFault: ((String, Data, Int) -> KeychainSaveResult?)?
+    private(set) var identityReadCount = 0
+    private(set) var identitySaveCount = 0
+    private(set) var identityDeleteCount = 0
+
     // BCH-01-009: Configurable error simulation for testing
     var simulatedReadError: KeychainReadResult?
     var simulatedSaveError: KeychainSaveResult?
@@ -31,6 +38,7 @@ final class MockKeychain: KeychainManagerProtocol {
     }
 
     func deleteIdentityKey(forKey key: String) -> Bool {
+        identityDeleteCount += 1
         storage.removeValue(forKey: key)
         return true
     }
@@ -57,6 +65,8 @@ final class MockKeychain: KeychainManagerProtocol {
 
     // BCH-01-009: New methods with proper error classification
     func getIdentityKeyWithResult(forKey key: String) -> KeychainReadResult {
+        identityReadCount += 1
+        if let fault = identityReadFault?(key, identityReadCount) { return fault }
         if let simulated = simulatedReadError {
             return simulated
         }
@@ -67,6 +77,8 @@ final class MockKeychain: KeychainManagerProtocol {
     }
 
     func saveIdentityKeyWithResult(_ keyData: Data, forKey key: String) -> KeychainSaveResult {
+        identitySaveCount += 1
+        if let fault = identitySaveFault?(key, keyData, identitySaveCount) { return fault }
         if let simulated = simulatedSaveError {
             return simulated
         }

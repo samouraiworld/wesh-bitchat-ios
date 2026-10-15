@@ -175,6 +175,19 @@ private func makeVerificationQR(noiseKeyHex: String) -> VerificationService.Veri
 /// `MockChatVerificationContext` with no `ChatViewModel`.
 @Suite(.serialized)
 struct ChatVerificationCoordinatorContextTests {
+    @Test @MainActor
+    func unavailableLocalNoiseRefusesQRChallengeAndHandshake() {
+        let context = MockChatVerificationContext()
+        context.myNoiseStaticKey = Data()
+        let peerID = PeerID(str: "1122334455667788")
+        let key = Data(repeating: 0x73, count: 32)
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Synthetic")]
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        #expect(!coordinator.beginQRVerification(with: makeVerificationQR(noiseKeyHex: key.hexEncodedString())))
+        #expect(context.triggeredHandshakes.isEmpty)
+        #expect(context.sentChallenges.isEmpty)
+    }
+
 
     @Test @MainActor
     func unavailableIdentityStateRefusesManualVerificationAndQRStart() {
