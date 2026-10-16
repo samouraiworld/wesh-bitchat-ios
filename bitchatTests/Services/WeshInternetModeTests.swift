@@ -332,20 +332,19 @@ struct WeshInternetModeTests {
         #expect(harness.make().state == .off)
     }
 
-    @Test func artiThatDidNotStopIsNotDeletedUnderAndPanicReportsFailure() {
+    @Test func panicDeletesArtiEvenIfItDidNotStopButReportsFailure() {
         let harness = Harness()
         let mode = enabledMode(harness)
         harness.events.removeAll()
         harness.artiExitsInTime = false
+        // Under duress the directory goes now, not at the next launch.
         #expect(!mode.wipeForPanic())
-        // Never delete under a live writer.
-        #expect(harness.events == ["network:off", "stopTor"])
-        #expect(mode.state == .off)
-        // Retried panic: deletion follows a confirmed stop.
-        harness.events.removeAll()
-        harness.artiExitsInTime = true
-        #expect(mode.wipeForPanic())
         #expect(harness.events == ["network:off", "stopTor", "deleteArti"])
+        #expect(mode.state == .off)
+        // The toggle is absent, so the next launch deletes again whatever Arti recreated.
+        harness.events.removeAll()
+        harness.make().start()
+        #expect(harness.events == ["network:off", "deleteArti"])
     }
 
     @Test func anInterruptedArtiWipeCompletesAtNextLaunch() {
@@ -358,11 +357,12 @@ struct WeshInternetModeTests {
         // The toggle is absent after panic, so the next launch deletes again.
         harness.make().start()
         #expect(harness.events == ["network:off", "deleteArti"])
-        // Arti did not stop: nothing deleted at panic, the next launch deletes.
+        // Arti did not stop: deleted at panic anyway, and again at the next launch.
         let stuck = Harness()
         let stuckMode = enabledMode(stuck)
         stuck.artiExitsInTime = false
         #expect(!stuckMode.wipeForPanic())
+        #expect(stuck.events.suffix(2) == ["stopTor", "deleteArti"])
         stuck.events.removeAll()
         stuck.make().start()
         #expect(stuck.events == ["network:off", "deleteArti"])

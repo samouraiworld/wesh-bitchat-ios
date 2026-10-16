@@ -261,10 +261,11 @@ final class WeshInternetMode: ObservableObject {
 
     /// Panic: Internet off (persisted), Tor stopped and awaited, Arti state
     /// deleted and checked. Nostr keys are wiped by the identity bridge in the
-    /// same transaction. Returns false if Arti did not stop (its directory is
-    /// then left alone, never deleted under a live writer) or the directory
-    /// survived; a retried panic or the next launch deletes it once Arti is
-    /// stopped, since the toggle is then absent.
+    /// same transaction. The directory is deleted even if Arti did not stop
+    /// in time: under duress it must not wait for the next launch. Returns
+    /// false if Arti did not stop or the directory survived, so the panic
+    /// stays pending; the next launch (toggle absent) deletes again whatever
+    /// Arti recreated.
     @discardableResult
     func wipeForPanic() -> Bool {
         defaults.removeObject(forKey: WeshInternetSettings.enabledKey)
@@ -272,11 +273,12 @@ final class WeshInternetMode: ObservableObject {
         disclosureAccepted = false
         apply(.panic)
         dependencies.setNetworkEnabled(false)
-        guard dependencies.stopTorAndWait() else {
-            SecureLogger.error("Panic: Arti did not stop in time; its directory is kept for a retry", category: .security)
-            return false
+        let stopped = dependencies.stopTorAndWait()
+        if !stopped {
+            SecureLogger.error("Panic: Arti did not stop in time; deleting its directory anyway, wipe left pending", category: .security)
         }
-        return deleteArtiDirectory()
+        let deleted = deleteArtiDirectory()
+        return stopped && deleted
     }
 
     private func deleteArtiDirectory() -> Bool {
