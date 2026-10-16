@@ -19,6 +19,8 @@ final class WeshQRTrust: ObservableObject {
     struct Contact: Codable, Identifiable {
         let noiseKeyHex: String
         let nickname: String
+        /// Signed by the contact's QR and validated at enrollment; nil = Bluetooth-only.
+        var npub: String? = nil
         var id: String { noiseKeyHex }
         var peerID: PeerID { PeerID(hexData: Data(hexString: noiseKeyHex) ?? Data()) }
     }
@@ -33,12 +35,12 @@ final class WeshQRTrust: ObservableObject {
         contacts = (defaults.data(forKey: "wesh.qrContacts.v1").flatMap { try? JSONDecoder().decode([Contact].self, from: $0) }) ?? []
     }
 
-    func record(sessionKey: Data, nickname: String = "Contact") {
+    func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil) {
         guard sessionKey.count == 32 else { return }
         fingerprints.insert(sessionKey.sha256Fingerprint())
         let hex = sessionKey.hexEncodedString()
         contacts.removeAll { $0.noiseKeyHex == hex }
-        contacts.append(Contact(noiseKeyHex: hex, nickname: nickname))
+        contacts.append(Contact(noiseKeyHex: hex, nickname: nickname, npub: npub))
         persist()
     }
 

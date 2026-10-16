@@ -58,6 +58,8 @@ protocol ChatVerificationContext: AnyObject {
     func noiseSessionPublicKeyData(for peerID: PeerID) -> Data?
     /// Our own Noise static public key.
     func noiseStaticPublicKeyData() -> Data
+    /// Our own npub; a contact's QR may not claim it.
+    var ownNostrNpub: String? { get }
     func hasEstablishedNoiseSession(with peerID: PeerID) -> Bool
     func triggerHandshake(with peerID: PeerID)
     func privateMediaPeerDidAuthenticate(_ peerID: PeerID)
@@ -126,6 +128,8 @@ extension ChatViewModel: ChatVerificationContext {
         meshService.noiseStaticPublicKeyData()
     }
 
+    var ownNostrNpub: String? { try? idBridge.getCurrentNostrIdentity()?.npub }
+
     func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {
         mediaTransferCoordinator.peerDidAuthenticate(peerID.toShort())
     }
@@ -166,6 +170,7 @@ final class ChatVerificationCoordinator {
         let noiseKeyHex: String
         let signKeyHex: String
         let nickname: String
+        let npub: String?
         let nonceA: Data
         let createdAt: Date
         var sent: Bool
@@ -377,6 +382,7 @@ final class ChatVerificationCoordinator {
             noiseKeyHex: qr.noiseKeyHex,
             signKeyHex: qr.signKeyHex,
             nickname: qr.nickname,
+            npub: qr.npub,
             nonceA: nonce,
             createdAt: now(),
             sent: false
@@ -461,7 +467,12 @@ final class ChatVerificationCoordinator {
         guard context.isIdentityStateAvailable,
               !context.hasPendingIdentityStateChanges else { return }
         pendingQRVerifications.removeValue(forKey: peerID)
-        if weshMode { WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname) }
+        if weshMode {
+            // The Noise challenge just proved the QR signer holds this session.
+            let npub = WeshQRNpub.enrollable(pending.npub, noiseKeyHex: pending.noiseKeyHex,
+                                             ownNpub: context.ownNostrNpub, contacts: WeshQRTrust.shared.contacts)
+            WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname, npub: npub)
+        }
         completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
         context.setStoredVerified(fingerprint, verified: true)
 

@@ -95,6 +95,7 @@ private final class MockChatVerificationContext: ChatVerificationContext {
 
     // Noise sessions & verification transport
     var myNoiseStaticKey = Data(repeating: 0x42, count: 32)
+    var ownNostrNpub: String?
     var establishedNoiseSessions: Set<PeerID> = []
     var noiseSessionKeysByPeerID: [PeerID: Data] = [:]
     private(set) var installedCallbacks: (onPeerAuthenticated: (PeerID, String) -> Void, onHandshakeRequired: (PeerID) -> Void)?
@@ -223,6 +224,55 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(context.storedVerifiedCalls.isEmpty)
         #expect(context.updatedEncryptionStatusPeers.isEmpty)
         #expect(context.vouchToConnectedVerifiedPeersCount == 0)
+    }
+
+    @Test @MainActor
+    func qrNpubIsBoundToTheNoiseKeyOnlyAfterTheChallenge() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        defer { restoreQRContacts(previousContacts) }
+        WeshQRTrust.shared.clear()
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        let peerID = PeerID(str: "1122334455667788")
+        let context = MockChatVerificationContext()
+        context.ownNostrNpub = try NostrIdentity.generate().npub
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Nora")]
+        context.establishedNoiseSessions = [peerID]
+        context.noiseSessionKeysByPeerID[peerID] = key
+        context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+        // The mock does not persist the verified flag the coordinator sets.
+        context.verifiedFingerprints.insert(key.sha256Fingerprint())
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
+        func enroll(npub: String?) throws {
+            let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+                signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: npub,
+                nickname: "Nora", ts: 0, nonceB64: "", sigHex: "")
+            let before = WeshQRTrust.shared.contacts.first?.npub
+            #expect(coordinator.beginQRVerification(with: qr))
+            let nonce = try #require(coordinator.qrAttemptNonce(for: key))
+            // Scanning alone binds nothing: the Noise challenge must answer first.
+            #expect(WeshQRTrust.shared.contacts.first?.npub == before)
+            let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: qr.noiseKeyHex, nonceA: nonce))
+            coordinator.handleVerifyResponsePayload(from: peerID, payload: try #require(NoisePayload.decode(encoded)).data)
+            #expect(coordinator.qrProgress(for: key, attemptNonce: nonce) == .verified)
+        }
+
+        let theirs = try NostrIdentity.generate().npub
+        try enroll(npub: theirs)
+        #expect(WeshQRTrust.shared.contacts.map(\.npub) == [theirs])
+        #expect(WeshQRTrust.shared.contacts.first?.noiseKeyHex == key.hexEncodedString())
+
+        // A QR claiming my own npub enrolls Bluetooth-only.
+        try enroll(npub: context.ownNostrNpub)
+        #expect(WeshQRTrust.shared.contacts.count == 1)
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        #expect(WeshQRTrust.shared.contacts.first?.requiresRescanForInternet == true)
+
+        // An invalid point also enrolls Bluetooth-only.
+        try enroll(npub: "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzsfj2hcx")
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        #expect(WeshQRTrust.shared.fingerprints.contains(key.sha256Fingerprint()))
     }
 
     @Test @MainActor
@@ -399,7 +449,7 @@ struct ChatVerificationCoordinatorContextTests {
         WeshQRTrust.shared.clear()
         for contact in contacts {
             if let key = Data(hexString: contact.noiseKeyHex) {
-                WeshQRTrust.shared.record(sessionKey: key, nickname: contact.nickname)
+                WeshQRTrust.shared.record(sessionKey: key, nickname: contact.nickname, npub: contact.npub)
             }
         }
         // Hosted tests share the simulator app's preferences. Flush cleanup
