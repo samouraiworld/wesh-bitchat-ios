@@ -28,7 +28,7 @@ struct LocalNicknameStore {
         switch keychain.getIdentityKeyWithResult(forKey: Self.keychainKey) {
         case .success(let data):
             if legacy != nil { defaults.removeObject(forKey: Self.legacyDefaultsKey) }
-            return .stored(String(decoding: data, as: UTF8.self))
+            return .stored(String(bytes: data, encoding: .utf8) ?? "")
         case .itemNotFound:
             guard let legacy else { return .absent }
             save(legacy)

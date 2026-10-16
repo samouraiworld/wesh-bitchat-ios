@@ -20,7 +20,7 @@ struct LocalNicknameStoreTests {
         var store: LocalNicknameStore { LocalNicknameStore(keychain: keychain, defaults: defaults) }
         var legacy: String? { defaults.string(forKey: LocalNicknameStore.legacyDefaultsKey) }
         var stored: String? {
-            keychain.getIdentityKey(forKey: LocalNicknameStore.keychainKey).map { String(decoding: $0, as: UTF8.self) }
+            keychain.getIdentityKey(forKey: LocalNicknameStore.keychainKey).flatMap { String(bytes: $0, encoding: .utf8) }
         }
         deinit { UserDefaults().removePersistentDomain(forName: suite) }
     }
