@@ -468,8 +468,11 @@ final class ChatVerificationCoordinator {
         let peerName = context.unifiedPeer(for: peerID)?.nickname
             ?? context.resolveNickname(for: peerID)
         context.postLocalNotification(
-            title: "Verified",
-            body: "You verified \(peerName)",
+            title: String(localized: "notification.verified.title", defaultValue: "Contact verified", comment: "Notification title after a contact QR verification succeeds"),
+            body: String(
+                format: String(localized: "notification.verified.body", defaultValue: "You verified %@", comment: "Notification body after a QR verification; placeholder is the contact nickname"),
+                locale: .current, peerName
+            ),
             identifier: "verify-success-\(peerID)-\(UUID().uuidString)"
         )
 
