@@ -111,6 +111,16 @@ protocol ChatPrivateConversationContext: AnyObject {
     func updatePeerFavoritedUs(noiseKey: Data, favorited: Bool, nickname: String, nostrPublicKey: String?)
     /// Posts the incoming-private-message local notification.
     func notifyPrivateMessage(from senderName: String, message: String, peerID: PeerID)
+
+    // MARK: Wesh admission
+    /// True when the owner took a message from a sender that is not a
+    /// verified contact: it must not enter the conversation store, notify,
+    /// or be acknowledged as read.
+    func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool
+}
+
+extension ChatPrivateConversationContext {
+    func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool { false }
 }
 
 extension ChatViewModel: ChatPrivateConversationContext {
@@ -181,6 +191,7 @@ extension ChatViewModel: ChatPrivateConversationContext {
     }
 
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
+        guard messageRouter.admitsControlMessage(to: peerID) else { return }
         meshService.sendReadReceipt(receipt, to: peerID)
     }
 
@@ -665,6 +676,8 @@ final class ChatPrivateConversationCoordinator {
             handleFavoriteNotification(message.content, from: peerID, senderNickname: message.sender)
             return
         }
+
+        if context.divertUnverifiedPrivateMessage(message, from: peerID) { return }
 
         migratePrivateChatsIfNeeded(for: peerID, senderNickname: message.sender)
 

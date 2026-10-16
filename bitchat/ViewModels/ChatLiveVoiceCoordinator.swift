@@ -187,6 +187,8 @@ final class ChatLiveVoiceCoordinator {
         // Live voice off means classic-notes-only in both directions: no live
         // bubble, no partial file, no early notification — the finalized
         // voice note still arrives through the normal pipeline.
+        // Wesh never writes inbound audio from BitChat peers to disk.
+        guard WeshIncomingMediaPolicy.acceptsMedia else { return }
         guard PTTSettings.liveVoiceEnabled else {
             SecureLogger.debug("PTT: dropping inbound voice frame — live voice is toggled off", category: .session)
             return

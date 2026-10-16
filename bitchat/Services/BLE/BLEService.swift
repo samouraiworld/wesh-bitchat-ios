@@ -2818,7 +2818,8 @@ final class BLEService: NSObject {
                     completion: completion,
                     finalization: finalization
                 )
-            }
+            },
+            rejectsIncomingMedia: { !WeshIncomingMediaPolicy.acceptsMedia }
         )
     }
     
