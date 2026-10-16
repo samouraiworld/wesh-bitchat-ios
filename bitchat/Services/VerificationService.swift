@@ -1,3 +1,4 @@
+import BitLogger
 import Foundation
 
 /// QR verification scaffolding: schema, signing, and basic challenge/response helpers.
@@ -74,18 +75,21 @@ final class VerificationService {
             let allowed: Set<String> = ["v", "noise", "sign", "nick", "ts", "nonce", "sig", "npub", "npubsig"]
             guard items.allSatisfy({ allowed.contains($0.name) }), Set(items.map(\.name)).count == items.count else { return nil }
             func val(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+            // Wesh: an empty `npub`/`npubsig` signs the same bytes as none, so it is none.
+            let npub = val("npub").flatMap { $0.isEmpty ? nil : $0 }
+            let npubSig = val("npubsig").flatMap { $0.isEmpty ? nil : $0 }
             guard let vStr = val("v"), let v = Int(vStr),
                   let noise = val("noise"), let sign = val("sign"),
                   let nick = val("nick"), let tsStr = val("ts"), let ts = Int64(tsStr),
                   let nonce = val("nonce"), let sig = val("sig") else { return nil }
             guard v == 1, validHex(noise, bytes: 32), validHex(sign, bytes: 32), validHex(sig, bytes: 64),
-                  nick.utf8.count <= 255, (val("npub")?.utf8.count ?? 0) <= 255,
-                  val("npubsig").map({ val("npub") != nil && validHex($0, bytes: 64) }) ?? true,
+                  nick.utf8.count <= 255, (npub?.utf8.count ?? 0) <= 255,
+                  npubSig.map({ npub != nil && validHex($0, bytes: 64) && $0 == $0.lowercased() }) ?? true,
                   nonce.count == 22, nonce.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }),
                   let nonceData = Data(base64Encoded: nonce.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") + "=="), nonceData.count == 16,
                   nonceData.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") == nonce else { return nil }
-            return VerificationQR(v: v, noiseKeyHex: noise, signKeyHex: sign, npub: val("npub"), nickname: nick, ts: ts, nonceB64: nonce, sigHex: sig,
-                                  npubSigHex: val("npubsig"))
+            return VerificationQR(v: v, noiseKeyHex: noise, signKeyHex: sign, npub: npub, nickname: nick, ts: ts, nonceB64: nonce, sigHex: sig,
+                                  npubSigHex: npubSig)
         }
     }
 
@@ -121,7 +125,11 @@ final class VerificationService {
                                     nonceB64: payload.nonceB64,
                                     sigHex: sig.hexEncodedString())
         if proven {
-            guard let proof = npubSigner?(msg), proof.count == 64 else { return nil }
+            guard let proof = npubSigner?(msg), proof.count == 64 else {
+                // Never show an unproven npub in its place: fall back to the Bluetooth-only QR.
+                SecureLogger.warning("npub proof signing failed; showing the QR without npub", category: .security)
+                return buildMyQRString(nickname: nickname, npub: nil)
+            }
             signed.npubSigHex = proof.hexEncodedString()
         }
         let out = signed.toURLString()

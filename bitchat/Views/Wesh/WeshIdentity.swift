@@ -45,6 +45,7 @@ final class WeshQRTrust: ObservableObject {
     func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil,
                 npubProven: Bool = false, npubConflict: Bool = false, npubProofWarning: Bool = false) {
         guard sessionKey.count == 32 else { return }
+        let npub = npub?.isEmpty == false ? npub : nil
         fingerprints.insert(sessionKey.sha256Fingerprint())
         let hex = sessionKey.hexEncodedString()
         contacts.removeAll { $0.noiseKeyHex == hex }

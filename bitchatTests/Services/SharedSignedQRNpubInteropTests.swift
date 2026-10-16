@@ -36,23 +36,25 @@ final class SharedSignedQRNpubInteropTests: XCTestCase {
         let url: String
     }
 
-    private func proofFixture() throws -> ProofFixture {
+    private func fixtureData(_ name: String) throws -> Data {
+        #if SWIFT_PACKAGE
+        let bundle = Bundle.module
+        #else
         let bundle = Bundle(for: Self.self)
-        let name = "wesh-signed-qr-v1-npub-proof"
+        #endif
         let url = try XCTUnwrap(
             bundle.url(forResource: name, withExtension: "json")
                 ?? bundle.url(forResource: name, withExtension: "json", subdirectory: "Services/Fixtures")
         )
-        return try JSONDecoder().decode(ProofFixture.self, from: Data(contentsOf: url))
+        return try Data(contentsOf: url)
+    }
+
+    private func proofFixture() throws -> ProofFixture {
+        try JSONDecoder().decode(ProofFixture.self, from: fixtureData("wesh-signed-qr-v1-npub-proof"))
     }
 
     private func fixture(_ name: String) throws -> Fixture {
-        let bundle = Bundle(for: Self.self)
-        let url = try XCTUnwrap(
-            bundle.url(forResource: name, withExtension: "json")
-                ?? bundle.url(forResource: name, withExtension: "json", subdirectory: "Services/Fixtures")
-        )
-        return try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
+        try JSONDecoder().decode(Fixture.self, from: fixtureData(name))
     }
 
     private func service() -> VerificationService {
@@ -165,6 +167,43 @@ final class SharedSignedQRNpubInteropTests: XCTestCase {
                                              canonicalBytes: parsed.canonicalBytes(), noiseKeyHex: parsed.noiseKeyHex,
                                              ownedNpubs: [], contacts: []),
                        .bluetoothOnly)
+    }
+
+    func test_emptyNpubOrNpubsigIsTreatedAsAbsent() throws {
+        // Empty and absent npub sign the same bytes, so `&npub=` can be appended
+        // to any signed QR: it must parse as no claim, never as an npub of "".
+        let plain = try fixture("wesh-signed-qr-v1")
+        let appended = try XCTUnwrap(service().verifyScannedQR(plain.url + "&npub=", now: Double(plain.timestamp)))
+        XCTAssertNil(appended.npub)
+        XCTAssertNil(appended.npubSigHex)
+        XCTAssertEqual(WeshQRNpub.enrollment(npub: appended.npub, npubSigHex: appended.npubSigHex,
+                                             canonicalBytes: appended.canonicalBytes(), noiseKeyHex: appended.noiseKeyHex,
+                                             ownedNpubs: [], contacts: []),
+                       .keep)
+        let f = try proofFixture()
+        XCTAssertNil(VerificationService.VerificationQR.fromURL(try XCTUnwrap(URL(string: plain.url + "&npub=&npubsig=" + f.npubSigHex))),
+                     "npubsig with an empty npub is npubsig without npub")
+        let unproven = try fixture("wesh-signed-qr-v1-npub")
+        let emptySig = try XCTUnwrap(service().verifyScannedQR(unproven.url + "&npubsig=", now: Double(unproven.timestamp)))
+        XCTAssertEqual(emptySig.npub, unproven.npub)
+        XCTAssertNil(emptySig.npubSigHex)
+    }
+
+    func test_npubsigMustBeLowercaseHex() throws {
+        let f = try proofFixture()
+        let upper = f.url.replacingOccurrences(of: f.npubSigHex, with: f.npubSigHex.uppercased())
+        XCTAssertNotEqual(upper, f.url)
+        XCTAssertNil(VerificationService.VerificationQR.fromURL(try XCTUnwrap(URL(string: upper))))
+    }
+
+    func test_buildMyQRStringFallsBackToBluetoothOnlyWhenTheProofFails() throws {
+        let builder = VerificationService()
+        builder.configure(with: MockTransport())
+        let nostr = try NostrIdentity.generate()
+        let url = try XCTUnwrap(builder.buildMyQRString(nickname: "Nora", npub: nostr.npub, npubSigner: { _ in nil }))
+        XCTAssertFalse(url.contains("npub"), "an unprovable npub is left out, not shown unproven")
+        let parsed = try XCTUnwrap(builder.verifyScannedQR(url))
+        XCTAssertNil(parsed.npub)
     }
 
     func test_buildMyQRStringSignsTheProofOverTheCanonicalBytes() throws {

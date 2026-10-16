@@ -35,7 +35,6 @@ struct WeshQRNpubTests {
             "nsec1r799vmpq2ceaq2gfgara9cv0gns9ny7a57jl3r6fvpuzqhm9devsyz6r7k", // right key, wrong prefix
             "npub1r799vmpq2ceaq2gfgara9cv0gns9ny7a57jl3r6fvpuzqhm9dc5lsswe",   // 31 bytes
             "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzsfj2hcx", // x = 5: not on secp256k1
-            "",
             "npub1"
         ]
         for sample in samples {
@@ -43,6 +42,9 @@ struct WeshQRNpubTests {
             #expect(enroll(sample) == .bluetoothOnly, "\(sample)")
         }
         #expect(enroll(nil) == .keep, "a QR without npub makes no claim")
+        // Empty signs the same bytes as absent, so it is no claim either.
+        #expect(WeshQRNpub.xOnlyKey(fromNpub: "") == nil)
+        #expect(enroll("") == .keep)
     }
 
     @Test func anyLocallyOwnedNpubIsRefusedAndAnUnknownSetFailsClosed() throws {
@@ -129,6 +131,37 @@ struct WeshQRNpubTests {
         store.enroll(sessionKey: keyA, nickname: "A2", outcome: .keep)
         #expect(contact(noiseA)?.npub == theirs.npub && contact(noiseA)?.nickname == "A2")
         #expect(store.contacts.filter { $0.npub == theirs.npub }.count == 1)
+    }
+
+    @Test func reviewFlagsSurviveLaterScansUntilSettled() throws {
+        let store = WeshQRTrust(defaults: UserDefaults(suiteName: "wesh.qr.flags.\(UUID().uuidString)")!)
+        let theirs = try NostrIdentity.generate()
+        let keyA = try #require(Data(hexString: noiseA))
+        func a() -> Contact? { store.contacts.first { $0.noiseKeyHex == noiseA } }
+
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .bound(npub: theirs.npub, proven: true, unbinding: []))
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .keepProven)
+        #expect(a()?.hasNpubProofWarning == true && a()?.hasNpubConflict == false)
+        // A conflict keeps the pending warning.
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .conflict)
+        #expect(a()?.hasNpubProofWarning == true && a()?.hasNpubConflict == true)
+        #expect(a()?.isNpubProven == true)
+        // A later stripped QR keeps the pending conflict.
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .keepProven)
+        #expect(a()?.hasNpubProofWarning == true && a()?.hasNpubConflict == true)
+        // A fresh binding or a refused claim does not settle them either.
+        let rotated = try NostrIdentity.generate()
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .bound(npub: rotated.npub, proven: true, unbinding: []))
+        #expect(a()?.npub == rotated.npub && a()?.hasNpubProofWarning == true && a()?.hasNpubConflict == true)
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: .bluetoothOnly)
+        #expect(a()?.npub == nil && a()?.hasNpubProofWarning == true && a()?.hasNpubConflict == true)
+    }
+
+    @Test func anEmptyNpubIsNeverRecorded() throws {
+        let store = WeshQRTrust(defaults: UserDefaults(suiteName: "wesh.qr.empty.\(UUID().uuidString)")!)
+        store.record(sessionKey: try #require(Data(hexString: noiseA)), nickname: "A", npub: "", npubProven: true)
+        #expect(store.contacts.first?.npub == nil)
+        #expect(store.contacts.first?.isNpubProven == false)
     }
 
     @Test func legacyContactWithoutNpubDecodesAndNeedsRescan() throws {

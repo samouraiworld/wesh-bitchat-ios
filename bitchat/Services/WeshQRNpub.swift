@@ -34,7 +34,8 @@ enum WeshQRNpub {
     static func enrollment(npub candidate: String?, npubSigHex: String?, canonicalBytes: Data,
                            noiseKeyHex: String, ownedNpubs: Set<String>?,
                            contacts: [WeshQRTrust.Contact]) -> Outcome {
-        guard let candidate else { return .keep }
+        // Empty signs the same canonical bytes as absent: no claim.
+        guard let candidate, !candidate.isEmpty else { return .keep }
         let hex = noiseKeyHex.lowercased()
         let wasProven = contacts.contains { $0.noiseKeyHex.lowercased() == hex && $0.isNpubProven }
         let refused: Outcome = wasProven ? .keepProven : .bluetoothOnly
@@ -105,23 +106,26 @@ extension WeshQRTrust {
     func enroll(sessionKey: Data, nickname: String, outcome: WeshQRNpub.Outcome) {
         let hex = sessionKey.hexEncodedString()
         let current = contacts.first { $0.noiseKeyHex.lowercased() == hex }
+        // Review flags stay pending until the user settles them; a later scan never clears them.
+        let conflict = current?.hasNpubConflict ?? false
+        let warning = current?.hasNpubProofWarning ?? false
         switch outcome {
         case .keep:
             record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
-                   npubProven: current?.isNpubProven ?? false, npubConflict: current?.hasNpubConflict ?? false,
-                   npubProofWarning: current?.hasNpubProofWarning ?? false)
+                   npubProven: current?.isNpubProven ?? false, npubConflict: conflict, npubProofWarning: warning)
         case .bluetoothOnly:
-            record(sessionKey: sessionKey, nickname: nickname)
+            record(sessionKey: sessionKey, nickname: nickname, npubConflict: conflict, npubProofWarning: warning)
         case let .bound(npub, proven, unbinding):
             flagNpubConflict(noiseKeysHex: unbinding)
-            record(sessionKey: sessionKey, nickname: nickname, npub: npub, npubProven: proven)
+            record(sessionKey: sessionKey, nickname: nickname, npub: npub, npubProven: proven,
+                   npubConflict: conflict, npubProofWarning: warning)
         case .conflict:
             // This contact's earlier binding, if any, is not another's claim: keep it.
             record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
-                   npubProven: current?.isNpubProven ?? false, npubConflict: true)
+                   npubProven: current?.isNpubProven ?? false, npubConflict: true, npubProofWarning: warning)
         case .keepProven:
             record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
-                   npubProven: true, npubProofWarning: true)
+                   npubProven: true, npubConflict: conflict, npubProofWarning: true)
         }
     }
 }
