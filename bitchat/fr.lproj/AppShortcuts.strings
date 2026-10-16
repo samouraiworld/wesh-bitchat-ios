@@ -1,0 +1,3 @@
+/* Phrases Siri et Raccourcis du raccourci « Tout effacer ». */
+"Erase everything in ${applicationName}" = "Tout effacer dans ${applicationName}";
+"Erase ${applicationName}" = "Effacer ${applicationName}";

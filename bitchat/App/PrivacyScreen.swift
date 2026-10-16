@@ -9,8 +9,9 @@
 #if os(iOS)
 import UIKit
 
-/// Covers the window while the app is not frontmost, so the snapshot iOS takes
-/// for the app switcher shows a placeholder instead of the open conversation.
+/// Covers every window while the app is not frontmost, so the snapshot iOS takes
+/// for the app switcher shows a placeholder instead of the open conversation —
+/// including a window above the main one, such as the erase screen's.
 ///
 /// The cover is added on `willResignActive` and removed on `didBecomeActive`.
 /// Both are deliberately UIKit notifications rather than SwiftUI's `scenePhase`:
@@ -24,7 +25,7 @@ import UIKit
 final class PrivacyScreen {
     static let shared = PrivacyScreen()
 
-    private var cover: UIView?
+    private var covers: [UIView] = []
     private var observers: [NSObjectProtocol] = []
 
     private init() {}
@@ -58,8 +59,11 @@ final class PrivacyScreen {
     }
 
     private func show() {
-        guard cover == nil, let window = Self.activeWindow() else { return }
+        guard covers.isEmpty else { return }
+        covers = Self.visibleWindows().map(Self.cover)
+    }
 
+    private static func cover(_ window: UIWindow) -> UIView {
         // Opaque rather than a blur: blurred large text can stay partly
         // legible, and the snapshot is stored on disk.
         let view = UIView(frame: window.bounds)
@@ -78,23 +82,20 @@ final class PrivacyScreen {
         ])
 
         window.addSubview(view)
-        cover = view
+        return view
     }
 
     private func hide() {
-        cover?.removeFromSuperview()
-        cover = nil
+        covers.forEach { $0.removeFromSuperview() }
+        covers = []
     }
 
-    private static func activeWindow() -> UIWindow? {
+    /// Every shown window of every scene, whatever its level.
+    private static func visibleWindows() -> [UIWindow] {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
-            .first { $0.isKeyWindow } ??
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first
+            .filter { !$0.isHidden }
     }
 }
 #endif

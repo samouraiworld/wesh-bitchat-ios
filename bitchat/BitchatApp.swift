@@ -24,6 +24,7 @@ struct BitchatApp: App {
 
     init() {
         WeshMode.isActive = true
+        PaveDisplayName.warmUp()
         // Wesh Internet mode is opt-in (default off); WeshInternetMode forces Tor.
         NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled())
         BridgeService.shared.setEnabled(false)
@@ -46,6 +47,7 @@ struct BitchatApp: App {
                 .environmentObject(runtime.appChromeModel)
                 .environmentObject(runtime.boardAlertsModel)
                 .environmentObject(runtime.sharedContentImportModel)
+                .paveEraseShortcut { runtime.appChromeModel.panicClearAllData() }
                 .onAppear {
                     appDelegate.runtime = runtime
                     runtime.start()

@@ -1,0 +1,375 @@
+{
+  "version": 1,
+  "rule": "docs/plan/design/system/README.md (section Surnom distant, v1, frozen 2026-10-16)",
+  "outcomes": {
+    "display": "the expected visible string",
+    "unnamed": "the platform string for « Sans surnom » / « No nickname »",
+    "reserved": "the platform string for « Sans surnom (réservé) » / « No nickname (reserved) »"
+  },
+  "confusables": {
+    "А": "a",
+    "В": "b",
+    "Е": "e",
+    "К": "k",
+    "М": "m",
+    "Н": "h",
+    "О": "o",
+    "Р": "p",
+    "С": "c",
+    "Т": "t",
+    "Х": "x",
+    "У": "y",
+    "а": "a",
+    "е": "e",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "у": "y",
+    "х": "x",
+    "і": "i",
+    "ј": "j",
+    "ѕ": "s",
+    "ԁ": "d",
+    "һ": "h",
+    "ӏ": "l",
+    "Ӏ": "l",
+    "І": "i",
+    "Ј": "j",
+    "Ѕ": "s",
+    "ԛ": "q",
+    "ԝ": "w",
+    "Α": "a",
+    "Β": "b",
+    "Ε": "e",
+    "Ζ": "z",
+    "Η": "h",
+    "Ι": "i",
+    "Κ": "k",
+    "Μ": "m",
+    "Ν": "n",
+    "Ο": "o",
+    "Ρ": "p",
+    "Τ": "t",
+    "Υ": "y",
+    "Χ": "x",
+    "α": "a",
+    "ι": "i",
+    "κ": "k",
+    "ν": "v",
+    "ο": "o",
+    "ρ": "p",
+    "υ": "u",
+    "ᴀ": "a",
+    "ʙ": "b",
+    "ᴄ": "c",
+    "ᴅ": "d",
+    "ᴇ": "e",
+    "ꜰ": "f",
+    "ɢ": "g",
+    "ʜ": "h",
+    "ɪ": "i",
+    "ᴊ": "j",
+    "ᴋ": "k",
+    "ʟ": "l",
+    "ᴍ": "m",
+    "ɴ": "n",
+    "ᴏ": "o",
+    "ᴘ": "p",
+    "ʀ": "r",
+    "ꜱ": "s",
+    "ᴛ": "t",
+    "ᴜ": "u",
+    "ᴠ": "v",
+    "ᴡ": "w",
+    "ʏ": "y",
+    "ᴢ": "z",
+    "ı": "i",
+    "օ": "o",
+    "ս": "u",
+    "ո": "n",
+    "հ": "h",
+    "ց": "g",
+    "զ": "q"
+  },
+  "reservedForTest": [
+    "Vous",
+    "You",
+    "Sans surnom",
+    "No nickname",
+    "Sans surnom (réservé)",
+    "No nickname (reserved)"
+  ],
+  "vectors": [
+    {
+      "input": "Nora",
+      "expect": "display",
+      "display": "Nora"
+    },
+    {
+      "input": "  Nora  ",
+      "expect": "display",
+      "display": "Nora"
+    },
+    {
+      "input": "​Nora​",
+      "expect": "display",
+      "display": "Nora"
+    },
+    {
+      "input": "No​ra",
+      "expect": "unnamed"
+    },
+    {
+      "input": "No‮ra",
+      "expect": "unnamed"
+    },
+    {
+      "input": "ㅤ",
+      "expect": "unnamed"
+    },
+    {
+      "input": "",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Nóra",
+      "expect": "display",
+      "display": "Nóra"
+    },
+    {
+      "input": "Вера",
+      "expect": "display",
+      "display": "Вера"
+    },
+    {
+      "input": "Nоra",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Υου",
+      "expect": "reserved"
+    },
+    {
+      "input": "Vоus",
+      "expect": "unnamed"
+    },
+    {
+      "input": "VOUS",
+      "expect": "reserved"
+    },
+    {
+      "input": "V0us",
+      "expect": "reserved"
+    },
+    {
+      "input": "V.ó-us",
+      "expect": "reserved"
+    },
+    {
+      "input": "Sans  surnom",
+      "expect": "reserved"
+    },
+    {
+      "input": "Nora sans surnom",
+      "expect": "reserved"
+    },
+    {
+      "input": "Vousseau",
+      "expect": "display",
+      "display": "Vousseau"
+    },
+    {
+      "input": "Vous Nora",
+      "expect": "reserved"
+    },
+    {
+      "input": "Nora la vraie qui ecrit trop longtemps ou pas",
+      "expect": "display",
+      "display": "Nora la vraie qu…ongtemps ou pas"
+    },
+    {
+      "input": "小明 Lee",
+      "expect": "display",
+      "display": "小明 Lee"
+    },
+    {
+      "input": "Nora (No nickname)",
+      "expect": "reserved"
+    },
+    {
+      "input": "❤️ Nora",
+      "expect": "display",
+      "display": "❤️ Nora"
+    },
+    {
+      "input": "👩‍💻 Nora",
+      "expect": "display",
+      "display": "👩‍💻 Nora"
+    },
+    {
+      "input": "No‍ra",
+      "expect": "unnamed"
+    },
+    {
+      "input": "No️ra",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Nora󠁁󠁂 Lee",
+      "expect": "unnamed"
+    },
+    {
+      "input": "NO NICKNAME",
+      "expect": "reserved"
+    },
+    {
+      "input": "No nıckname",
+      "expect": "reserved"
+    },
+    {
+      "input": "ᴠᴏᴜꜱ",
+      "expect": "reserved"
+    },
+    {
+      "input": "ʏᴏᴜ",
+      "expect": "reserved"
+    },
+    {
+      "input": "Nora͏Lee",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Nora󠄀Lee",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Lina",
+      "expect": "display",
+      "display": "Lina"
+    },
+    {
+      "input": "❤️️ Nora",
+      "expect": "unnamed"
+    },
+    {
+      "input": "❤‍ Nora",
+      "expect": "unnamed"
+    },
+    {
+      "input": "👩‍‍💻 Nora",
+      "expect": "unnamed"
+    },
+    {
+      "input": "1️⃣ Nora",
+      "expect": "display",
+      "display": "1️⃣ Nora"
+    },
+    {
+      "input": "👩🏽‍💻 Nora",
+      "expect": "display",
+      "display": "👩🏽‍💻 Nora"
+    },
+    {
+      "input": "Nora A1B2 C3D4",
+      "expect": "reserved"
+    },
+    {
+      "input": "a1b2c3d4",
+      "expect": "reserved"
+    },
+    {
+      "input": "Nora 2024",
+      "expect": "display",
+      "display": "Nora 2024"
+    },
+    {
+      "input": "Café 2024",
+      "expect": "display",
+      "display": "Café 2024"
+    },
+    {
+      "input": "dead beef",
+      "expect": "display",
+      "display": "dead beef"
+    },
+    {
+      "input": "OB5E 44D8",
+      "expect": "reserved"
+    },
+    {
+      "input": "Nora 0F3A 9lC2",
+      "expect": "reserved"
+    },
+    {
+      "input": "Vꓳus",
+      "expect": "unnamed"
+    },
+    {
+      "input": "ꓦꓳꓴꓢ",
+      "expect": "unnamed"
+    },
+    {
+      "input": "Nora الف",
+      "expect": "unnamed"
+    },
+    {
+      "input": "الف",
+      "expect": "display",
+      "display": "الف"
+    },
+    {
+      "input": "Vou5",
+      "expect": "reserved"
+    },
+    {
+      "input": "օւ",
+      "expect": "display",
+      "display": "օւ"
+    },
+    {
+      "input": "Nora 7F3A 9lC2 OB5E 44D8",
+      "expect": "reserved"
+    }
+  ],
+  "afterLowercase": {
+    "i": "l",
+    "l": "l",
+    "1": "l",
+    "0": "o",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b"
+  },
+  "afterLowercaseNote": "Applied after the confusables table and lowercasing, on both the name and every reserved word.",
+  "fingerprintCanonical": {
+    "o": "0",
+    "i": "1",
+    "l": "1"
+  },
+  "scripts": {
+    "latinMayMixWith": [
+      "Han",
+      "Hiragana",
+      "Katakana",
+      "Hangul",
+      "Bopomofo"
+    ],
+    "neverMixTogether": [
+      "Latin",
+      "Greek",
+      "Cyrillic",
+      "Armenian"
+    ],
+    "alwaysUnnamed": [
+      "Cherokee",
+      "Lisu",
+      "Coptic",
+      "Canadian_Aboriginal",
+      "Old_Italic",
+      "Tifinagh",
+      "Osage"
+    ]
+  }
+}
