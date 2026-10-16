@@ -30,7 +30,6 @@ final class AppRuntime: ObservableObject {
     let sharedContentImportModel: SharedContentImportModel
     let composerDrafts = ComposerDraftStore.repository
 
-    private let idBridge: NostrIdentityBridge
     private var cancellables = Set<AnyCancellable>()
     private var started = false
     private var lastNostrRelayConnectedState = false
@@ -46,7 +45,6 @@ final class AppRuntime: ObservableObject {
         idBridge: NostrIdentityBridge = NostrIdentityBridge(),
         sharedContentStore: SharedContentStore? = nil
     ) {
-        self.idBridge = idBridge
         let conversations = ConversationStore()
         let peerIdentityStore = PeerIdentityStore()
         let locationPresenceStore = LocationPresenceStore()
@@ -149,13 +147,8 @@ final class AppRuntime: ObservableObject {
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
-            let nickname = await MainActor.run { self.chatViewModel.nickname }
-            let npub = await MainActor.run {
-                try? self.idBridge.getCurrentNostrIdentity()?.npub
-            }
-            await MainActor.run {
-                _ = VerificationService.shared.buildMyQRString(nickname: nickname, npub: npub)
-            }
+            // Warms the QR cache through the same read-only npub rule as the sheet.
+            await MainActor.run { _ = self.verificationModel.myQRString() }
         }
 
         NetworkActivationService.shared.start()
