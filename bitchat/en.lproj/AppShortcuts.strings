@@ -1,0 +1,3 @@
+/* Siri and Shortcuts phrases for the « Tout effacer » App Shortcut. */
+"Erase everything in ${applicationName}" = "Erase everything in ${applicationName}";
+"Erase ${applicationName}" = "Erase ${applicationName}";
