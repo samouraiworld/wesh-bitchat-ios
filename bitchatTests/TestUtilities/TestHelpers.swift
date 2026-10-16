@@ -93,6 +93,19 @@ final class TestHelpers {
         }
         return true
     }
+
+    /// Runs work that may park on a lock or a gate on a plain thread, so it
+    /// never holds a thread of Swift's small cooperative pool in parallel runs.
+    static func onThread(_ body: @escaping @Sendable () -> Void) -> Task<Void, Never> {
+        Task {
+            await withCheckedContinuation { continuation in
+                Thread {
+                    body()
+                    continuation.resume()
+                }.start()
+            }
+        }
+    }
 }
 
 enum TestError: Error {
