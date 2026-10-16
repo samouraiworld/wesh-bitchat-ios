@@ -73,10 +73,7 @@ final class WeshQRTrust: ObservableObject {
         next.contacts.append(Contact(noiseKeyHex: hex, nickname: nickname))
         let fingerprint = sessionKey.sha256Fingerprint()
         if !next.fingerprints.contains(fingerprint) { next.fingerprints.append(fingerprint) }
-        guard commit(next) else { return false }
-        // A fresh enrollment supersedes an older pending revocation.
-        if intent.revokedFingerprints.remove(fingerprint) != nil { _ = persistIntent() }
-        return true
+        return commit(next)
     }
 
     /// Revokes only this identity's enrollment; history and drafts belong to
@@ -160,7 +157,8 @@ final class WeshQRTrust: ObservableObject {
         guard storageState == .available, !intent.wipe else { return false }
         if let storage {
             guard save(next, to: storage) else { return false }
-            // The confirmed file now omits every pending revocation.
+            // The confirmed file now omits every pending revocation, and a
+            // fresh enrollment supersedes an older one for the same key.
             if !intent.revokedFingerprints.isEmpty {
                 intent.revokedFingerprints = []
                 _ = persistIntent()
