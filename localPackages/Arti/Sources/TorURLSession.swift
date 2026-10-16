@@ -3,41 +3,34 @@ import Foundation
 import CFNetwork
 #endif
 
-/// Provides a shared URLSession that routes traffic via Tor's SOCKS5 proxy
-/// when Tor is enforced/ready. Allows swapping between proxied and direct
-/// sessions so UI can toggle Tor usage at runtime.
+/// Provides the shared URLSession that routes traffic via Tor's SOCKS5 proxy.
+///
+/// There is no direct session: every request made through it goes to the
+/// local Arti SOCKS port, so when Tor is down requests fail instead of
+/// leaving through the clearnet.
 public final class TorURLSession {
     public static let shared = TorURLSession()
 
-    // Default (no proxy) session for direct Nostr access when Tor is disabled.
-    private var defaultSession: URLSession = TorURLSession.makeDefaultSession()
+    // Keep in sync with TorManager defaults
+    static let socksHost = "127.0.0.1"
+    static let socksPort = 39050
 
-    // Proxied (SOCKS5) session that routes through Tor.
     private var torSession: URLSession = TorURLSession.makeTorSession()
-    private var useTorProxy: Bool = true
 
-    public var session: URLSession {
-        useTorProxy ? torSession : defaultSession
-    }
+    public var session: URLSession { torSession }
 
-    // Recreate sessions so new clients bind to the fresh SOCKS/control ports after a Tor restart.
+    // Recreate the session so new clients bind to the fresh SOCKS port after a Tor restart.
     public func rebuild() {
-        defaultSession = TorURLSession.makeDefaultSession()
         torSession = TorURLSession.makeTorSession()
     }
 
-    public func setProxyMode(useTor: Bool) {
-        guard useTorProxy != useTor else { return }
-        useTorProxy = useTor
-        rebuild()
-    }
+    /// Kept for the activation policy. Asking for direct mode changes
+    /// nothing: the session stays proxied (fail-closed).
+    public func setProxyMode(useTor: Bool) {}
 
-    private static func makeTorSession() -> URLSession {
+    static func makeTorSession(host: String = socksHost, port: Int = socksPort) -> URLSession {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.waitsForConnectivity = true
-        // Keep in sync with TorManager defaults
-        let host = "127.0.0.1"
-        let port = 39050
         #if os(macOS)
         cfg.connectionProxyDictionary = [
             kCFNetworkProxiesSOCKSEnable as String: 1,
@@ -52,12 +45,6 @@ public final class TorURLSession {
             "SOCKSPort": port
         ]
         #endif
-        return URLSession(configuration: cfg)
-    }
-
-    private static func makeDefaultSession() -> URLSession {
-        let cfg = URLSessionConfiguration.default
-        cfg.waitsForConnectivity = true
         return URLSession(configuration: cfg)
     }
 }

@@ -550,6 +550,32 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertEqual(context.sessionFactory.requestedURLs, [relayOne, relayTwo])
     }
 
+    func test_ensureConnections_viaTor_neverTargetsAnIPLiteral() async {
+        let named = "wss://relay-one.example"
+        let literals = [
+            "wss://203.0.113.7", "wss://203.0.113.7:4848", "wss://[2001:db8::1]",
+            "ws://127.1", "wss://0x7f.1", "wss://10.0.0.1./"
+        ]
+        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: true)
+
+        context.manager.ensureConnections(to: literals + [named])
+
+        let connected = await waitUntil {
+            context.manager.relays.contains { $0.url == named && $0.isConnected }
+        }
+        XCTAssertTrue(connected)
+        XCTAssertEqual(context.sessionFactory.requestedURLs, [named])
+    }
+
+    func test_hasDomainNameHost_acceptsNamesOnly() {
+        for url in ["wss://relay.damus.io", "wss://relay.primal.net/", "wss://offchain.pub:443", "wss://abc.onion", "wss://relay.example."] {
+            XCTAssertTrue(NostrRelayURL.hasDomainNameHost(url), url)
+        }
+        for url in ["wss://1.2.3.4", "wss://[::1]", "wss://127.1", "wss://0x7f.0x1", "wss://2130706433", "wss://", "not a url"] {
+            XCTAssertFalse(NostrRelayURL.hasDomainNameHost(url), url)
+        }
+    }
+
     func test_ensureConnections_coalescesTargetsWhileWaitingForTor() async {
         let relayOne = "wss://tor-one.example"
         let relayTwo = "wss://tor-two.example"
