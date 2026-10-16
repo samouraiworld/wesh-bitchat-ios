@@ -331,6 +331,54 @@ struct ChatVerificationCoordinatorContextTests {
     }
 
     @Test @MainActor
+    func scanCompletingAfterTheContactStoreUnlocksKeepsExistingReviewFlags() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wesh-qr-locked-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keychain = MockKeychain()
+        func store() -> WeshSealedStore {
+            WeshSealedStore(keychain: keychain, fileURL: root.appendingPathComponent("contacts.enc"),
+                            keyName: "contacts.test", context: "wesh.contacts.test")
+        }
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        #expect(WeshQRTrust(storage: store()).record(sessionKey: key, nickname: "Test", npubConflict: true))
+
+        // The list was unreadable when this owner loaded it, then the phone unlocks.
+        keychain.simulatedReadError = .deviceLocked
+        let trust = WeshQRTrust(storage: store())
+        #expect(trust.storageState == .unavailable && trust.contacts.isEmpty)
+        let peerID = PeerID(str: "1122334455667788")
+        let context = MockChatVerificationContext()
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Test")]
+        context.establishedNoiseSessions = [peerID]
+        context.noiseSessionKeysByPeerID[peerID] = key
+        context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true, qrTrust: trust)
+        let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+            signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+            nickname: "Test", ts: 0, nonceB64: "", sigHex: "")
+        func respond(to nonce: Data) throws {
+            let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: qr.noiseKeyHex, nonceA: nonce))
+            coordinator.handleVerifyResponsePayload(from: peerID, payload: try #require(NoisePayload.decode(encoded)).data)
+        }
+
+        // Still locked: no enrollment from an empty list.
+        #expect(coordinator.beginQRVerification(with: qr))
+        let lockedNonce = try #require(context.sentChallenges.last?.nonceA)
+        try respond(to: lockedNonce)
+        #expect(coordinator.qrProgress(for: key, attemptNonce: lockedNonce) == .notSaved)
+        #expect(!context.postedLocalNotifications.contains { $0.identifier.hasPrefix("verify-success") })
+
+        keychain.simulatedReadError = nil
+        #expect(coordinator.beginQRVerification(with: qr))
+        try respond(to: try #require(context.sentChallenges.last?.nonceA))
+        #expect(trust.contacts.first?.hasNpubConflict == true)
+        #expect(context.postedLocalNotifications.filter { $0.identifier.hasPrefix("verify-success") }.count == 1)
+    }
+
+    @Test @MainActor
     func unconfirmedContactWriteReportsNotSavedWithoutSuccessAndRescanEnrolls() throws {
         var failWrites = true
         let root = FileManager.default.temporaryDirectory

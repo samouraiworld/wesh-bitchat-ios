@@ -476,13 +476,16 @@ final class ChatVerificationCoordinator {
         guard context.isIdentityStateAvailable,
               !context.hasPendingIdentityStateChanges else { return }
         if weshMode {
+            // The npub outcome is decided from the stored list, never from one
+            // that could not be read (it would drop review flags and conflicts).
+            qrTrust.reloadIfNeeded()
             // The Noise challenge just proved the QR signer holds this session.
-            let outcome = WeshQRNpub.enrollment(npub: pending.npub, npubSigHex: pending.npubSigHex,
-                                                canonicalBytes: pending.scannedQRBytes, noiseKeyHex: pending.noiseKeyHex,
-                                                ownedNpubs: context.locallyOwnedNpubs, contacts: qrTrust.contacts)
             // Success is announced only once the contact is confirmed on disk;
             // otherwise this attempt stays open and reports the failure.
-            guard qrTrust.enroll(sessionKey: sessionKey, nickname: pending.nickname, outcome: outcome) else {
+            guard qrTrust.storageState == .available,
+                  qrTrust.enroll(sessionKey: sessionKey, nickname: pending.nickname, outcome: WeshQRNpub.enrollment(
+                      npub: pending.npub, npubSigHex: pending.npubSigHex, canonicalBytes: pending.scannedQRBytes,
+                      noiseKeyHex: pending.noiseKeyHex, ownedNpubs: context.locallyOwnedNpubs, contacts: qrTrust.contacts)) else {
                 var failed = pending
                 failed.saveFailed = true
                 pendingQRVerifications[peerID] = failed
