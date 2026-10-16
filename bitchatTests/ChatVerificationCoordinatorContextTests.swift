@@ -263,6 +263,61 @@ struct ChatVerificationCoordinatorContextTests {
     }
 
     @Test @MainActor
+    func unconfirmedContactWriteReportsNotSavedWithoutSuccessAndRescanEnrolls() throws {
+        var failWrites = true
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wesh-qr-unsaved-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let live = ComposerDraftPersistence.FileAccess.live
+        let files = ComposerDraftPersistence.FileAccess(read: live.read, write: { data, url in
+            if failWrites { throw CocoaError(.fileWriteNoPermission) }
+            try live.write(data, url)
+        }, remove: live.remove)
+        let trust = WeshQRTrust(storage: WeshSealedStore(keychain: MockKeychain(),
+            fileURL: root.appendingPathComponent("contacts.enc"), keyName: "contacts.test",
+            context: "wesh.contacts.test", files: files))
+        let transport = MockTransport()
+        VerificationService.shared.configure(with: transport)
+        let key = transport.noiseStaticPublicKeyData()
+        let peerID = PeerID(str: "1122334455667788")
+        let context = MockChatVerificationContext()
+        context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Test")]
+        context.establishedNoiseSessions = [peerID]
+        context.noiseSessionKeysByPeerID[peerID] = key
+        context.fingerprintsByPeerID[peerID] = key.sha256Fingerprint()
+        let coordinator = ChatVerificationCoordinator(context: context, weshMode: true, qrTrust: trust)
+        let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+            signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: nil,
+            nickname: "Test", ts: 0, nonceB64: "", sigHex: "")
+        func respond(to nonce: Data) throws {
+            let encoded = try #require(VerificationService.shared.buildVerifyResponse(noiseKeyHex: qr.noiseKeyHex, nonceA: nonce))
+            coordinator.handleVerifyResponsePayload(from: peerID, payload: try #require(NoisePayload.decode(encoded)).data)
+        }
+
+        #expect(coordinator.beginQRVerification(with: qr))
+        let nonce = try #require(context.sentChallenges.last?.nonceA)
+        try respond(to: nonce)
+        #expect(trust.contacts.isEmpty)
+        #expect(context.storedVerifiedCalls.isEmpty)
+        #expect(!context.postedLocalNotifications.contains { $0.title == "Verified" })
+        #expect(coordinator.qrProgress(for: key, attemptNonce: nonce) == .notSaved)
+        #expect(coordinator.qrAttemptNonce(for: key) == nonce)
+
+        // Rescanning the same QR starts a fresh challenge instead of reusing the failed one.
+        failWrites = false
+        #expect(coordinator.beginQRVerification(with: qr))
+        #expect(context.sentChallenges.count == 2)
+        let retryNonce = try #require(context.sentChallenges.last?.nonceA)
+        #expect(retryNonce != nonce)
+        try respond(to: retryNonce)
+        #expect(trust.fingerprints.contains(key.sha256Fingerprint()))
+        #expect(context.storedVerifiedCalls.map(\.verified) == [true])
+        #expect(context.postedLocalNotifications.filter { $0.title == "Verified" }.count == 1)
+        context.verifiedFingerprints.insert(key.sha256Fingerprint())
+        #expect(coordinator.qrProgress(for: key, attemptNonce: retryNonce) == .verified)
+    }
+
+    @Test @MainActor
     func verifyAndUnverifyFingerprint_updateBothStoresAndStatus() async {
         let context = MockChatVerificationContext()
         let coordinator = ChatVerificationCoordinator(context: context)

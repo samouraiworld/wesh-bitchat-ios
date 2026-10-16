@@ -1404,6 +1404,9 @@ private struct WeshContactSheet: View {
                 .id(QRFocus.result)
                 .accessibilityFocused($accessibilityFocus, equals: .result)
             Button("Scanner à nouveau", action: retryScan).frame(minHeight: 44)
+        } else if progress == .notSaved {
+            resultMessage(String(localized: "wesh.verify.contact_not_saved", comment: "Shown after a QR scan when the verified contact could not be saved on this phone"))
+            Button("Réessayer le scan", action: retryScan).buttonStyle(WeshPrimaryButtonStyle())
         } else {
             resultMessage("Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis réessayez.")
             Button("Réessayer le scan", action: retryScan).buttonStyle(WeshPrimaryButtonStyle())
