@@ -19,7 +19,8 @@ let package = Package(
         .package(path: "localPackages/Arti"),
         .package(path: "localPackages/BitFoundation"),
         .package(path: "localPackages/BitLogger"),
-        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.21.1")
+        // Upstream 0.21.1 plus Swift 6.4 compiler disambiguation; see docs/validation/BASELINE.md.
+        .package(url: "https://github.com/samouraiworld/swift-secp256k1", revision: "0a1a9f9031b6f86f92eb9b66ef8a6882af531e6f")
     ],
     targets: [
         .executableTarget(
