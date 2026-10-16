@@ -81,17 +81,31 @@ private struct PaveEraseShortcutPresenter: ViewModifier {
     }
 }
 
+/// Key status around the erase overlay window.
+enum PaveWindowOrder {
+    /// The window that takes key status back when the overlay closes: the one that had it before,
+    /// if still in the scene, else the first other window; never the overlay.
+    static func keyAfterOverlay<Window: AnyObject>(previous: Window?, overlay: Window, windows: [Window]) -> Window? {
+        if let previous, previous !== overlay, windows.contains(where: { $0 === previous }) { return previous }
+        return windows.first { $0 !== overlay }
+    }
+}
+
 #if os(iOS)
-/// The hold-to-erase screen in its own window, above every sheet and cover of the app.
+/// The hold-to-erase screen in its own window, above every sheet and cover of the app. It takes
+/// key status while shown and gives it back on close. `PrivacyScreen` covers every window of the
+/// scene, this one included, before the app switcher snapshot.
 @MainActor
 private final class PaveEraseOverlayWindow {
     private var window: UIWindow?
+    private weak var previousKeyWindow: UIWindow?
 
     func show(_ screen: some View) {
         guard window == nil else { return }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         // Before the scene is active (launched by the shortcut), `scenePhase` retries.
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) else { return }
+        previousKeyWindow = scene.keyWindow
         let window = UIWindow(windowScene: scene)
         window.windowLevel = .alert + 1
         window.rootViewController = UIHostingController(rootView: screen)
@@ -100,8 +114,12 @@ private final class PaveEraseOverlayWindow {
     }
 
     func hide() {
-        window?.isHidden = true
-        window = nil
+        guard let window else { return }
+        window.isHidden = true
+        let others = window.windowScene?.windows ?? []
+        PaveWindowOrder.keyAfterOverlay(previous: previousKeyWindow, overlay: window, windows: others)?.makeKey()
+        self.window = nil
+        previousKeyWindow = nil
     }
 }
 #endif

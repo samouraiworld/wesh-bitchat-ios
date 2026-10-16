@@ -190,3 +190,18 @@ struct PaveReviewFixTests {
         #expect(PaveEraseScreen.Outcome(erased: false) == .failed)
     }
 }
+
+@Suite("Pavé erase overlay window")
+struct PaveEraseOverlayOrderTests {
+    private final class Window {}
+
+    @Test func closingTheOverlayGivesKeyStatusBackToTheAppWindow() {
+        let app = Window(), other = Window(), overlay = Window()
+        #expect(PaveWindowOrder.keyAfterOverlay(previous: app, overlay: overlay, windows: [app, other, overlay]) === app)
+        // The previous key window went away meanwhile: the first other window of the scene.
+        #expect(PaveWindowOrder.keyAfterOverlay(previous: nil, overlay: overlay, windows: [overlay, other]) === other)
+        #expect(PaveWindowOrder.keyAfterOverlay(previous: app, overlay: overlay, windows: [overlay, other]) === other)
+        // Never the overlay itself.
+        #expect(PaveWindowOrder.keyAfterOverlay(previous: overlay, overlay: overlay, windows: [overlay]) == nil)
+    }
+}
