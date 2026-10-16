@@ -149,6 +149,10 @@ struct PaveHoldToErase: View {
 struct PaveEraseScreen: View {
     enum Outcome {
         case ready, erased, failed
+
+        init(erased: Bool) {
+            self = erased ? .erased : .failed
+        }
     }
 
     /// Runs the local wipe; returns whether it completed.
@@ -165,18 +169,27 @@ struct PaveEraseScreen: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PaveSpace.s4) {
+        Group {
             switch outcome {
-            case .ready: ready
-            case .erased: erased
-            case .failed: failed
+            case .ready:
+                // Not inside a ScrollView: a scroll must never compete with the hold.
+                page { ready }
+            case .erased:
+                // These two scroll, so large Dynamic Type never pushes their buttons off screen.
+                ScrollView { page { erased } }
+            case .failed:
+                ScrollView { page { failed } }
             }
         }
-        .padding(.horizontal, PaveSpace.s4)
-        .padding(.top, PaveSpace.s8)
-        .padding(.bottom, PaveSpace.s6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .paveScreenBackground()
+    }
+
+    private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: PaveSpace.s4) { content() }
+            .padding(.horizontal, PaveSpace.s4)
+            .padding(.top, PaveSpace.s8)
+            .padding(.bottom, PaveSpace.s6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var ready: some View {
@@ -197,7 +210,7 @@ struct PaveEraseScreen: View {
             // Not inside a ScrollView: a scroll must never compete with the hold.
             VStack(spacing: PaveSpace.s4) {
                 PaveHoldToErase {
-                    outcome = erase() ? .erased : .failed
+                    outcome = Outcome(erased: erase())
                     if outcome == .failed { PaveHaptics.play(.failure) }
                 }
                 .padding(.vertical, PaveSpace.s12)
@@ -217,7 +230,7 @@ struct PaveEraseScreen: View {
             Text(PaveCopy.text("pave.erase.emptyTitle")).paveText(.title).accessibilityAddTraits(.isHeader)
             Text(PaveCopy.text("pave.erase.emptyBody")).paveText(.body)
             Text(PaveCopy.text("pave.erase.emptyContacts")).paveText(.body).foregroundStyle(theme[.inkMuted])
-            Spacer()
+            Spacer(minLength: PaveSpace.s6)
             Button(PaveCopy.text("pave.erase.restart"), action: onClose).buttonStyle(.pavePrimary)
         }
     }
@@ -229,7 +242,7 @@ struct PaveEraseScreen: View {
                 .foregroundStyle(theme[.danger])
                 .accessibilityAddTraits(.isHeader)
             Text(PaveCopy.text("pave.erase.failedBody")).paveText(.body)
-            Spacer()
+            Spacer(minLength: PaveSpace.s6)
             Button(PaveCopy.text("pave.action.retry")) { outcome = .ready }.buttonStyle(.pavePrimary)
             Button(PaveCopy.text("pave.action.close"), action: onClose).buttonStyle(.paveSecondary)
         }

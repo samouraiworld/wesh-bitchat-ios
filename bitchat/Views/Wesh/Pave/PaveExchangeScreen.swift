@@ -39,7 +39,6 @@ struct PaveExchangeScreen: View {
     @State private var now = Date()
     @State private var cameraUnavailable = false
     @State private var authorization = PaveCameraAuthorization.current
-    @State private var celebrated = false
     @State private var latch = PaveCompletionLatch()
     @State private var myFingerprint: String?
     @State private var contactFingerprint: String?
@@ -76,15 +75,22 @@ struct PaveExchangeScreen: View {
         .task { await keepCodeFresh() }
         .task(id: myNoiseKey) { myFingerprint = await PaveFingerprint.computed(myNoiseKey) }
         .task(id: contactNoiseKey) { contactFingerprint = await PaveFingerprint.computed(contactNoiseKey) }
-        .onChange(of: progress) { newValue in
-            guard newValue.isComplete, !celebrated else { return }
-            celebrated = true
+        .task(id: progress.isComplete) {
+            // Cancelled when the screen goes away; Close also shuts the latch.
+            guard progress.isComplete else { return }
             PaveHaptics.play(.scanSuccess)
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(PaveCompletionLatch.successHold * 1_000_000_000))
-                openChat()
+            do {
+                try await Task.sleep(nanoseconds: UInt64(PaveCompletionLatch.successHold * 1_000_000_000))
+            } catch {
+                return
             }
+            openChat()
         }
+    }
+
+    private func close() {
+        latch.close()
+        onClose()
     }
 
     private var fingerprints: PaveExchangeFingerprints {
@@ -103,7 +109,7 @@ struct PaveExchangeScreen: View {
                 .foregroundStyle(theme[.success])
             Text(PaveDisplayName.safe(contactName))
                 .paveText(.headline)
-                .lineLimit(1)
+                .lineLimit(2)
             PaveFingerprintBlock(label: PaveCopy.text("pave.fingerprint.contact"), fingerprint: fingerprints.contact)
             Button(PaveCopy.text("pave.exchange.openChat")) { openChat() }
                 .buttonStyle(.pavePrimary)
@@ -119,7 +125,7 @@ struct PaveExchangeScreen: View {
         HStack {
             Text(PaveCopy.text("pave.exchange.title")).paveText(.title).accessibilityAddTraits(.isHeader)
             Spacer()
-            Button(action: onClose) {
+            Button(action: close) {
                 Image(systemName: "xmark")
                     .font(PaveTextStyle.headline.font)
                     .frame(width: PaveTouch.minimum, height: PaveTouch.minimum)

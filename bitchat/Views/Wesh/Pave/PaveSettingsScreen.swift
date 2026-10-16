@@ -43,19 +43,34 @@ struct PaveSettingsSummary {
 
 struct PaveSettingsScreen: View {
     let summary: PaveSettingsSummary
-    let onErase: () -> Void
+    /// Runs the local wipe; returns whether it completed, like `PaveEraseScreen`.
+    let onErase: () -> Bool
     let onSelect: (PaveSettingsDestination) -> Void
 
     @Environment(\.paveTheme) private var theme
+    /// After a hold: « Wesh est vide » or the failure, as on the erase screen.
+    @State private var eraseOutcome: PaveEraseScreen.Outcome?
 
     var body: some View {
+        if let eraseOutcome {
+            PaveEraseScreen(outcome: eraseOutcome, erase: onErase) { self.eraseOutcome = nil }
+        } else {
+            settings
+        }
+    }
+
+    private var settings: some View {
         VStack(alignment: .leading, spacing: PaveSpace.s3) {
             Text(PaveCopy.text("pave.settings.title"))
                 .paveText(.title)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.bottom, PaveSpace.s1)
             // Pinned above the scrolling rows: a scroll must never compete with the hold.
-            PaveHoldToErase(layout: .row, onErase: onErase)
+            PaveHoldToErase(layout: .row) {
+                let outcome = PaveEraseScreen.Outcome(erased: onErase())
+                if outcome == .failed { PaveHaptics.play(.failure) }
+                eraseOutcome = outcome
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: PaveSpace.s3) {
                     VStack(spacing: 0) {
@@ -174,7 +189,7 @@ struct PaveSettingsScreen_Previews: PreviewProvider {
             PaveSettingsScreen(summary: PaveSettingsSummary(nickname: "Renard 42", previewsHidden: true,
                                                             meetingNote: "Fontaine, 18 h", blockedCount: 2,
                                                             theme: .nuit),
-                               onErase: {}, onSelect: { _ in })
+                               onErase: { true }, onSelect: { _ in })
         }
         PavePreview.variants {
             PaveAboutScreen(version: "1.0 (1)")

@@ -196,6 +196,11 @@ struct PaveCompletionLatch {
         fired = true
         action()
     }
+
+    /// The screen closed first: neither the button nor the timer opens the chat any more.
+    mutating func close() {
+        fired = true
+    }
 }
 
 /// The two checks of Échanger. They never carry the contact's name: it is peer-chosen, and a check

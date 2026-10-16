@@ -145,3 +145,35 @@ struct PaveInternetSwitchTests {
         #expect(PaveInternetStatus(.error(.torBlocked)) == .failed)
     }
 }
+
+@Suite("Pavé review fixes")
+struct PaveReviewFixTests {
+    @Test func closingBeforeTheTimerKeepsTheChatClosed() {
+        var latch = PaveCompletionLatch()
+        var opened = 0
+        latch.close()  // « Fermer » within the 3 s hold
+        latch.fire { opened += 1 }  // the timer, if it still ran
+        #expect(opened == 0)
+        #expect(latch.fired)
+    }
+
+    @Test @MainActor func theShortcutWorksAgainAfterTheScreenCloses() {
+        let request = PaveEraseRequest()
+        #expect(!request.isPresented)
+        request.request()
+        #expect(request.isPresented)
+        #expect(request.requestCount == 1)
+        request.request()  // a second run while the screen is up: still one screen
+        #expect(request.isPresented)
+        #expect(request.requestCount == 2)
+        request.close()
+        #expect(!request.isPresented)
+        request.request()
+        #expect(request.isPresented)
+    }
+
+    @Test func settingsShowTheSameOutcomeAsTheEraseScreen() {
+        #expect(PaveEraseScreen.Outcome(erased: true) == .erased)
+        #expect(PaveEraseScreen.Outcome(erased: false) == .failed)
+    }
+}

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 /// What the Internet mode is doing, as shown to people.
 enum PaveInternetStatus: Equatable {
@@ -113,6 +118,7 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
     @Environment(\.openURL) private var openURL
     @State private var askDisclosure = false
     @State private var refused = false
+    @AccessibilityFocusState private var disclosureFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -192,6 +198,7 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
                 Text(PaveCopy.text("pave.internet.confirmTitle"))
                     .paveText(.label)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($disclosureFocused)
                 Text(PaveCopy.text("pave.internet.disclosureFull"))
                     .paveText(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -217,6 +224,11 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
     private func show(_ outcome: PaveInternetToggle) {
         askDisclosure = outcome == .needsDisclosure
         refused = outcome == .refused
+        if askDisclosure {
+            // VoiceOver moves to the disclosure it must hear before « Activer ».
+            DispatchQueue.main.async { disclosureFocused = true }
+        }
+        if refused { PaveAccessibility.announce(PaveCopy.text("pave.internet.refused")) }
     }
 
     private var bluetoothRole: PaveColorRole {
@@ -241,6 +253,19 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
         case .off: return PaveCopy.text("pave.connexion.bluetoothOffHelp")
         case .unauthorized: return PaveCopy.text("pave.connexion.bluetoothDeniedHelp")
         }
+    }
+}
+
+/// Spoken feedback for changes VoiceOver would otherwise miss.
+enum PaveAccessibility {
+    static func announce(_ message: String) {
+        #if os(iOS)
+        UIAccessibility.post(notification: .announcement, argument: message)
+        #elseif os(macOS)
+        guard let window = NSApp.keyWindow else { return }
+        NSAccessibility.post(element: window, notification: .announcementRequested,
+                             userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        #endif
     }
 }
 
