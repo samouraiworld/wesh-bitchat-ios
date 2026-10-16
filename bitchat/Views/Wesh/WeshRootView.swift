@@ -1253,7 +1253,7 @@ private struct WeshMessageBubble: View {
         HStack {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
-                if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
+                if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : WeshDisplayName.clean(message.sender, fallback: "Participant")).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
                 Text(message.content).font(.body).textSelection(.enabled)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }
@@ -1834,17 +1834,18 @@ private struct WeshNearbyPeople: View {
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(participants, id: \.peerID) { person in
+                        let name = WeshDisplayName.clean(person.displayName, fallback: "Participant")
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(person.displayName).font(.headline)
+                            Text(name).font(.headline)
                             Text("Identité · " + String(person.noisePublicKey.sha256Fingerprint().prefix(8)))
                                 .font(.caption.monospaced()).foregroundStyle(theme.secondary)
                             if runtime.chatViewModel.identityManager.isBlocked(fingerprint: person.noisePublicKey.sha256Fingerprint()) {
                                 Text("Bloqué sur ce téléphone").font(.subheadline).foregroundStyle(theme.secondary)
                             } else {
                                 Button("Bloquer sur ce téléphone", role: .destructive) {
-                                    selected = .init(noiseKeyHex: person.noisePublicKey.hexEncodedString(), nickname: person.displayName)
+                                    selected = .init(noiseKeyHex: person.noisePublicKey.hexEncodedString(), nickname: name)
                                 }.frame(minHeight: 44)
-                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(person.displayName, fingerprint: person.noisePublicKey.sha256Fingerprint()))
+                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(name, fingerprint: person.noisePublicKey.sha256Fingerprint()))
                                     .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                             }
                         }.padding(.vertical, 8)

@@ -12,6 +12,14 @@ enum WeshTextLimits {
     static let maximumUTF8Bytes = 2000
 }
 
+/// A peer-chosen name made safe to show: no control or format characters
+/// (bidi overrides included), at most 50 characters, NFC; else the fallback.
+enum WeshDisplayName {
+    static func clean(_ raw: String, fallback: String = "Contact") -> String {
+        InputValidator.validateNickname(raw) ?? fallback
+    }
+}
+
 /// QR enrollment is separate from upstream manual verification and transitive vouches.
 /// Contacts are sealed on this device only. An unreadable record is preserved
 /// and reported, never replaced by an empty list.
@@ -70,7 +78,7 @@ final class WeshQRTrust: ObservableObject {
         let hex = sessionKey.hexEncodedString()
         var next = snapshot
         next.contacts.removeAll { $0.noiseKeyHex == hex }
-        next.contacts.append(Contact(noiseKeyHex: hex, nickname: nickname))
+        next.contacts.append(Contact(noiseKeyHex: hex, nickname: WeshDisplayName.clean(nickname)))
         let fingerprint = sessionKey.sha256Fingerprint()
         if !next.fingerprints.contains(fingerprint) { next.fingerprints.append(fingerprint) }
         return commit(next)
@@ -271,7 +279,7 @@ final class WeshQRTrust: ObservableObject {
                   let decoded = try? JSONDecoder().decode([Contact].self, from: data) else {
                 throw WeshSealedStore.Failure.recoveryRequired
             }
-            value.contacts = decoded
+            value.contacts = decoded.map { Contact(noiseKeyHex: $0.noiseKeyHex, nickname: WeshDisplayName.clean($0.nickname)) }
         }
         if let prints {
             guard let prints = prints as? [String] else { throw WeshSealedStore.Failure.recoveryRequired }

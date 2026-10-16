@@ -575,4 +575,22 @@ struct WeshPrivateDataAtRestTests {
 
     // MARK: Contact names
 
+    @Test func contactNicknamesAreSanitizedWhenRecordedAndWhenMigrated() throws {
+        #expect(WeshDisplayName.clean("  Nora  ") == "Nora")
+        #expect(WeshDisplayName.clean("No\u{202E}ra") == "Contact")
+        #expect(WeshDisplayName.clean("Line\nbreak") == "Contact")
+        #expect(WeshDisplayName.clean(String(repeating: "a", count: 51)) == "Contact")
+        #expect(WeshDisplayName.clean("", fallback: "Participant") == "Participant")
+
+        let trust = WeshQRTrust()
+        #expect(trust.record(sessionKey: alice, nickname: "Ali\u{200F}ce"))
+        #expect(trust.contacts.map(\.nickname) == ["Contact"])
+
+        let fixture = Fixture()
+        let legacy = [WeshQRTrust.Contact(noiseKeyHex: bob.hexEncodedString(), nickname: "Bob\u{0007}")]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: WeshQRTrust.legacyContactsKey)
+        let migrated = WeshQRTrust(storage: fixture.store(), legacyDefaults: fixture.defaults)
+        #expect(migrated.contacts.map(\.nickname) == ["Contact"])
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.map(\.nickname) == ["Contact"])
+    }
 }
