@@ -132,6 +132,40 @@ struct LocalNicknamePanicTests {
         #expect(vm.nickname != "Nora")
     }
 
+    @Test func aLockedKeychainAtLaunchNeverMakesTheStandInNamePermanent() {
+        let keychain = MockKeychain()
+        let (vm, _) = viewModel(keychain: keychain)
+        _ = keychain.saveIdentityKey(Data("Nora".utf8), forKey: LocalNicknameStore.keychainKey)
+        keychain.identityReadFault = { key, _ in key == LocalNicknameStore.keychainKey ? .deviceLocked : nil }
+        vm.loadNickname()
+        #expect(vm.isNicknameProvisional)
+        #expect(vm.nickname.hasPrefix("anon"))
+        // The header field saves on focus loss even when nothing was typed.
+        vm.validateAndSaveNickname()
+        #expect(keychain.getIdentityKey(forKey: LocalNicknameStore.keychainKey) == Data("Nora".utf8))
+
+        keychain.identityReadFault = nil
+        vm.reloadProvisionalNickname()
+        #expect(vm.nickname == "Nora")
+        #expect(!vm.isNicknameProvisional)
+    }
+
+    @Test func aNameTypedWhileTheKeychainWasLockedIsSavedAndKept() {
+        let keychain = MockKeychain()
+        let (vm, _) = viewModel(keychain: keychain)
+        _ = keychain.saveIdentityKey(Data("Nora".utf8), forKey: LocalNicknameStore.keychainKey)
+        keychain.identityReadFault = { key, _ in key == LocalNicknameStore.keychainKey ? .deviceLocked : nil }
+        vm.loadNickname()
+        vm.nickname = "Lea"
+        vm.validateAndSaveNickname()
+        #expect(!vm.isNicknameProvisional)
+        #expect(keychain.getIdentityKey(forKey: LocalNicknameStore.keychainKey) == Data("Lea".utf8))
+
+        keychain.identityReadFault = nil
+        vm.reloadProvisionalNickname()
+        #expect(vm.nickname == "Lea")
+    }
+
     @Test func panicDoesNotCommitWhileTheNicknameWipeIsUnconfirmed() {
         let keychain = MockKeychain()
         let (vm, committed) = viewModel(keychain: keychain)

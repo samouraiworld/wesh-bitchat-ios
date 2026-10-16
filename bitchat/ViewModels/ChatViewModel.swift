@@ -348,6 +348,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private var nicknameStore: LocalNicknameStore {
         LocalNicknameStore(keychain: keychain, defaults: userDefaults)
     }
+    private var provisionalNickname: String?
+    private var nicknameProtectedDataObserver: AnyCancellable?
     // Location channel state (macOS supports manual geohash selection)
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
@@ -1311,6 +1313,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // MARK: - Nickname Management
 
     func loadNickname() {
+        provisionalNickname = nil
         switch nicknameStore.load() {
         case .stored(let savedNickname):
             nickname = savedNickname.trimmed
@@ -1318,12 +1321,51 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             nickname = "anon\(Int.random(in: 1000...9999))"
             saveNickname()
         case .unavailable:
-            // Keychain locked: use a temporary name, keep the stored one.
+            // Keychain locked (background launch before first unlock): use a
+            // stand-in that is never saved, and read again after unlock.
             nickname = "anon\(Int.random(in: 1000...9999))"
+            provisionalNickname = nickname
+            observeProtectedDataForNickname()
         }
     }
 
+    /// True while the name is the stand-in chosen with a locked Keychain and
+    /// the user has not typed another one.
+    var isNicknameProvisional: Bool {
+        provisionalNickname != nil && provisionalNickname == nickname
+    }
+
+    func reloadProvisionalNickname() {
+        guard isNicknameProvisional else { return }
+        switch nicknameStore.load() {
+        case .stored(let savedNickname):
+            provisionalNickname = nil
+            nickname = savedNickname.trimmed
+            meshService.sendBroadcastAnnounce()
+        case .absent:
+            provisionalNickname = nil
+            saveNickname()
+        case .unavailable:
+            break
+        }
+    }
+
+    private func observeProtectedDataForNickname() {
+        #if os(iOS)
+        guard nicknameProtectedDataObserver == nil else { return }
+        nicknameProtectedDataObserver = NotificationCenter.default
+            .publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reloadProvisionalNickname() }
+        #endif
+    }
+
     func saveNickname() {
+        if let provisional = provisionalNickname {
+            // Saving on focus loss must not make the stand-in permanent.
+            guard nickname != provisional else { return }
+            provisionalNickname = nil
+        }
         nicknameStore.save(nickname)
 
         // Send announce with new nickname to all peers
@@ -1776,6 +1818,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         // Reset nickname to anonymous; the previous one must be gone from
         // the Keychain and from the legacy UserDefaults key.
+        provisionalNickname = nil
         nickname = "anon\(Int.random(in: 1000...9999))"
         let nicknameWipeCompleted = nicknameStore.replaceForPanic(with: nickname)
 
