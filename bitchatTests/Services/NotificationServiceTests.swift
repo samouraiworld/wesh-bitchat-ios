@@ -74,7 +74,28 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(request?.content.title, "🔒 DM from Alice")
         XCTAssertEqual(request?.content.body, "hi")
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
-        XCTAssertEqual(request?.content.userInfo["senderName"] as? String, "Alice")
+        XCTAssertNil(request?.content.userInfo["senderName"])
+    }
+
+    func test_removeAllNotifications_clearsDeliveredAndPending() {
+        final class Remover: NotificationRemoving {
+            var delivered = 0
+            var pending = 0
+            func removeAllDeliveredNotifications() { delivered += 1 }
+            func removeAllPendingNotificationRequests() { pending += 1 }
+        }
+        let remover = Remover()
+        let service = NotificationService(
+            isRunningTestsProvider: { false },
+            authorizer: RecordingNotificationAuthorizer(),
+            requestDeliverer: RecordingNotificationRequestDeliverer(),
+            remover: remover
+        )
+
+        service.removeAllNotifications()
+
+        XCTAssertEqual(remover.delivered, 1)
+        XCTAssertEqual(remover.pending, 1)
     }
 
     /// Previews hidden: the default. The routing payload has to survive

@@ -8,9 +8,10 @@ import UIKit
 
 /// One owner for the note. An editor event belongs to the generation in which
 /// its Binding was created, including events delivered after a wipe/restart.
+/// The note is sealed on this device; an unreadable record is kept, not replaced.
 @MainActor
 final class WeshMeetingNoteStore: ObservableObject {
-    struct Content: Equatable {
+    struct Content: Equatable, Codable {
         var title = ""
         var place = ""
         var note = ""
@@ -20,48 +21,107 @@ final class WeshMeetingNoteStore: ObservableObject {
     @Published private(set) var content: Content
     @Published private(set) var generation: UInt64 = 0
     @Published private(set) var isSuspended = false
-    private let defaults: UserDefaults?
+    @Published private(set) var storageState: WeshQRTrust.StorageState = .available
+    /// False after an accepted edit whose sealed write was not confirmed.
+    @Published private(set) var isSaveConfirmed = true
+    private let storage: WeshSealedStore?
+    private let legacyDefaults: UserDefaults?
     private let erasePersisted: @MainActor () -> Bool
-    private static let keys = ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"]
+    static let legacyKeys = ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"]
 
-    /// Nil defaults is a RAM-only instance. Tests inject synthetic storage and
-    /// never construct an owner backed by the host's standard defaults.
-    init(defaults: UserDefaults? = nil, erasePersisted: (@MainActor () -> Bool)? = nil) {
-        self.defaults = defaults
-        content = Content(
-            title: defaults?.string(forKey: Self.keys[0]) ?? "",
-            place: defaults?.string(forKey: Self.keys[1]) ?? "",
-            note: defaults?.string(forKey: Self.keys[2]) ?? "",
-            date: defaults?.object(forKey: Self.keys[3]) as? Double ?? Date().timeIntervalSince1970
-        )
+    /// Nil storage is a RAM-only instance. Tests inject synthetic storage and
+    /// never construct an owner backed by the host's real files.
+    init(storage: WeshSealedStore? = nil, legacyDefaults: UserDefaults? = nil,
+         erasePersisted: (@MainActor () -> Bool)? = nil) {
+        self.storage = storage
+        self.legacyDefaults = legacyDefaults
+        content = Content()
         self.erasePersisted = erasePersisted ?? {
-            guard let defaults else { return true }
-            Self.keys.forEach { defaults.removeObject(forKey: $0) }
-            return Self.keys.allSatisfy { defaults.object(forKey: $0) == nil }
+            var erased = true
+            if let storage { do { try storage.wipe() } catch { erased = false } }
+            if let legacyDefaults {
+                Self.legacyKeys.forEach { legacyDefaults.removeObject(forKey: $0) }
+                erased = erased && Self.legacyKeys.allSatisfy { legacyDefaults.object(forKey: $0) == nil }
+            }
+            return erased
         }
+        load()
+    }
+
+    var isEditable: Bool { !isSuspended && storageState == .available }
+
+    func reloadIfNeeded() {
+        guard !isSuspended, storageState != .available else { return }
+        load()
     }
 
     @discardableResult
     func edit(_ field: WritableKeyPath<Content, String>, value: String, generation expected: UInt64) -> Bool {
-        guard !isSuspended, expected == generation else { return false }
-        content[keyPath: field] = value
-        let key: String
+        guard isEditable, expected == generation else { return false }
         switch field {
-        case \Content.title: key = Self.keys[0]
-        case \Content.place: key = Self.keys[1]
-        case \Content.note: key = Self.keys[2]
+        case \Content.title, \Content.place, \Content.note: break
         default: return false
         }
-        defaults?.set(value, forKey: key)
+        content[keyPath: field] = value
+        persist()
         return true
     }
 
     @discardableResult
     func editDate(_ value: TimeInterval, generation expected: UInt64) -> Bool {
-        guard !isSuspended, expected == generation, value.isFinite else { return false }
+        guard isEditable, expected == generation, value.isFinite else { return false }
         content.date = value
-        defaults?.set(value, forKey: Self.keys[3])
+        persist()
         return true
+    }
+
+    private func persist() {
+        guard let storage else { return }
+        do {
+            try storage.save(JSONEncoder().encode(content))
+            isSaveConfirmed = true
+        } catch WeshSealedStore.Failure.recoveryRequired {
+            isSaveConfirmed = false
+            storageState = .recoveryRequired
+        } catch { isSaveConfirmed = false }
+    }
+
+    private func load() {
+        guard let storage else { return }
+        do {
+            if let data = try storage.load() {
+                guard let value = try? JSONDecoder().decode(Content.self, from: data) else {
+                    throw WeshSealedStore.Failure.recoveryRequired
+                }
+                content = value
+            } else if let legacy = legacyContent() {
+                // One-time migration: delete plaintext only after a confirmed sealed write.
+                try storage.save(JSONEncoder().encode(legacy))
+                content = legacy
+            } else {
+                content = Content()
+            }
+            if let legacyDefaults { Self.legacyKeys.forEach { legacyDefaults.removeObject(forKey: $0) } }
+            storageState = .available
+        } catch WeshSealedStore.Failure.recoveryRequired {
+            content = Content()
+            storageState = .recoveryRequired
+        } catch {
+            // Locked device or unconfirmed write: retryable, nothing replaced.
+            content = Content()
+            storageState = .unavailable
+        }
+    }
+
+    private func legacyContent() -> Content? {
+        guard let legacyDefaults,
+              Self.legacyKeys.contains(where: { legacyDefaults.object(forKey: $0) != nil }) else { return nil }
+        return Content(
+            title: legacyDefaults.string(forKey: Self.legacyKeys[0]) ?? "",
+            place: legacyDefaults.string(forKey: Self.legacyKeys[1]) ?? "",
+            note: legacyDefaults.string(forKey: Self.legacyKeys[2]) ?? "",
+            date: legacyDefaults.object(forKey: Self.legacyKeys[3]) as? Double ?? Date().timeIntervalSince1970
+        )
     }
 
     func suspendForPanic() {
@@ -72,7 +132,10 @@ final class WeshMeetingNoteStore: ObservableObject {
 
     func wipeForPanic() -> Bool {
         guard isSuspended else { return false }
-        return erasePersisted()
+        guard erasePersisted() else { return false }
+        storageState = .available
+        isSaveConfirmed = true
+        return true
     }
 
     func completePanic() {
@@ -156,6 +219,7 @@ struct WeshRootView: View {
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     private var theme: WeshTheme { WeshTheme(appearance: appearance) }
 
     init(runtime: AppRuntime) {
@@ -210,12 +274,19 @@ struct WeshRootView: View {
                 }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
             }
         }
+        .overlay { if WeshPrivacyCover.covers(scenePhase) { WeshPrivacyCoverView() } }
         .environment(\.weshTheme, theme)
         .environment(\.colorScheme, theme.scheme)
         .tint(theme.accent)
         .preferredColorScheme(theme.scheme)
         .background(theme.canvas.ignoresSafeArea())
         .onChange(of: viewModel.weshPanicGeneration) { _ in sharedReview = nil }
+        .onChange(of: scenePhase) { phase in
+            // Sealed stores stay closed until first unlock; retry once visible.
+            guard phase == .active else { return }
+            WeshQRTrust.shared.reloadIfNeeded()
+            viewModel.weshMeetingNote.reloadIfNeeded()
+        }
         .alert("Effacer les données de Wesh sur ce téléphone ?", isPresented: $chrome.showPanicConfirmation) {
             Button("Annuler", role: .cancel) {}
             Button("Effacer les données locales", role: .destructive) {
@@ -468,7 +539,16 @@ private struct WeshInbox: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var addingContact = false
+    @State private var storageCheck = 0
     @EnvironmentObject private var peers: PeerListModel
+
+    private var storageNotice: WeshContactStorageNotice? {
+        let _ = storageCheck
+        let identity = runtime.chatViewModel.identityManager
+        return WeshContactStorageNotice(identityAvailable: identity.isPersistenceAvailable,
+                                        identityRequiresRecovery: identity.persistenceRequiresRecovery,
+                                        contactsState: trust.storageState)
+    }
 
     private var contacts: [WeshQRTrust.Contact] {
         let _ = peers.renderID
@@ -483,6 +563,15 @@ private struct WeshInbox: View {
             if chrome.noiseIdentityAvailability != .available {
                 Section { WeshNoiseIdentityRecoveryPanel() }
                     .listRowBackground(theme.canvas)
+            }
+            if let storageNotice {
+                Section {
+                    WeshContactStorageRecoveryPanel(notice: storageNotice) {
+                        runtime.chatViewModel.identityManager.forceSave()
+                        trust.reloadIfNeeded()
+                        storageCheck += 1
+                    }
+                }.listRowBackground(theme.canvas)
             }
             Section {
                 NavigationLink {
@@ -1932,9 +2021,16 @@ private struct WeshMeetingNote: View {
                     store.editDate($0.timeIntervalSince1970, generation: generation)
                 }))
                 TextField("À retenir", text: textBinding(\.note, generation: generation), axis: .vertical).lineLimit(3...8)
-            }.disabled(store.isSuspended).listRowBackground(theme.canvas)
+            }.disabled(!store.isEditable).listRowBackground(theme.canvas)
             if store.isSuspended {
                 Text("La note est suspendue après une demande d’effacement. Certaines données peuvent rester ici. Reprenez l’effacement local depuis les réglages de confidentialité.")
+            } else if store.storageState == .unavailable {
+                Text("La note est illisible pour le moment. Déverrouillez le téléphone, puis réessayez.")
+                Button("Réessayer") { store.reloadIfNeeded() }.frame(minHeight: 44)
+            } else if store.storageState == .recoveryRequired {
+                Text("La note conservée n’a pas pu être lue. Elle est gardée sans être remplacée. Vous pouvez l’effacer pour en écrire une nouvelle.")
+            } else if !store.isSaveConfirmed {
+                Text("Enregistrement de la note non confirmé. Gardez cette page ouverte et réessayez.")
             }
             Section { Button("Effacer cette note", role: .destructive) { clear = true }.frame(minHeight: 44).disabled(store.isSuspended) }.listRowBackground(theme.canvas)
         }

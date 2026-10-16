@@ -37,6 +37,10 @@ struct PanicPersistentStoreWipes {
         guard let defaults = UserDefaults(suiteName: BitchatApp.groupID) else { return false }
         return SharedContentStore(defaults: defaults).discardAll()
     }
+    /// Sealed QR contact list, its key and any legacy plaintext copy.
+    var qrContacts: @MainActor () -> Bool = { WeshQRTrust.shared.clear() }
+    /// Delivered and pending alerts can still name senders or quote messages.
+    var notifications: @MainActor () -> Void = { NotificationService.shared.removeAllNotifications() }
 }
 
 struct PanicRecoveryIntent {

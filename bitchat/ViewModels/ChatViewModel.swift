@@ -1207,7 +1207,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicNetworkLifecycle = panicNetworkLifecycle
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
-            ?? WeshMeetingNoteStore(defaults: TestEnvironment.isRunningTests ? nil : .standard)
+            ?? (TestEnvironment.isRunningTests
+                ? WeshMeetingNoteStore()
+                : WeshMeetingNoteStore(storage: .liveMeetingNote(), legacyDefaults: .standard))
         self.groupStore = groupStore ?? GroupStore(keychain: keychain)
         self.idBridge = idBridge
         self.identityManager = identityManager
@@ -1750,10 +1752,14 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Clear favorites and peer mappings
         // Clear through SecureIdentityStateManager instead of directly
         identityManager.clearAllIdentityData()
+        // The reset path offered for an unreadable cache relies on this: the
+        // wipe commits only once an empty cache is confirmed writable again.
+        let identityCacheWipeCompleted = identityManager.isPersistenceAvailable
         peerIdentityStore.clearAll()
-        WeshQRTrust.shared.clear()
+        let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
         UserDefaults.standard.removeObject(forKey: "wesh.publicDisclosureAccepted.v1")
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
+        panicPersistentStoreWipes.notifications()
         locationPresenceStore.reset()
         publicRateLimiter.reset()
 
@@ -1853,7 +1859,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [keychainWipeCompleted, meetingNoteWipeCompleted, courierWipeCompleted,
+            if [keychainWipeCompleted, identityCacheWipeCompleted, meetingNoteWipeCompleted, qrContactsWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
                 groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
                 sharedContentWipeCompleted].allSatisfy({ $0 }) {
