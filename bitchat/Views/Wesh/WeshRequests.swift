@@ -299,7 +299,7 @@ private struct WeshRequestDetail: View {
             Button("Annuler", role: .cancel) {}
             Button("Bloquer", role: .destructive) {
                 if let request {
-                    runtime.chatViewModel.blockMeshPeer(peerID: request.peerID, displayName: request.nickname)
+                    runtime.chatViewModel.blockMeshPeer(peerID: request.peerID, displayName: PaveDisplayName.safe(request.nickname))
                     requests.remove(request.id)
                 }
                 dismiss()

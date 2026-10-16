@@ -1885,18 +1885,20 @@ private struct WeshNearbyPeople: View {
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(participants, id: \.peerID) { person in
-                        let name = WeshDisplayName.clean(person.displayName, fallback: "Participant")
+                        let name = PaveDisplayName.safe(WeshDisplayName.clean(person.displayName, fallback: "Participant"))
+                        // One identity for the whole row: the key this peer proved in its Noise session.
+                        // An announced key can be copied, so without a proven one there is nothing to block.
+                        let proven = runtime.chatViewModel.noiseSessionPublicKeyData(for: person.peerID)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(name).font(.headline)
-                            // Only a key this peer proved in its Noise session; an announced key can be copied.
-                            PaveFingerprintText(fingerprint: PaveFingerprint.short(runtime.chatViewModel.noiseSessionPublicKeyData(for: person.peerID)))
-                            if runtime.chatViewModel.identityManager.isBlocked(fingerprint: person.noisePublicKey.sha256Fingerprint()) {
+                            PaveFingerprintText(fingerprint: PaveFingerprint.short(proven))
+                            if let proven, runtime.chatViewModel.identityManager.isBlocked(fingerprint: proven.sha256Fingerprint()) {
                                 Text("Bloqué sur ce téléphone").font(.subheadline).foregroundStyle(theme.secondary)
-                            } else {
+                            } else if let proven {
                                 Button("Bloquer sur ce téléphone", role: .destructive) {
-                                    selected = .init(noiseKeyHex: person.noisePublicKey.hexEncodedString(), nickname: name)
+                                    selected = .init(noiseKeyHex: proven.hexEncodedString(), nickname: name)
                                 }.frame(minHeight: 44)
-                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(name, fingerprint: person.noisePublicKey.sha256Fingerprint()))
+                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(name, fingerprint: proven.sha256Fingerprint()))
                                     .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                             }
                         }.padding(.vertical, 8)
@@ -1939,7 +1941,7 @@ private struct WeshBlockedContacts: View {
     private var fingerprints: [String] { runtime.chatViewModel.identityManager.getBlockedFingerprints().sorted() }
     private func name(for fingerprint: String) -> String {
         let identity = runtime.chatViewModel.identityManager.getSocialIdentity(for: fingerprint)
-        return WeshDisplayName.blockedContact(petname: identity?.localPetname, claimedNickname: identity?.claimedNickname)
+        return PaveDisplayName.safe(WeshDisplayName.blockedContact(petname: identity?.localPetname, claimedNickname: identity?.claimedNickname))
     }
 
     var body: some View {
@@ -2216,10 +2218,10 @@ private func weshIdentitySummary(_ name: String, fingerprint: String?) -> String
 }
 
 /// The full short fingerprint ("A1B2 C3D4 E5F6 0718") of a SHA-256 fingerprint in hex; never shortened.
+/// Fails closed on anything but a whole 64-digit ASCII hex fingerprint.
 func weshShortFingerprint(hex: String?) -> String? {
-    guard let hex, hex.count >= 16 else { return nil }
+    guard let hex, hex.count == 64, hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
     let digits = Array(hex.uppercased().prefix(16))
-    guard digits.allSatisfy(\.isHexDigit) else { return nil }
     return stride(from: 0, to: 16, by: 4).map { String(digits[$0..<$0 + 4]) }.joined(separator: " ")
 }
 
