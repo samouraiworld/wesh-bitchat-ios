@@ -74,7 +74,7 @@ struct WeshInternetStateMachineTests {
             machine.handle(.retry)
             #expect(machine.state == .on)
         }
-        // A soft error becomes the hard one; Off, Paused and a route fault stay as they are.
+        // Any error becomes the Arti exit; Off and Paused stay as they are.
         var machine = WeshInternetStateMachine(enabled: true)
         machine.handle(.stallTimeout)
         machine.handle(.torStopped)
@@ -86,9 +86,12 @@ struct WeshInternetStateMachineTests {
         machine.handle(.background)
         machine.handle(.torStopped)
         #expect(machine.state == .paused)
-        machine = WeshInternetStateMachine(enabled: true, inputs: Inputs(torProgress: 10, relayConnected: true))
-        machine.handle(.torStopped)
+        // Readiness drops before the exit is posted: the route fault seen first gives way to it.
+        machine = WeshInternetStateMachine(enabled: true, inputs: Inputs(torReady: true, torProgress: 100, relayConnected: true))
+        machine.handle(.inputs(Inputs(torReady: false, torProgress: 0, relayConnected: true)))
         #expect(machine.state == .error(.routeFault))
+        machine.handle(.torStopped)
+        #expect(machine.state == .error(.torStopped))
     }
 
     @Test func stallAndNoNetworkAreErrors() {
@@ -302,6 +305,24 @@ struct WeshInternetModeTests {
         mode.retry()
         #expect(mode.state == .connecting(torProgress: 0))
         #expect(Array(harness.events.suffix(2)) == ["network:on", "retry"])
+    }
+
+    @Test func artiExitAfterTheReadinessDropIsReportedAsTheArtiExit() async {
+        let harness = Harness()
+        let mode = enabledMode(harness)
+        harness.inputs.send(.init(torReady: true, torProgress: 100, relayConnected: true))
+        await settle()
+        harness.events.removeAll()
+
+        // TorManager drops readiness first, then posts the exit.
+        harness.inputs.send(.init(torReady: false, torProgress: 0, relayConnected: true))
+        await settle()
+        #expect(mode.state == .error(.routeFault))
+        harness.torStopped.send()
+        await settle()
+
+        #expect(mode.state == .error(.torStopped))
+        #expect(!harness.networkEnabled.contains(true))
     }
 
     @Test func enablingIsRefusedWhenTorCannotBeForced() {

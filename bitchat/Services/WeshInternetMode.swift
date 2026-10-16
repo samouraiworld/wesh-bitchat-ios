@@ -110,10 +110,12 @@ struct WeshInternetStateMachine: Equatable {
         case .routeFault:
             if state != .off { state = .error(.routeFault) }
         case .torStopped:
+            // Also replaces a route fault: TorManager drops readiness before
+            // it posts the exit, so a connected relay can be seen as a route
+            // fault a moment earlier. The cause is the Arti exit.
             switch state {
-            case .connecting, .on: state = .error(.torStopped)
-            case .error(let failure) where !failure.isHard: state = .error(.torStopped)
-            case .off, .paused, .error: break
+            case .connecting, .on, .error: state = .error(.torStopped)
+            case .off, .paused: break
             }
         case .retry:
             if case .error = state { state = connecting() }
