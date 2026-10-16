@@ -710,6 +710,42 @@ struct BridgeCourierServiceTests {
 
     // MARK: - Subscription management
 
+    @Test func refreshDoesNotDeriveTagsFromAbsentOrMalformedOwnIdentity() {
+        let unavailableKeys: [Data?] = [nil, Data(), Data(repeating: 1, count: 31), Data(repeating: 1, count: 33)]
+        for key in unavailableKeys {
+            let fixture = Fixture()
+            fixture.myKey = key
+            fixture.service.refresh()
+            #expect(fixture.openedSubscriptions.isEmpty)
+        }
+    }
+
+    @Test func refreshClosesOwnSubscriptionWhenIdentityBecomesUnavailable() {
+        let fixture = Fixture()
+        fixture.service.refresh()
+        #expect(fixture.openedSubscriptions.count == 1)
+        fixture.myKey = Data()
+        fixture.service.refresh()
+        #expect(fixture.closedSubscriptions == 1)
+        #expect(fixture.openedSubscriptions.count == 1)
+    }
+
+    @Test func refreshIgnoresMalformedPeerIdentityKeys() throws {
+        let fixture = Fixture()
+        fixture.myKey = nil
+        let validKey = Fixture.randomKey()
+        fixture.localPeers = [
+            (PeerID(str: "0011223344556677"), Data()),
+            (PeerID(str: "1122334455667788"), Data(repeating: 1, count: 31)),
+            (PeerID(str: "2233445566778899"), validKey)
+        ]
+        fixture.service.refresh()
+        let tags = try #require(fixture.openedSubscriptions.last)
+        let expected = CourierEnvelope.candidateTags(noiseStaticKey: validKey, around: Date())
+            .map { $0.hexEncodedString() }
+        #expect(Set(tags) == Set(expected))
+    }
+
     @Test func refreshSubscribesOwnCandidateTags() throws {
         let fixture = Fixture()
         fixture.service.refresh()

@@ -467,7 +467,7 @@ struct CourierEndToEndTests {
         carol.courierDepositPolicy = { _, _ in nil } // depositor is neither favorite nor verified
 
         let alice = NoiseEncryptionService(keychain: MockKeychain())
-        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()
+        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()!
         let typedPayload = try #require(BLENoisePayloadFactory.privateMessage(content: "x", messageID: "m1"))
         let sealed = try alice.sealCourierPayload(typedPayload, recipientStaticKey: bobKey)
         let now = Date()
@@ -479,7 +479,7 @@ struct CourierEndToEndTests {
             expiry: UInt64((now.timeIntervalSince1970 + 3600) * 1000),
             ciphertext: sealed
         )
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
         let unsigned = BitchatPacket(
             type: MessageType.courierEnvelope.rawValue,
             senderID: Data(hexString: alicePeerID.id) ?? Data(),
@@ -491,7 +491,7 @@ struct CourierEndToEndTests {
         )
         let packet = try #require(alice.signPacket(unsigned))
 
-        carol._test_handlePacket(packet, fromPeerID: alicePeerID, signingPublicKey: alice.getSigningPublicKeyData())
+        carol._test_handlePacket(packet, fromPeerID: alicePeerID, signingPublicKey: alice.getSigningPublicKeyData()!)
         let stored = await TestHelpers.waitUntil(
             { !carol.courierStore.isEmpty },
             timeout: TestConstants.negativeWaitWindow
@@ -504,7 +504,7 @@ struct CourierEndToEndTests {
         carol.courierDepositPolicy = { _, _ in .favorite }
 
         let alice = NoiseEncryptionService(keychain: MockKeychain())
-        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()
+        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()!
         let typedPayload = try #require(BLENoisePayloadFactory.privateMessage(content: "x", messageID: "m-unsigned"))
         let sealed = try alice.sealCourierPayload(typedPayload, recipientStaticKey: bobKey)
         let now = Date()
@@ -516,7 +516,7 @@ struct CourierEndToEndTests {
             expiry: UInt64((now.timeIntervalSince1970 + 3600) * 1000),
             ciphertext: sealed
         )
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
         // Correct sender, willing policy — but no packet signature: the
         // courier cannot authenticate the depositor, so it must not carry.
         let packet = BitchatPacket(
@@ -529,7 +529,7 @@ struct CourierEndToEndTests {
             ttl: 1
         )
 
-        carol._test_handlePacket(packet, fromPeerID: alicePeerID, signingPublicKey: alice.getSigningPublicKeyData())
+        carol._test_handlePacket(packet, fromPeerID: alicePeerID, signingPublicKey: alice.getSigningPublicKeyData()!)
         let stored = await TestHelpers.waitUntil(
             { !carol.courierStore.isEmpty },
             timeout: TestConstants.negativeWaitWindow
@@ -550,7 +550,7 @@ struct CourierEndToEndTests {
         }
 
         let aliceNoise = NoiseEncryptionService(keychain: MockKeychain())
-        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()
+        let bobKey = NoiseEncryptionService(keychain: MockKeychain()).getStaticPublicKeyData()!
         let typedPayload = try #require(BLENoisePayloadFactory.privateMessage(content: "spoofed", messageID: "m-spoof"))
         let sealed = try aliceNoise.sealCourierPayload(typedPayload, recipientStaticKey: bobKey)
         let now = Date()

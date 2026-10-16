@@ -81,6 +81,7 @@ enum TransportEvent: @unchecked Sendable {
     case peerSnapshotsUpdated([TransportPeerSnapshot])
     case messageDeliveryStatusUpdated(messageID: String, status: DeliveryStatus)
     case bluetoothStateUpdated(CBManagerState)
+    case noiseIdentityAvailabilityUpdated(NoiseIdentityAvailability)
 }
 
 /// Downgrade-safe decision for a private-media recipient. Callers ask before
@@ -179,11 +180,11 @@ protocol Transport: AnyObject {
     // orchestration) is never exposed outside the transport.
     /// The remote static public key of the Noise session with `peerID`, if established.
     func noiseSessionPublicKeyData(for peerID: PeerID) -> Data?
-    /// Fingerprint of our own Noise static identity key.
+    /// Fingerprint of our durable Noise identity, or empty while unavailable.
     func noiseIdentityFingerprint() -> String
-    /// Our Noise static public key (Curve25519 key agreement).
+    /// Our durable Noise static public key, or empty while unavailable.
     func noiseStaticPublicKeyData() -> Data
-    /// Our Noise signing public key (Ed25519).
+    /// Our durable Noise signing public key, or empty while unavailable.
     func noiseSigningPublicKeyData() -> Data
     /// Signs `data` with our Noise signing key.
     func noiseSignData(_ data: Data) -> Data?
@@ -300,6 +301,8 @@ extension BitchatDelegate {
             didUpdateMessageDeliveryStatus(messageID, status: status)
         case .bluetoothStateUpdated(let state):
             didUpdateBluetoothState(state)
+        case .noiseIdentityAvailabilityUpdated:
+            break
         }
     }
 }
@@ -316,3 +319,5 @@ extension BLEService: MeshPublicArchiving {}
 extension BLEService: BluetoothStateReporting {}
 extension BLEService: PanicResettingTransport {}
 extension BLEService: MeshBridgingTransport {}
+
+extension BLEService: MeshIdentityRecovering {}

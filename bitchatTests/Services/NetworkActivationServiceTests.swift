@@ -194,6 +194,17 @@ final class NetworkActivationServiceTests: XCTestCase {
         XCTAssertTrue(deactivated)
     }
 
+    func test_nearbyOptOutBlocksInternetEvenWithLocationAndFavorites() async {
+        let context = makeService(permission: .authorized, favorites: [Data([1])])
+        context.service.setUserInternetEnabled(false)
+        context.service.start()
+        context.favoritesSubject.send([Data([2])])
+        await Task.yield()
+        XCTAssertFalse(context.service.activationAllowed)
+        XCTAssertEqual(context.torController.startIfNeededCallCount, 0)
+        XCTAssertEqual(context.relayController.connectCallCount, 0)
+    }
+
     private func makeService(
         permission: LocationChannelManager.PermissionState,
         favorites: Set<Data>,

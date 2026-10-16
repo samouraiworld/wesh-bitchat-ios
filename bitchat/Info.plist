@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>bitchat</string>
+	<string>Wesh</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -36,11 +36,11 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>bitchat uses Bluetooth to create a secure mesh network for chatting with nearby users.</string>
+	<string>Wesh uses Bluetooth for public chat and encrypted private messages after identity verification. Participants can keep and relay public messages.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>bitchat uses Bluetooth to discover and connect with other bitchat users nearby.</string>
+	<string>Wesh uses Bluetooth to connect nearby phones for public chat and verified private conversations.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>bitchat uses the camera to scan QR codes to verify peers.</string>
+	<string>Wesh uses the camera to scan a contact’s live identity QR code in person.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>bitchat uses your location to compute optional geohash channels, bridge cells, and nearby place labels. Exact coordinates are not included in bitchat messages.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -19,12 +19,12 @@ struct NoiseCourierTests {
         let bob = NoiseEncryptionService(keychain: MockKeychain())
 
         let payload = Data("meet at the north gate".utf8)
-        let sealed = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData())
+        let sealed = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData()!)
 
         let opened = try bob.openCourierPayload(sealed)
         #expect(opened.payload == payload)
         // The X pattern authenticates the sender: Bob learns Alice's real static key.
-        #expect(opened.senderStaticKey == alice.getStaticPublicKeyData())
+        #expect(opened.senderStaticKey == alice.getStaticPublicKeyData()!)
     }
 
     @Test func wrongRecipientCannotOpen() throws {
@@ -32,7 +32,7 @@ struct NoiseCourierTests {
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let carol = NoiseEncryptionService(keychain: MockKeychain())
 
-        let sealed = try alice.sealCourierPayload(Data("secret".utf8), recipientStaticKey: bob.getStaticPublicKeyData())
+        let sealed = try alice.sealCourierPayload(Data("secret".utf8), recipientStaticKey: bob.getStaticPublicKeyData()!)
 
         #expect(throws: (any Error).self) {
             _ = try carol.openCourierPayload(sealed)
@@ -43,7 +43,7 @@ struct NoiseCourierTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
 
-        var sealed = try alice.sealCourierPayload(Data("secret".utf8), recipientStaticKey: bob.getStaticPublicKeyData())
+        var sealed = try alice.sealCourierPayload(Data("secret".utf8), recipientStaticKey: bob.getStaticPublicKeyData()!)
         sealed[sealed.count - 1] ^= 0x01
 
         #expect(throws: (any Error).self) {
@@ -58,7 +58,7 @@ struct NoiseCourierTests {
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
 
-        let bobKey = bob.getStaticPublicKeyData()
+        let bobKey = bob.getStaticPublicKeyData()!
         let fromAlice = try alice.sealCourierPayload(Data("hi".utf8), recipientStaticKey: bobKey)
         let fromMallory = try mallory.sealCourierPayload(Data("hi".utf8), recipientStaticKey: bobKey)
 
@@ -82,7 +82,7 @@ struct NoiseCourierTests {
     @Test func emptyAndLargePayloadsRoundTrip() throws {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let bobKey = bob.getStaticPublicKeyData()
+        let bobKey = bob.getStaticPublicKeyData()!
 
         let empty = try alice.sealCourierPayload(Data(), recipientStaticKey: bobKey)
         #expect(try bob.openCourierPayload(empty).payload.isEmpty)
@@ -99,8 +99,8 @@ struct NoiseCourierTests {
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let payload = Data("same message".utf8)
 
-        let a = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData())
-        let b = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData())
+        let a = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData()!)
+        let b = try alice.sealCourierPayload(payload, recipientStaticKey: bob.getStaticPublicKeyData()!)
         #expect(a != b)
         #expect(a.prefix(32) != b.prefix(32))
     }

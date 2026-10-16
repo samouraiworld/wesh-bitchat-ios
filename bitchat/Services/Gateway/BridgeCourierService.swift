@@ -145,6 +145,7 @@ final class BridgeCourierService: ObservableObject {
     private let dedupStore: BridgeDropDedupStore
 
     private var dedupPersistScheduled = false
+    private var dedupPersistGeneration: UInt64 = 0
 
     init(now: @escaping () -> Date = Date.init, dedupStore: BridgeDropDedupStore? = nil) {
         self.now = now
@@ -183,9 +184,10 @@ final class BridgeCourierService: ObservableObject {
     private func persistDedup() {
         guard !dedupPersistScheduled else { return }
         dedupPersistScheduled = true
+        let generation = dedupPersistGeneration
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Limits.dedupPersistCoalesceSeconds * 1_000_000_000))
-            guard let self else { return }
+            guard let self, self.dedupPersistGeneration == generation else { return }
             self.dedupPersistScheduled = false
             self.flushDedupSnapshot()
         }
@@ -202,7 +204,10 @@ final class BridgeCourierService: ObservableObject {
     }
 
     /// Panic wipe: forget queued drops and the persisted dedup record.
-    func wipe() {
+    @discardableResult
+    func wipe() -> Bool {
+        dedupPersistGeneration &+= 1
+        dedupPersistScheduled = false
         cancelActivePublishes()
         rejectedDropKeys = ExpiringIDSet(
             capacity: Limits.maxTrackedIDs,
@@ -210,7 +215,7 @@ final class BridgeCourierService: ObservableObject {
         )
         publishedDropKeys = ExpiringIDSet(capacity: Limits.maxTrackedIDs, lifetime: CourierEnvelope.maxLifetimeSeconds)
         seenDropEventIDs = ExpiringIDSet(capacity: Limits.maxTrackedIDs, lifetime: CourierEnvelope.maxLifetimeSeconds)
-        dedupStore.wipe()
+        return dedupStore.wipe()
     }
 
     // MARK: - Sender role
@@ -462,14 +467,16 @@ final class BridgeCourierService: ObservableObject {
             return
         }
         let date = now()
-        if let myKey = myNoiseKey?() {
+        if let myKey = myNoiseKey?(), myKey.count == 32 {
             myTagsHex = Set(CourierEnvelope.candidateTags(noiseStaticKey: myKey, around: date).map { $0.hexEncodedString() })
         } else {
             myTagsHex = []
         }
         // While bridging with internet, every device watches drops for its
         // verified local peers — the single-switch analogue of gateway duty.
-        let peers = (localVerifiedPeers?() ?? []).prefix(Limits.maxWatchedPeers)
+        let peers = (localVerifiedPeers?() ?? [])
+            .filter { $0.noiseKey.count == 32 }
+            .prefix(Limits.maxWatchedPeers)
         watchedPeerTags = peers.map { peer in
             (peer.peerID, Set(CourierEnvelope.candidateTags(noiseStaticKey: peer.noiseKey, around: date).map { $0.hexEncodedString() }))
         }

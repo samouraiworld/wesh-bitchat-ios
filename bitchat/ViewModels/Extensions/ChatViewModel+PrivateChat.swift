@@ -14,6 +14,7 @@ extension ChatViewModel {
 
     @MainActor
     func sendPrivateMessage(_ content: String, to peerID: PeerID) {
+        if weshPrivatePolicyEnabled && (peerID.noiseKey == nil || !canSendWeshPrivate(to: peerID)) { return }
         // Group chats reuse the private-chat surface but broadcast a sealed
         // envelope instead of routing to a single peer.
         if peerID.isGroup {

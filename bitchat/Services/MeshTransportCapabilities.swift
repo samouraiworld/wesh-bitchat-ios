@@ -2,6 +2,15 @@ import BitFoundation
 import CoreBluetooth
 import Foundation
 
+/// Optional identity recovery. Retrying never deletes existing identity data or
+/// overrides a transport stop or panic suspension.
+protocol MeshIdentityRecovering: AnyObject {
+    var noiseIdentityAvailability: NoiseIdentityAvailability { get }
+    var isNoiseIdentityTrafficAllowed: Bool { get }
+    func retryNoiseIdentityRecovery(completion: @escaping @MainActor (Bool) -> Void)
+}
+
+
 /// Optional transport capabilities, discovered with `as?` instead of casting
 /// to a concrete transport class. `Transport` stays the contract every
 /// transport genuinely implements; a capability protocol here is the

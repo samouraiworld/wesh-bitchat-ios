@@ -1,9 +1,41 @@
 import Foundation
 import XCTest
+import CryptoKit
 import BitFoundation
 @testable import bitchat
 
 final class SecureIdentityStateManagerTests: XCTestCase {
+    func test_getBlockedFingerprints_preservesOfflineIdentitiesAcrossReloadAndExactUnblock() {
+        let keychain = MockKeychain()
+        let manager = SecureIdentityStateManager(keychain)
+        let fingerprintA = Data(repeating: 0xA7, count: 32).sha256Fingerprint()
+        let fingerprintB = Data(repeating: 0xB8, count: 32).sha256Fingerprint()
+        let favoriteFingerprint = Data(repeating: 0xC9, count: 32).sha256Fingerprint()
+        XCTAssertTrue(manager.getBlockedFingerprints().isEmpty)
+
+        // No crypto or ephemeral peer entries: both offline people share a
+        // display name, but their durable block records remain independent.
+        for fingerprint in [fingerprintA, fingerprintB] {
+            manager.updateSocialIdentity(SocialIdentity(fingerprint: fingerprint, localPetname: nil, claimedNickname: "Alex", trustLevel: .verified, isFavorite: false, isBlocked: true, notes: nil))
+        }
+        manager.setFavorite(favoriteFingerprint, isFavorite: true)
+        manager.setNostrBlocked(String(repeating: "dd", count: 32), isBlocked: true)
+        manager.forceSave()
+
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertEqual(reloaded.getBlockedFingerprints(), Set([fingerprintA, fingerprintB]))
+        reloaded.setBlocked(fingerprintA, isBlocked: false)
+        XCTAssertEqual(reloaded.getBlockedFingerprints(), Set([fingerprintB]))
+        XCTAssertEqual(reloaded.getSocialIdentity(for: fingerprintA)?.trustLevel, .verified)
+        XCTAssertEqual(reloaded.getSocialIdentity(for: fingerprintB)?.claimedNickname, "Alex")
+        reloaded.forceSave()
+
+        let reloadedAgain = SecureIdentityStateManager(keychain)
+        XCTAssertEqual(reloadedAgain.getBlockedFingerprints(), Set([fingerprintB]))
+        XCTAssertFalse(reloadedAgain.isBlocked(fingerprint: fingerprintA))
+        XCTAssertTrue(reloadedAgain.isFavorite(fingerprint: favoriteFingerprint))
+    }
+
     func test_upsertCryptographicIdentity_withoutClaimedNicknameDoesNotCreateSocialIdentity() async {
         let manager = SecureIdentityStateManager(MockKeychain())
         let fingerprint = String(repeating: "aa", count: 32)
@@ -458,7 +490,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         XCTAssertTrue(cleared)
     }
 
-    func test_corruptPersistedCache_fallsBackToEmptyState() {
+    func test_corruptPersistedCache_preservesStoredBlobAndBlocksWrites() {
         let keychain = MockKeychain()
         _ = keychain.saveIdentityKey(Data(repeating: 0x01, count: 32), forKey: "identityCacheEncryptionKey")
         _ = keychain.saveIdentityKey(Data([0xFF, 0x00, 0xAA]), forKey: "bitchat.identityCache.v2")
@@ -468,7 +500,11 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         XCTAssertTrue(manager.getFavorites().isEmpty)
         XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
         XCTAssertTrue(manager.getBlockedNostrPubkeys().isEmpty)
-        XCTAssertNil(keychain.getIdentityKey(forKey: "bitchat.identityCache.v2"))
+        XCTAssertFalse(manager.isPersistenceAvailable)
+        manager.setFavorite("new-peer", isFavorite: true)
+        manager.forceSave()
+        XCTAssertFalse(manager.isFavorite(fingerprint: "new-peer"))
+        XCTAssertEqual(keychain.getIdentityKey(forKey: "bitchat.identityCache.v2"), Data([0xFF, 0x00, 0xAA]))
     }
 
     func test_clearAllIdentityData_removesCachedState() async {
@@ -561,6 +597,228 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         XCTAssertFalse(reloaded.isFavorite(fingerprint: fingerprint))
     }
 
+    func test_cacheReadFailures_preserveStoredStateAndRequireExplicitRetry() {
+        for failure: KeychainReadResult in [.deviceLocked, .authenticationFailed, .accessDenied, .otherError(-1)] {
+            let keychain = IdentityCacheFaultKeychain()
+            let original = SecureIdentityStateManager(keychain)
+            original.setFavorite("favorite", isFavorite: true)
+            original.setBlocked("blocked", isBlocked: true)
+            original.upsertCryptographicIdentity(fingerprint: "pinned", noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 2, count: 32))
+            let stored = keychain.backing.getIdentityKey(forKey: keychain.cacheKey)
+            let savesBeforeFailure = keychain.cacheSaveCount
+            keychain.cacheReadError = failure
+
+            var unavailable: SecureIdentityStateManager? = SecureIdentityStateManager(keychain)
+            XCTAssertFalse(unavailable!.isPersistenceAvailable)
+            unavailable!.setFavorite("replacement", isFavorite: true)
+            unavailable!.upsertCryptographicIdentity(fingerprint: "pinned", noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 3, count: 32))
+            unavailable!.forceSave()
+            XCTAssertFalse(unavailable!.isFavorite(fingerprint: "replacement"))
+            XCTAssertEqual(keychain.cacheSaveCount, savesBeforeFailure)
+            XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), stored)
+
+            keychain.cacheReadError = nil
+            unavailable!.forceSave()
+            XCTAssertTrue(unavailable!.isPersistenceAvailable)
+            XCTAssertTrue(unavailable!.isFavorite(fingerprint: "favorite"))
+            XCTAssertTrue(unavailable!.isBlocked(fingerprint: "blocked"))
+            XCTAssertEqual(unavailable!.signingPublicKey(forFingerprint: "pinned"), Data(repeating: 2, count: 32))
+            XCTAssertEqual(keychain.cacheSaveCount, savesBeforeFailure, "retry only loads; it never writes an empty replacement")
+            unavailable!.setFavorite("after-retry", isFavorite: true)
+            unavailable = nil
+            let reloaded = SecureIdentityStateManager(keychain)
+            XCTAssertTrue(reloaded.isFavorite(fingerprint: "favorite"))
+            XCTAssertTrue(reloaded.isFavorite(fingerprint: "after-retry"))
+        }
+    }
+
+    func test_malformedOrUndecryptableCache_isPreservedWithoutWritesOrDeletion() throws {
+        let key = Data(repeating: 0x52, count: 32)
+        let invalidJSON = try XCTUnwrap(AES.GCM.seal(Data("not JSON".utf8), using: SymmetricKey(data: key)).combined)
+        let invalidSchema = try XCTUnwrap(AES.GCM.seal(Data(#"{"socialIdentities":123}"#.utf8), using: SymmetricKey(data: key)).combined)
+        let wrongKey = try XCTUnwrap(AES.GCM.seal(Data("{}".utf8), using: SymmetricKey(data: Data(repeating: 0x53, count: 32))).combined)
+        for blob in [Data([0xFF, 0x00]), invalidJSON, invalidSchema, wrongKey] {
+            let keychain = IdentityCacheFaultKeychain()
+            _ = keychain.backing.saveIdentityKey(key, forKey: keychain.encryptionKeyName)
+            _ = keychain.backing.saveIdentityKey(blob, forKey: keychain.cacheKey)
+            var manager: SecureIdentityStateManager? = SecureIdentityStateManager(keychain)
+            XCTAssertFalse(manager!.isPersistenceAvailable)
+            manager!.setBlocked("new", isBlocked: true)
+            manager!.forceSave()
+            manager = nil
+            XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), blob)
+            XCTAssertEqual(keychain.cacheSaveCount, 0)
+            XCTAssertEqual(keychain.cacheDeleteCount, 0)
+        }
+    }
+
+    func test_keyReadFailureAndMalformedKey_doNotReplaceKeysAndRecoverOnExplicitRetry() {
+        for keyFailure: KeychainReadResult in [.deviceLocked, .authenticationFailed, .accessDenied, .otherError(-2), .success(Data([1]))] {
+            let keychain = IdentityCacheFaultKeychain()
+            let original = SecureIdentityStateManager(keychain)
+            original.setFavorite("durable", isFavorite: true)
+            let storedKey = keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName)
+            let storedCache = keychain.backing.getIdentityKey(forKey: keychain.cacheKey)
+            let keySaveCount = keychain.keySaveCount
+            keychain.keyReadError = keyFailure
+            let manager = SecureIdentityStateManager(keychain)
+            XCTAssertFalse(manager.isPersistenceAvailable)
+            manager.setFavorite("replacement", isFavorite: true)
+            manager.forceSave()
+            XCTAssertEqual(keychain.keySaveCount, keySaveCount)
+            XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName), storedKey)
+            XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), storedCache)
+            keychain.keyReadError = nil
+            manager.forceSave()
+            XCTAssertTrue(manager.isPersistenceAvailable)
+            XCTAssertTrue(manager.isFavorite(fingerprint: "durable"))
+        }
+    }
+
+    func test_missingKeyWithExistingOrUnreadableCache_neverGeneratesReplacementKey() {
+        for cacheRead: KeychainReadResult in [.success(Data([1, 2, 3])), .deviceLocked, .authenticationFailed, .accessDenied, .otherError(-3)] {
+            let keychain = IdentityCacheFaultKeychain()
+            let orphanedBlob = Data([1, 2, 3])
+            _ = keychain.backing.saveIdentityKey(orphanedBlob, forKey: keychain.cacheKey)
+            keychain.cacheReadError = cacheRead
+            let manager = SecureIdentityStateManager(keychain)
+            XCTAssertFalse(manager.isPersistenceAvailable)
+            XCTAssertTrue(manager.isBlocked(fingerprint: "unknown"))
+            XCTAssertTrue(manager.isNostrBlocked(pubkeyHexLowercased: "unknown"))
+            manager.setFavorite("new", isFavorite: true)
+            manager.forceSave()
+            XCTAssertEqual(keychain.keySaveCount, 0)
+            XCTAssertEqual(keychain.cacheSaveCount, 0)
+            XCTAssertEqual(keychain.cacheDeleteCount, 0)
+            XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), orphanedBlob)
+            XCTAssertNil(keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName))
+        }
+    }
+
+    func test_failedFirstUseKeySave_doesNotPersistOrAcceptCacheUntilRetry() {
+        let keychain = IdentityCacheFaultKeychain()
+        keychain.keySaveFails = true
+        let manager = SecureIdentityStateManager(keychain)
+        XCTAssertFalse(manager.isPersistenceAvailable)
+        manager.setFavorite("refused", isFavorite: true)
+        XCTAssertEqual(keychain.cacheSaveCount, 0)
+        keychain.keySaveFails = false
+        manager.forceSave()
+        XCTAssertTrue(manager.isPersistenceAvailable)
+        XCTAssertFalse(manager.isFavorite(fingerprint: "refused"))
+        manager.setFavorite("accepted", isFavorite: true)
+        XCTAssertTrue(SecureIdentityStateManager(keychain).isFavorite(fingerprint: "accepted"))
+    }
+
+    func test_unavailableFirstUseKeyReadback_doesNotPersistCacheAndReusesStoredKeyOnRetry() {
+        let keychain = IdentityCacheFaultKeychain()
+        keychain.keyReadbackFails = true
+        let manager = SecureIdentityStateManager(keychain)
+        XCTAssertFalse(manager.isPersistenceAvailable)
+        manager.setFavorite("refused", isFavorite: true)
+        let storedKey = keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName)
+        XCTAssertNotNil(storedKey)
+        XCTAssertEqual(keychain.cacheSaveCount, 0)
+        keychain.keyReadbackFails = false
+        manager.forceSave()
+        XCTAssertTrue(manager.isPersistenceAvailable)
+        XCTAssertEqual(keychain.keySaveCount, 1)
+        XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName), storedKey)
+    }
+
+    func test_failedCacheWrite_retainsPendingSnapshotForForceSaveRetry() {
+        let keychain = IdentityCacheFaultKeychain()
+        let manager = SecureIdentityStateManager(keychain)
+        manager.setFavorite("original", isFavorite: true)
+        let stored = keychain.backing.getIdentityKey(forKey: keychain.cacheKey)
+        keychain.cacheSaveFails = true
+        manager.setFavorite("pending", isFavorite: true)
+        XCTAssertTrue(manager.hasPendingPersistenceChanges)
+        XCTAssertTrue(manager.isFavorite(fingerprint: "pending"))
+        XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), stored)
+        manager.forceSave()
+        XCTAssertTrue(manager.hasPendingPersistenceChanges)
+        keychain.cacheSaveFails = false
+        manager.forceSave()
+        XCTAssertFalse(manager.hasPendingPersistenceChanges)
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertTrue(reloaded.isFavorite(fingerprint: "original"))
+        XCTAssertTrue(reloaded.isFavorite(fingerprint: "pending"))
+    }
+
+    func test_failedVerificationWrite_doesNotExposeTrustUntilExplicitRetryConfirmsStorage() {
+        let keychain = IdentityCacheFaultKeychain()
+        let manager = SecureIdentityStateManager(keychain)
+        manager.setFavorite("verified-peer", isFavorite: true)
+        keychain.cacheSaveFails = true
+        manager.setVerified(fingerprint: "verified-peer", verified: true)
+        XCTAssertTrue(manager.hasPendingPersistenceChanges)
+        XCTAssertFalse(manager.isVerified(fingerprint: "verified-peer"))
+        XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
+        XCTAssertTrue(manager.mostRecentlyVerifiedFingerprints(limit: 5, excluding: "other").isEmpty)
+        XCTAssertEqual(manager.getSocialIdentity(for: "verified-peer")?.trustLevel, .unknown)
+        XCTAssertEqual(manager.effectiveTrustLevel(for: "verified-peer"), .unknown)
+        XCTAssertTrue(manager.isBlocked(fingerprint: "any-peer"))
+        keychain.cacheSaveFails = false
+        manager.forceSave()
+        XCTAssertFalse(manager.hasPendingPersistenceChanges)
+        XCTAssertTrue(manager.isVerified(fingerprint: "verified-peer"))
+        XCTAssertEqual(manager.getVerifiedFingerprints(), ["verified-peer"])
+        XCTAssertEqual(manager.getSocialIdentity(for: "verified-peer")?.trustLevel, .verified)
+        XCTAssertEqual(manager.effectiveTrustLevel(for: "verified-peer"), .verified)
+    }
+
+    func test_unconfirmedCacheReadback_keepsPendingChangesForRetry() {
+        for readback: KeychainReadResult in [.deviceLocked, .success(Data([0xFF]))] {
+            let keychain = IdentityCacheFaultKeychain()
+            let manager = SecureIdentityStateManager(keychain)
+            keychain.cacheReadError = readback
+            manager.setFavorite("pending", isFavorite: true)
+            XCTAssertTrue(manager.hasPendingPersistenceChanges)
+            keychain.cacheReadError = nil
+            manager.forceSave()
+            XCTAssertFalse(manager.hasPendingPersistenceChanges)
+            XCTAssertTrue(SecureIdentityStateManager(keychain).isFavorite(fingerprint: "pending"))
+        }
+    }
+
+    func test_explicitClearAfterUnreadableCache_allowsFreshStateWithoutResurrectingData() {
+        let keychain = IdentityCacheFaultKeychain()
+        let original = SecureIdentityStateManager(keychain)
+        original.setFavorite("old", isFavorite: true)
+        keychain.cacheReadError = .deviceLocked
+        let manager = SecureIdentityStateManager(keychain)
+        XCTAssertFalse(manager.isPersistenceAvailable)
+        manager.clearAllIdentityData()
+        keychain.cacheReadError = nil
+        manager.forceSave()
+        XCTAssertTrue(manager.isPersistenceAvailable)
+        XCTAssertFalse(manager.isFavorite(fingerprint: "old"))
+        manager.setFavorite("new", isFavorite: true)
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertFalse(reloaded.isFavorite(fingerprint: "old"))
+        XCTAssertTrue(reloaded.isFavorite(fingerprint: "new"))
+    }
+
+    func test_clearAfterFullKeychainWipe_revalidatesDurableEncryptionKeyBeforeNewWrites() {
+        let keychain = IdentityCacheFaultKeychain()
+        let manager = SecureIdentityStateManager(keychain)
+        manager.setFavorite("old", isFavorite: true)
+        let originalKey = keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName)
+        XCTAssertTrue(keychain.deleteAllKeychainData())
+        manager.clearAllIdentityData()
+        XCTAssertTrue(manager.isPersistenceAvailable)
+        let newKey = keychain.backing.getIdentityKey(forKey: keychain.encryptionKeyName)
+        XCTAssertNotNil(newKey)
+        XCTAssertNotEqual(newKey, originalKey)
+        manager.setFavorite("new", isFavorite: true)
+        XCTAssertFalse(manager.hasPendingPersistenceChanges)
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertTrue(reloaded.isPersistenceAvailable)
+        XCTAssertFalse(reloaded.isFavorite(fingerprint: "old"))
+        XCTAssertTrue(reloaded.isFavorite(fingerprint: "new"))
+    }
+
     private func waitUntil(
         timeout: TimeInterval = TestConstants.settleTimeout,
         condition: @escaping () -> Bool
@@ -647,4 +905,60 @@ private final class FailingCacheSaveKeychain: KeychainManagerProtocol {
     func deleteAll(service: String) {
         serviceStorage.removeValue(forKey: service)
     }
+}
+
+/// Isolated, per-item faults; this fixture never accesses the real Keychain.
+private final class IdentityCacheFaultKeychain: KeychainManagerProtocol {
+    let backing = MockKeychain()
+    let cacheKey = "bitchat.identityCache.v2"
+    let encryptionKeyName = "identityCacheEncryptionKey"
+    var cacheReadError: KeychainReadResult?
+    var keyReadError: KeychainReadResult?
+    var cacheSaveFails = false
+    var keySaveFails = false
+    var keyReadbackFails = false
+    private(set) var cacheSaveCount = 0
+    private(set) var keySaveCount = 0
+    private(set) var cacheDeleteCount = 0
+
+    func getIdentityKeyWithResult(forKey key: String) -> KeychainReadResult {
+        if key == cacheKey, let cacheReadError { return cacheReadError }
+        if key == encryptionKeyName {
+            if let keyReadError { return keyReadError }
+            if keyReadbackFails && keySaveCount > 0 { return .deviceLocked }
+        }
+        return backing.getIdentityKeyWithResult(forKey: key)
+    }
+    func saveIdentityKeyWithResult(_ data: Data, forKey key: String) -> KeychainSaveResult {
+        if key == cacheKey {
+            cacheSaveCount += 1
+            if cacheSaveFails { return .accessDenied }
+        }
+        if key == encryptionKeyName {
+            keySaveCount += 1
+            if keySaveFails { return .accessDenied }
+        }
+        return backing.saveIdentityKeyWithResult(data, forKey: key)
+    }
+    func saveIdentityKey(_ data: Data, forKey key: String) -> Bool {
+        if case .success = saveIdentityKeyWithResult(data, forKey: key) { return true }
+        return false
+    }
+    func getIdentityKey(forKey key: String) -> Data? {
+        if case .success(let data) = getIdentityKeyWithResult(forKey: key) { return data }
+        return nil
+    }
+    func deleteIdentityKey(forKey key: String) -> Bool {
+        if key == cacheKey { cacheDeleteCount += 1 }
+        return backing.deleteIdentityKey(forKey: key)
+    }
+    func deleteAllKeychainData() -> Bool { backing.deleteAllKeychainData() }
+    func secureClear(_ data: inout Data) { backing.secureClear(&data) }
+    // periphery:ignore - protocol conformance of the test double
+    func secureClear(_ string: inout String) { backing.secureClear(&string) }
+    func verifyIdentityKeyExists() -> Bool { backing.verifyIdentityKeyExists() }
+    func save(key: String, data: Data, service: String, accessible: CFString?) { backing.save(key: key, data: data, service: service, accessible: accessible) }
+    func load(key: String, service: String) -> Data? { backing.load(key: key, service: service) }
+    func delete(key: String, service: String) { backing.delete(key: key, service: service) }
+    func deleteAll(service: String) { backing.deleteAll(service: service) }
 }

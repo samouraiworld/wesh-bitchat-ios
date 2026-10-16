@@ -47,6 +47,10 @@ final class MockIdentityManager: SecureIdentityStateManagerProtocol {
     func isBlocked(fingerprint: String) -> Bool {
         blockedFingerprints.contains(fingerprint) || socialIdentities[fingerprint]?.isBlocked == true
     }
+
+    func getBlockedFingerprints() -> Set<String> {
+        blockedFingerprints.union(socialIdentities.values.filter(\.isBlocked).map(\.fingerprint))
+    }
     
     func setBlocked(_ fingerprint: String, isBlocked: Bool) {
         if var identity = socialIdentities[fingerprint] {

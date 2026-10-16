@@ -12,10 +12,9 @@ import UserNotifications
 @main
 struct BitchatApp: App {
     static let bundleID = Bundle.main.bundleIdentifier ?? "chat.bitchat"
-    static let groupID = "group.\(bundleID)"
+    static let groupID = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String ?? "group.\(bundleID)"
 
     @StateObject private var runtime: AppRuntime
-    @AppStorage(AppTheme.storageKey) private var appThemeRawValue = AppTheme.matrix.rawValue
     #if os(iOS)
     @Environment(\.scenePhase) var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -24,14 +23,18 @@ struct BitchatApp: App {
     #endif
 
     init() {
+        WeshMode.isActive = true
+        NetworkActivationService.shared.setUserInternetEnabled(false)
+        BridgeService.shared.setEnabled(false)
+        GatewayService.shared.setEnabled(false)
         _runtime = StateObject(wrappedValue: AppRuntime())
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(\.appTheme, AppTheme(rawValue: appThemeRawValue) ?? .matrix)
+            WeshRootView(runtime: runtime)
+                .environment(\.appTheme, .liquidGlass)
                 .environmentObject(runtime.publicChatModel)
                 .environmentObject(runtime.privateInboxModel)
                 .environmentObject(runtime.privateConversationModel)

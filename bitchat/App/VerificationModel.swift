@@ -59,7 +59,7 @@ final class VerificationModel: ObservableObject {
     }
 
     func myQRString() -> String {
-        let npub = try? chatViewModel.idBridge.getCurrentNostrIdentity()?.npub
+        let npub = WeshMode.isActive ? nil : (try? chatViewModel.idBridge.getCurrentNostrIdentity()?.npub)
         return VerificationService.shared.buildMyQRString(nickname: currentNickname, npub: npub) ?? ""
     }
 

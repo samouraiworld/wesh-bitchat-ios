@@ -87,14 +87,15 @@ final class SharedContentImportModel: ObservableObject {
     /// A destination change updates the prompt and requires another tap.
     func confirm(
         destination: SharedContentDestination,
-        now: Date = Date()
+        now: Date = Date(),
+        acceptDraft: (String) -> Bool = { _ in true }
     ) -> String? {
         guard let offer else { return nil }
         guard offer.destination == destination else {
             updateDestination(destination)
             return nil
         }
-        guard let payload = store?.consume(id: offer.id, now: now) else {
+        guard let payload = store?.consume(id: offer.id, now: now, expected: offer.payload, accepting: { acceptDraft($0.composerText) }) else {
             _ = refresh(destination: destination, now: now)
             return nil
         }

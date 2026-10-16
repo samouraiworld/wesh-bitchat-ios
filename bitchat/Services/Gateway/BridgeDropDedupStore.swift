@@ -79,11 +79,16 @@ final class BridgeDropDedupStore {
     }
 
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
 
     /// - Parameter fileURL: Overrides the on-disk location (tests). Ignored
     ///   when `persistsToDisk` is false.
-    init(persistsToDisk: Bool = true, fileURL: URL? = nil) {
-        self.fileURL = persistsToDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+    init(persistsToDisk: Bool = true, fileURL: URL? = nil, wipeFileManager: FileManager = .default) {
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.wipeFileManager = wipeFileManager
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
     }
 
     func load() -> Snapshot {
@@ -118,9 +123,9 @@ final class BridgeDropDedupStore {
     }
 
     /// Panic wipe: forget which drops we published or handled.
-    func wipe() {
-        guard let fileURL else { return }
-        try? FileManager.default.removeItem(at: fileURL)
+    @discardableResult
+    func wipe() -> Bool {
+        PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
     }
 
     private static func defaultFileURL() -> URL? {

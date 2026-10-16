@@ -17,6 +17,9 @@ final class AppChromeModel: ObservableObject {
     @Published var showBluetoothAlert = false
     @Published var bluetoothAlertMessage = ""
     @Published var bluetoothState: CBManagerState = .unknown
+    @Published private(set) var noiseIdentityAvailability: NoiseIdentityAvailability = .available
+    @Published private(set) var isRecoveringNoiseIdentity = false
+    @Published private(set) var noiseIdentityRetryFailed = false
     /// Tor bootstrap has stalled (network likely blocks it); drives the
     /// connectivity banner. Mirrored from `ChatViewModel.torBlocked`.
     @Published private(set) var torBlocked = false
@@ -46,12 +49,17 @@ final class AppChromeModel: ObservableObject {
         self.chatViewModel = chatViewModel
         self.onPanicWipe = onPanicWipe
         self.nickname = chatViewModel.nickname
+        self.noiseIdentityAvailability = chatViewModel.noiseIdentityAvailability
 
         bind(privateInboxModel: privateInboxModel)
     }
 
     var shouldSuppressScreenshotNotification: Bool {
         isLocationChannelsSheetPresented || isAppInfoPresented
+    }
+
+    func retryNoiseIdentityRecovery() {
+        chatViewModel.retryNoiseIdentityRecovery()
     }
 
     func setNickname(_ nickname: String) {
@@ -127,7 +135,9 @@ final class AppChromeModel: ObservableObject {
         showPanicConfirmation = true
     }
 
-    func panicClearAllData() {
+    @discardableResult
+    func panicClearAllData() -> Bool {
+        showPanicConfirmation = false
         // A wipe invalidates everything on screen, and its outcome must be
         // visible: the success message and the failed-wipe banner both live
         // on the root timeline, so a sheet left up (the App Info danger-zone
@@ -140,7 +150,7 @@ final class AppChromeModel: ObservableObject {
 
         prepareForPanic?()
         onPanicWipe()
-        chatViewModel.panicClearAllData()
+        return chatViewModel.panicClearAllData()
     }
 
     private func bind(privateInboxModel: PrivateInboxModel) {
@@ -170,6 +180,16 @@ final class AppChromeModel: ObservableObject {
         chatViewModel.$bluetoothState
             .receive(on: DispatchQueue.main)
             .assign(to: &$bluetoothState)
+
+        chatViewModel.$noiseIdentityAvailability
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$noiseIdentityAvailability)
+        chatViewModel.$isRecoveringNoiseIdentity
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isRecoveringNoiseIdentity)
+        chatViewModel.$noiseIdentityRetryFailed
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$noiseIdentityRetryFailed)
 
         chatViewModel.$torBlocked
             .receive(on: DispatchQueue.main)

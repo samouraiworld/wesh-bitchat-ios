@@ -173,10 +173,10 @@ struct BLENoisePacketHandlerTests {
         let sender = NoiseEncryptionService(keychain: MockKeychain())
         let receiver = NoiseEncryptionService(keychain: MockKeychain())
         let senderPeerID = PeerID(
-            publicKey: sender.getStaticPublicKeyData()
+            publicKey: sender.getStaticPublicKeyData()!
         )
         let receiverPeerID = PeerID(
-            publicKey: receiver.getStaticPublicKeyData()
+            publicKey: receiver.getStaticPublicKeyData()!
         )
         let message1 = try sender.initiateHandshake(with: receiverPeerID)
         let message2 = try #require(
@@ -579,9 +579,9 @@ struct BLENoisePacketHandlerTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(
-            publicKey: alice.getStaticPublicKeyData()
+            publicKey: alice.getStaticPublicKeyData()!
         )
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         let message1 = try alice.initiateHandshake(with: bobPeerID)
         let message2 = try #require(
@@ -650,9 +650,9 @@ struct BLENoisePacketHandlerTests {
         let bob = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(
-            publicKey: alice.getStaticPublicKeyData()
+            publicKey: alice.getStaticPublicKeyData()!
         )
-        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData())
+        let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
 
         let initial1 = try alice.initiateHandshake(with: bobPeerID)
         let initial2 = try #require(

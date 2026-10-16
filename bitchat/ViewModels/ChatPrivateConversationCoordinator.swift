@@ -223,7 +223,12 @@ extension ChatViewModel: ChatPrivateConversationContext {
     }
 
     func notifyPrivateMessage(from senderName: String, message: String, peerID: PeerID) {
-        NotificationService.shared.sendPrivateMessageNotification(from: senderName, message: message, peerID: peerID)
+        let pinnedPeerID: PeerID
+        if weshPrivatePolicyEnabled {
+            guard let key = noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID)) else { return }
+            pinnedPeerID = PeerID(hexData: key)
+        } else { pinnedPeerID = peerID }
+        NotificationService.shared.sendPrivateMessageNotification(from: senderName, message: message, peerID: pinnedPeerID)
     }
 
     /// Deliberately no `senderPeerID`: geohash envelopes (and the acks for

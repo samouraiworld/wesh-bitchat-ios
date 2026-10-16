@@ -58,14 +58,27 @@ final class VerificationService {
             return comps.string ?? ""
         }
 
+        static func validHex(_ value: String, bytes: Int) -> Bool {
+            value.utf8.count == bytes * 2 && value.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
+        }
+
         static func fromURL(_ url: URL) -> VerificationQR? {
-            guard url.scheme == "bitchat", url.host == "verify",
+            guard url.absoluteString.utf8.count <= 2048,
+                  url.scheme == "bitchat", url.host == "verify",
+                  url.user == nil, url.password == nil, url.port == nil, url.fragment == nil, url.path.isEmpty,
                   let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
+            let allowed: Set<String> = ["v", "noise", "sign", "nick", "ts", "nonce", "sig", "npub"]
+            guard items.allSatisfy({ allowed.contains($0.name) }), Set(items.map(\.name)).count == items.count else { return nil }
             func val(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
             guard let vStr = val("v"), let v = Int(vStr),
                   let noise = val("noise"), let sign = val("sign"),
                   let nick = val("nick"), let tsStr = val("ts"), let ts = Int64(tsStr),
                   let nonce = val("nonce"), let sig = val("sig") else { return nil }
+            guard v == 1, validHex(noise, bytes: 32), validHex(sign, bytes: 32), validHex(sig, bytes: 64),
+                  nick.utf8.count <= 255, (val("npub")?.utf8.count ?? 0) <= 255,
+                  nonce.count == 22, nonce.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }),
+                  let nonceData = Data(base64Encoded: nonce.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") + "=="), nonceData.count == 16,
+                  nonceData.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") == nonce else { return nil }
             return VerificationQR(v: v, noiseKeyHex: noise, signKeyHex: sign, npub: val("npub"), nickname: nick, ts: ts, nonceB64: nonce, sigHex: sig)
         }
     }
@@ -75,13 +88,14 @@ final class VerificationService {
     /// Build a signed QR string for the current identity
     func buildMyQRString(nickname: String, npub: String?) -> String? {
         // Simple short-lived cache to speed up sheet opening
-        struct Cache { static var last: (nick: String, npub: String?, builtAt: Date, value: String)? }
-        if let c = Cache.last, c.nick == nickname, c.npub == npub, Date().timeIntervalSince(c.builtAt) < 60 {
-            return c.value
-        }
-        guard let transport = transport else { return nil }
+        struct Cache { static var last: (nick: String, npub: String?, noise: String, sign: String, builtAt: Date, value: String)? }
+        guard nickname.utf8.count <= 255, (npub?.utf8.count ?? 0) <= 255, let transport else { return nil }
         let noiseKey = transport.noiseStaticPublicKeyData().hexEncodedString()
         let signKey = transport.noiseSigningPublicKeyData().hexEncodedString()
+        guard VerificationQR.validHex(noiseKey, bytes: 32), VerificationQR.validHex(signKey, bytes: 32) else { return nil }
+        if let c = Cache.last, c.nick == nickname, c.npub == npub, c.noise == noiseKey, c.sign == signKey, Date().timeIntervalSince(c.builtAt) < 60 {
+            return c.value
+        }
         let ts = Int64(Date().timeIntervalSince1970)
         var nonce = Data(count: 16)
         let status = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
@@ -89,7 +103,7 @@ final class VerificationService {
         let nonceB64 = nonce.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         let payload = VerificationQR(v: 1, noiseKeyHex: noiseKey, signKeyHex: signKey, npub: npub, nickname: nickname, ts: ts, nonceB64: nonceB64, sigHex: "")
         let msg = payload.canonicalBytes()
-        guard let sig = transport.noiseSignData(msg) else { return nil }
+        guard let sig = transport.noiseSignData(msg), sig.count == 64 else { return nil }
         let signed = VerificationQR(v: payload.v,
                                     noiseKeyHex: payload.noiseKeyHex,
                                     signKeyHex: payload.signKeyHex,
@@ -99,16 +113,15 @@ final class VerificationService {
                                     nonceB64: payload.nonceB64,
                                     sigHex: sig.hexEncodedString())
         let out = signed.toURLString()
-        Cache.last = (nickname, npub, Date(), out)
+        Cache.last = (nickname, npub, noiseKey, signKey, Date(), out)
         return out
     }
 
     /// Verify a scanned QR and return the parsed payload if valid (signature + freshness checks)
-    func verifyScannedQR(_ urlString: String, maxAge: TimeInterval = TransportConfig.verificationQRMaxAgeSeconds) -> VerificationQR? {
+    func verifyScannedQR(_ urlString: String, maxAge: TimeInterval = TransportConfig.verificationQRMaxAgeSeconds, now: TimeInterval = Date().timeIntervalSince1970) -> VerificationQR? {
         guard let url = URL(string: urlString), let qr = VerificationQR.fromURL(url) else { return nil }
         // Freshness, in both directions: a future-dated timestamp must not
         // buy a QR a longer validity window than a fresh one gets.
-        let now = Date().timeIntervalSince1970
         if abs(now - Double(qr.ts)) > maxAge { return nil }
         // Verify signature using embedded ed25519 signKey
         guard let sig = Data(hexString: qr.sigHex), let signKey = Data(hexString: qr.signKeyHex) else { return nil }

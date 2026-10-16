@@ -28,6 +28,7 @@ final class AppRuntime: ObservableObject {
     let appChromeModel: AppChromeModel
     let boardAlertsModel: BoardAlertsModel
     let sharedContentImportModel: SharedContentImportModel
+    let composerDrafts = ComposerDraftStore.repository
 
     private let idBridge: NostrIdentityBridge
     private var cancellables = Set<AnyCancellable>()
@@ -51,6 +52,20 @@ final class AppRuntime: ObservableObject {
         let locationPresenceStore = LocationPresenceStore()
         let locationManager = LocationChannelManager.shared
         self.conversations = conversations
+        let resolvedSharedContentStore: SharedContentStore?
+        if let sharedContentStore {
+            resolvedSharedContentStore = sharedContentStore
+        } else if !TestEnvironment.isRunningTests,
+                  let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
+            resolvedSharedContentStore = SharedContentStore(defaults: sharedDefaults)
+        } else {
+            resolvedSharedContentStore = nil
+        }
+        var persistentWipes = PanicPersistentStoreWipes()
+        persistentWipes.sharedContent = {
+            guard let resolvedSharedContentStore else { return TestEnvironment.isRunningTests }
+            return resolvedSharedContentStore.discardAll()
+        }
         self.chatViewModel = ChatViewModel(
             keychain: keychain,
             idBridge: idBridge,
@@ -58,7 +73,8 @@ final class AppRuntime: ObservableObject {
             conversations: conversations,
             peerIdentityStore: peerIdentityStore,
             locationPresenceStore: locationPresenceStore,
-            locationManager: locationManager
+            locationManager: locationManager,
+            panicPersistentStoreWipes: persistentWipes
         )
         self.publicChatModel = PublicChatModel(conversations: conversations)
         self.privateInboxModel = PrivateInboxModel(conversations: conversations)
@@ -86,14 +102,6 @@ final class AppRuntime: ObservableObject {
             peerIdentityStore: peerIdentityStore,
             locationPresenceStore: locationPresenceStore
         )
-        let resolvedSharedContentStore: SharedContentStore?
-        if let sharedContentStore {
-            resolvedSharedContentStore = sharedContentStore
-        } else if let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
-            resolvedSharedContentStore = SharedContentStore(defaults: sharedDefaults)
-        } else {
-            resolvedSharedContentStore = nil
-        }
         let sharedContentImportModel = SharedContentImportModel(store: resolvedSharedContentStore)
         self.sharedContentImportModel = sharedContentImportModel
         self.appChromeModel = AppChromeModel(
@@ -119,9 +127,10 @@ final class AppRuntime: ObservableObject {
                 }
             )
         )
-        if chatViewModel.networkActivationAllowed {
+        if chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
             GeoRelayDirectory.shared.prefetchIfNeeded()
         }
+        configureComposerDrafts()
         bindRuntimeObservers()
         NotificationDelegate.shared.runtime = self
     }
@@ -150,7 +159,7 @@ final class AppRuntime: ObservableObject {
         }
 
         NetworkActivationService.shared.start()
-        GeohashPresenceService.shared.start()
+        if NetworkActivationService.shared.userInternetEnabled { GeohashPresenceService.shared.start() }
         checkForSharedContent()
         performMediaMaintenance()
 
@@ -183,6 +192,8 @@ final class AppRuntime: ObservableObject {
     func handleDidBecomeActiveNotification() {
         guard chatViewModel.networkActivationAllowed else { return }
         chatViewModel.handleDidBecomeActive()
+        configureComposerDrafts()
+        composerDrafts.retry()
         checkForSharedContent()
     }
 
@@ -199,6 +210,7 @@ final class AppRuntime: ObservableObject {
     func handleScenePhaseChange(_ newPhase: ScenePhase) {
         switch newPhase {
         case .background:
+            composerDrafts.flush()
             record(.scenePhaseChanged(.background))
             TorManager.shared.setAppForeground(false)
             TorManager.shared.goDormantOnBackground()
@@ -234,6 +246,8 @@ final class AppRuntime: ObservableObject {
             }
 
             chatViewModel.handleDidBecomeActive()
+            configureComposerDrafts()
+            composerDrafts.retry()
             checkForSharedContent()
 
         case .inactive:
@@ -246,6 +260,7 @@ final class AppRuntime: ObservableObject {
     #endif
 
     func applicationWillTerminate() {
+        composerDrafts.flush()
         record(.terminationRequested)
         chatViewModel.applicationWillTerminate()
     }
@@ -296,7 +311,17 @@ final class AppRuntime: ObservableObject {
 }
 
 private extension AppRuntime {
+    private func configureComposerDrafts() {
+        guard chatViewModel.networkActivationAllowed else { return }
+        ComposerDraftStore.configurePersistence(keychain: chatViewModel.keychain,
+            noiseKey: chatViewModel.meshService.noiseStaticPublicKeyData())
+    }
+
     func bindRuntimeObservers() {
+        chatViewModel.$noiseIdentityAvailability
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.configureComposerDrafts() }
+            .store(in: &cancellables)
         NostrRelayManager.shared.$isConnected
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isConnected in

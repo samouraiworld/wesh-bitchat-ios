@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Wesh";
+"NSBluetoothAlwaysUsageDescription" = "Wesh uses Bluetooth for public chat and encrypted private messages after identity verification. Participants can keep and relay public messages.";
+"NSBluetoothPeripheralUsageDescription" = "Wesh uses Bluetooth to connect nearby phones for public chat and verified private conversations.";
+"NSCameraUsageDescription" = "Wesh uses the camera to scan a contact’s live identity QR code in person.";

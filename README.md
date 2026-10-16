@@ -1,3 +1,28 @@
+# Wesh iOS validation fork
+
+Wesh is being developed on `feat/wesh-native-ui` in
+[draft PR #2](https://github.com/samouraiworld/wesh-bitchat-ios/pull/2), based on
+`chore/validation-foundations`. Start with the [Wesh contribution and candidate
+guide](docs/WESH-CONTRIBUTING.md) for simulator commands and the current validation
+limits.
+
+Local RC5 is **0.1.0 (6)**, built from
+`140030a19965ee7dd2fa0bfb3b0988359e32d697`, with **2,333 iOS tests passing**
+(2,114 Swift Testing and 219 XCTest, including the four signed-QR fixture tests).
+Its universal simulator package, Development device archive, and locally exported
+Apple Distribution-signed App Store IPA are verified. The launcher icon now uses
+[polished silver on pure black](docs/WESH-APP-ICON.md). No server validation,
+TestFlight upload, or invitations have occurred. The unresolved RSA dependency
+advisory and hardware/VoiceOver checks remain qualification gates. Read the
+[RC5 evidence and limitations](docs/RC5-VALIDATION.md) before sharing a candidate.
+
+Wesh's primary mode exposes a public Bluetooth channel and private contacts
+verified locally through QR. Internet startup is disabled. Public messages can
+be relayed and have no guaranteed geographic boundary. The inherited descriptions
+and store links below describe upstream BitChat rather than a published Wesh app.
+
+## Upstream BitChat README (retained reference)
+
 <img width="256" height="256" alt="icon_128x128@2x" src="https://github.com/user-attachments/assets/90133f83-b4f6-41c6-aab9-25d0859d2a47" />
 
 ## bitchat

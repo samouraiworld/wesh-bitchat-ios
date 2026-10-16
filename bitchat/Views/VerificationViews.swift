@@ -229,6 +229,11 @@ struct CameraScannerView: UIViewRepresentable {
         context.coordinator.setActive(isActive)
     }
 
+    static func dismantleUIView(_ uiView: PreviewView, coordinator: CameraScannerCoordinator) {
+        coordinator.shutdown()
+        uiView.videoPreviewLayer.session = nil
+    }
+
     func makeCoordinator() -> CameraScannerCoordinator { CameraScannerCoordinator() }
 
     final class PreviewView: UIView {
@@ -263,6 +268,11 @@ struct CameraScannerView: NSViewRepresentable {
         context.coordinator.setActive(isActive)
     }
 
+    static func dismantleNSView(_ nsView: PreviewView, coordinator: CameraScannerCoordinator) {
+        coordinator.shutdown()
+        nsView.videoPreviewLayer.session = nil
+    }
+
     func makeCoordinator() -> CameraScannerCoordinator { CameraScannerCoordinator() }
 
     final class PreviewView: NSView {
@@ -290,6 +300,8 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
     private var onCode: ((String) -> Void)?
     private var onUnavailable: (() -> Void)?
     private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "camera.scanner.session")
+    private var isDisposed = false
     private var isRunning = false
     private var permissionGranted = false
     private var desiredActive = false
@@ -317,6 +329,7 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async {
+                    guard !self.isDisposed else { return }
                     self.permissionGranted = granted
                     if granted {
                         if !self.configureSessionIfNeeded() {
@@ -367,21 +380,31 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
 
     private func reportUnavailable() {
         DispatchQueue.main.async {
+            guard !self.isDisposed else { return }
             self.onUnavailable?()
         }
     }
 
+    func shutdown() {
+        setActive(false)
+        isDisposed = true
+        onCode = nil
+        onUnavailable = nil
+        previewLayer = nil
+    }
+
     func setActive(_ active: Bool) {
+        guard !isDisposed else { return }
         desiredActive = active
         guard permissionGranted, didConfigureSession else { return }
         if active && !isRunning {
             isRunning = true
-            DispatchQueue.global(qos: .userInitiated).async {
+            sessionQueue.async {
                 if !self.session.isRunning { self.session.startRunning() }
             }
         } else if !active && isRunning {
             isRunning = false
-            DispatchQueue.global(qos: .userInitiated).async {
+            sessionQueue.async {
                 if self.session.isRunning { self.session.stopRunning() }
             }
         }
@@ -392,6 +415,7 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
         didOutput metadataObjects: [AVMetadataObject],
         from connection: AVCaptureConnection
     ) {
+        guard desiredActive, !isDisposed else { return }
         for obj in metadataObjects {
             guard let m = obj as? AVMetadataMachineReadableCodeObject,
                   m.type == .qr,

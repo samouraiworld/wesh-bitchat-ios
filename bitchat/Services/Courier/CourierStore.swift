@@ -122,6 +122,8 @@ final class CourierStore {
     private var envelopes: [StoredEnvelope] = []
     private let queue = DispatchQueue(label: "chat.bitchat.courier.store")
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
     private let now: () -> Date
     private let readData: (URL) throws -> Data
     /// A protected file can be present but unreadable during an iOS
@@ -139,10 +141,14 @@ final class CourierStore {
         persistsToDisk: Bool = true,
         fileURL: URL? = nil,
         now: @escaping () -> Date = Date.init,
-        readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) }
+        readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) },
+        wipeFileManager: FileManager = .default
     ) {
         self.now = now
-        self.fileURL = persistsToDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.wipeFileManager = wipeFileManager
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
         self.readData = readData
         loadFromDisk()
         #if os(iOS)
@@ -416,15 +422,16 @@ final class CourierStore {
     // MARK: - Maintenance
 
     /// Panic wipe: drop all carried mail from memory and disk.
-    func wipe() {
-        queue.sync {
+    @discardableResult
+    func wipe() -> Bool {
+        let removed = queue.sync {
             envelopes.removeAll()
             diskLoadDeferred = false
-            if let fileURL {
-                try? FileManager.default.removeItem(at: fileURL)
-            }
+            let removed = PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
             publishCountLocked()
+            return removed
         }
+        return removed
     }
 
     /// Retries a protected-data read and merges any envelopes accepted while

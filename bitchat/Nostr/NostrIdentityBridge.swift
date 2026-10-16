@@ -4,6 +4,12 @@ import CryptoKit
 
 /// Bridge between Noise and Nostr identities
 final class NostrIdentityBridge {
+    enum StorageError: Error {
+        case unavailable
+        case invalidStoredIdentity
+        case persistenceNotConfirmed
+    }
+
     private let keychainService = "chat.bitchat.nostr"
     private let currentIdentityKey = "nostr-current-identity"
     private let deviceSeedKey = "nostr-device-seed"
@@ -22,9 +28,16 @@ final class NostrIdentityBridge {
     /// Get or create the current Nostr identity
     func getCurrentNostrIdentity() throws -> NostrIdentity? {
         // Check if we already have a Nostr identity
-        if let existingData = keychain.load(key: currentIdentityKey, service: keychainService),
-           let identity = try? JSONDecoder().decode(NostrIdentity.self, from: existingData) {
+        switch keychain.loadWithResult(key: currentIdentityKey, service: keychainService) {
+        case .success(let existingData):
+            guard let identity = try? JSONDecoder().decode(NostrIdentity.self, from: existingData) else {
+                throw StorageError.invalidStoredIdentity
+            }
             return identity
+        case .itemNotFound:
+            break
+        case .accessDenied, .deviceLocked, .authenticationFailed, .otherError:
+            throw StorageError.unavailable
         }
         
         // Generate new Nostr identity
@@ -32,7 +45,7 @@ final class NostrIdentityBridge {
         
         // Store it
         let data = try JSONEncoder().encode(nostrIdentity)
-        keychain.save(key: currentIdentityKey, data: data, service: keychainService, accessible: nil)
+        try saveAndConfirm(data, forKey: currentIdentityKey, accessible: nil)
         
         return nostrIdentity
     }
@@ -68,21 +81,35 @@ final class NostrIdentityBridge {
 
     /// Returns a stable device seed used to derive unlinkable per-geohash identities.
     /// Stored only on device keychain.
-    private func getOrCreateDeviceSeed() -> Data {
+    private func getOrCreateDeviceSeed() throws -> Data {
         if let cached = deviceSeedCache { return cached }
-        if let existing = keychain.load(key: deviceSeedKey, service: keychainService) {
-            // Migrate to AfterFirstUnlockThisDeviceOnly for stability during lock
-            keychain.save(key: deviceSeedKey, data: existing, service: keychainService, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+        switch keychain.loadWithResult(key: deviceSeedKey, service: keychainService) {
+        case .success(let existing):
+            guard existing.count == 32 else { throw StorageError.invalidStoredIdentity }
             deviceSeedCache = existing
             return existing
+        case .itemNotFound:
+            break
+        case .accessDenied, .deviceLocked, .authenticationFailed, .otherError:
+            throw StorageError.unavailable
         }
         // CryptoKit key generation cannot fail, unlike SecRandomCopyBytes —
         // a discarded failure here would persist an all-zero identity seed.
         let seed = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
         // Ensure availability after first unlock to prevent unintended rotation when locked
-        keychain.save(key: deviceSeedKey, data: seed, service: keychainService, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+        try saveAndConfirm(seed, forKey: deviceSeedKey, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
         deviceSeedCache = seed
         return seed
+    }
+
+    /// The legacy custom-service save has no result. Do not expose a new
+    /// identity until its exact bytes can be read back from persistent storage.
+    private func saveAndConfirm(_ data: Data, forKey key: String, accessible: CFString?) throws {
+        keychain.save(key: key, data: data, service: keychainService, accessible: accessible)
+        guard case .success(let stored) = keychain.loadWithResult(key: key, service: keychainService),
+              stored == data else {
+            throw StorageError.persistenceNotConfirmed
+        }
     }
 
     /// Derive a deterministic, unlinkable Nostr identity for a mesh-bridge
@@ -104,7 +131,7 @@ final class NostrIdentityBridge {
         }
         cacheLock.unlock()
 
-        let seed = getOrCreateDeviceSeed()
+        let seed = try getOrCreateDeviceSeed()
         guard let msg = geohash.data(using: .utf8) else {
             throw NSError(domain: "NostrIdentity", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid geohash string"])
         }

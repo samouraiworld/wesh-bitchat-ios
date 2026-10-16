@@ -9,6 +9,8 @@ struct BLEOutboundFragmentTransferRequest {
     let transferId: String?
     let requireDirectPeerLink: Bool
     let requireNoiseAuthenticatedPeerLink: Bool
+    /// Captured before scheduler admission, including time spent pending.
+    let servicesRequestGeneration: UInt64?
 
     init(
         packet: BitchatPacket,
@@ -17,7 +19,8 @@ struct BLEOutboundFragmentTransferRequest {
         directedPeer: PeerID?,
         transferId: String?,
         requireDirectPeerLink: Bool = false,
-        requireNoiseAuthenticatedPeerLink: Bool = false
+        requireNoiseAuthenticatedPeerLink: Bool = false,
+        servicesRequestGeneration: UInt64? = nil
     ) {
         self.packet = packet
         self.pad = pad
@@ -26,6 +29,7 @@ struct BLEOutboundFragmentTransferRequest {
         self.transferId = transferId
         self.requireDirectPeerLink = requireDirectPeerLink
         self.requireNoiseAuthenticatedPeerLink = requireNoiseAuthenticatedPeerLink
+        self.servicesRequestGeneration = servicesRequestGeneration
     }
 
     var resolvedTransferId: String? {

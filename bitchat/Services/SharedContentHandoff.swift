@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum SharedContentKind: String, Codable, Sendable, Equatable {
     case text
@@ -122,6 +123,7 @@ enum SharedContentHandoffError: Error, Equatable {
     case unsupportedURL
     case envelopeTooLarge
     case encodingFailed
+    case storageUnavailable
 }
 
 /// Durable, single-item app-group storage used by both the extension and app.
@@ -137,11 +139,34 @@ final class SharedContentStore {
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let lockURL: URL?
+    private let lockTimeout: TimeInterval
+    private let monotonicNow: () -> TimeInterval
+    private let pauseBeforeLockRetry: () -> Void
 
-    init(defaults: UserDefaults) {
+    #if DEBUG
+    /// Exercises an extension writer arriving after validation, before deletion.
+    var beforeRemovalForTesting: (() -> Void)?
+    #endif
+
+    init(defaults: UserDefaults, lockURL: URL? = nil,
+         lockTimeout: TimeInterval = 0.05,
+         monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         pauseBeforeLockRetry: @escaping () -> Void = { Thread.sleep(forTimeInterval: 0.001) }) {
         self.defaults = defaults
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
+        self.lockTimeout = lockTimeout
+        self.monotonicNow = monotonicNow
+        self.pauseBeforeLockRetry = pauseBeforeLockRetry
+        if let lockURL {
+            self.lockURL = lockURL
+        } else if let groupID = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String,
+                  let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
+            self.lockURL = container.appendingPathComponent(".wesh-share-handoff.lock")
+        } else {
+            self.lockURL = nil
+        }
     }
 
     /// Replaces any older pending share with a validated, bounded envelope.
@@ -154,19 +179,25 @@ final class SharedContentStore {
             throw SharedContentHandoffError.envelopeTooLarge
         }
 
-        defaults.set(encoded, forKey: Self.storageKey)
-        clearLegacyKeys()
+        try withInterprocessLock {
+            defaults.set(encoded, forKey: Self.storageKey)
+            clearLegacyKeys()
+        }
     }
 
     /// Reads the pending share without consuming it. Invalid and expired data
     /// is removed immediately so malformed app-group state cannot linger.
     func pending(now: Date = Date()) -> SharedContentPayload? {
+        (try? withInterprocessLock { pendingUnlocked(now: now) }) ?? nil
+    }
+
+    private func pendingUnlocked(now: Date) -> SharedContentPayload? {
         clearLegacyKeys()
 
         guard let encoded = defaults.data(forKey: Self.storageKey) else { return nil }
         guard encoded.count <= SharedContentPayload.maxEnvelopeBytes,
               let payload = try? decoder.decode(SharedContentPayload.self, from: encoded) else {
-            defaults.removeObject(forKey: Self.storageKey)
+            removeEnvelopeUnlocked()
             return nil
         }
 
@@ -174,34 +205,92 @@ final class SharedContentStore {
             try payload.validate(now: now)
             return payload
         } catch {
-            defaults.removeObject(forKey: Self.storageKey)
+            removeEnvelopeUnlocked()
             return nil
         }
     }
 
     /// Consumes only the envelope the user actually reviewed. If a newer share
     /// already replaced it, the newer content remains pending.
-    func consume(id: UUID, now: Date = Date()) -> SharedContentPayload? {
-        guard let payload = pending(now: now), payload.id == id else { return nil }
-        defaults.removeObject(forKey: Self.storageKey)
-        return payload
+    func consume(id: UUID, now: Date = Date(), expected: SharedContentPayload? = nil,
+                 accepting: (SharedContentPayload) -> Bool = { _ in true }) -> SharedContentPayload? {
+        (try? withInterprocessLock {
+            guard let payload = pendingUnlocked(now: now), payload.id == id,
+                  expected == nil || expected == payload, accepting(payload) else { return nil as SharedContentPayload? }
+            removeEnvelopeUnlocked()
+            return payload
+        }) ?? nil
     }
 
     /// Explicit cancellation has the same identity guard as consumption so it
     /// can never discard a newer share that arrived while a prompt was open.
     func discard(id: UUID) {
-        guard let encoded = defaults.data(forKey: Self.storageKey),
-              encoded.count <= SharedContentPayload.maxEnvelopeBytes,
-              let payload = try? decoder.decode(SharedContentPayload.self, from: encoded),
-              payload.id == id else {
-            return
+        try? withInterprocessLock {
+            guard let encoded = defaults.data(forKey: Self.storageKey),
+                  encoded.count <= SharedContentPayload.maxEnvelopeBytes,
+                  let payload = try? decoder.decode(SharedContentPayload.self, from: encoded),
+                  payload.id == id else {
+                return
+            }
+            removeEnvelopeUnlocked()
         }
+    }
+
+    @discardableResult
+    func discardAll() -> Bool {
+        do {
+            return try withInterprocessLock(verifyCommit: {
+                ([Self.storageKey] + Self.legacyKeys).allSatisfy { self.defaults.object(forKey: $0) == nil }
+            }) {
+                removeEnvelopeUnlocked()
+                clearLegacyKeys()
+                return true
+            }
+        } catch { return false }
+    }
+
+    private func removeEnvelopeUnlocked() {
+        #if DEBUG
+        beforeRemovalForTesting?()
+        #endif
         defaults.removeObject(forKey: Self.storageKey)
     }
 
-    func discardAll() {
-        defaults.removeObject(forKey: Self.storageKey)
-        clearLegacyKeys()
+    /// Every app/extension operation uses the same app-group BSD file lock.
+    /// Synchronize preferences inside the critical section, not after releasing it.
+    private func withInterprocessLock<T>(verifyCommit: () -> Bool = { true }, _ body: () throws -> T) throws -> T {
+        guard let lockURL else { throw SharedContentHandoffError.storageUnavailable }
+        let descriptor = Darwin.open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw SharedContentHandoffError.storageUnavailable }
+        defer { Darwin.close(descriptor) }
+        // A suspended extension must not leave the app waiting indefinitely.
+        // Retry only within a 50ms monotonic budget in production; no unlocked fallback.
+        let deadline = monotonicNow() + max(0, lockTimeout)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR,
+                  monotonicNow() < deadline else { throw SharedContentHandoffError.storageUnavailable }
+            pauseBeforeLockRetry()
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        guard defaults.synchronize() else { throw SharedContentHandoffError.storageUnavailable }
+        let keys = [Self.storageKey] + Self.legacyKeys
+        let snapshot = Dictionary(uniqueKeysWithValues: keys.compactMap { key in
+            defaults.object(forKey: key).map { (key, $0) }
+        })
+        do {
+            let result = try body()
+            guard defaults.synchronize(), verifyCommit() else { throw SharedContentHandoffError.storageUnavailable }
+            return result
+        } catch {
+            // A failed flush must not consume a review or replace its content.
+            // Restore while holding the same interprocess lock, then retry flush.
+            for key in keys {
+                if let value = snapshot[key] { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+            _ = defaults.synchronize()
+            throw error
+        }
     }
 
     private func clearLegacyKeys() {

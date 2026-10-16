@@ -108,7 +108,12 @@ extension ChatViewModel: ChatLifecycleContext {
     }
 
     func forceSaveIdentity() {
+        let needsRefresh = !identityManager.isPersistenceAvailable || identityManager.hasPendingPersistenceChanges
         identityManager.forceSave()
+        if needsRefresh && identityManager.isPersistenceAvailable && !identityManager.hasPendingPersistenceChanges {
+            loadVerifiedFingerprints()
+            unifiedPeerService.refreshPeers()
+        }
     }
 
     @discardableResult
@@ -126,6 +131,8 @@ final class ChatLifecycleCoordinator {
     }
 
     func handleDidBecomeActive() {
+        // Retry protected storage before foreground contact and receipt decisions.
+        context.forceSaveIdentity()
         context.refreshBluetoothState()
 
         guard let peerID = context.selectedPrivateChatPeer else { return }

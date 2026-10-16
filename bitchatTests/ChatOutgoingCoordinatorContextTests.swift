@@ -123,6 +123,18 @@ private func drainMainActorTasks() async {
 struct ChatOutgoingCoordinatorContextTests {
 
     @Test @MainActor
+    func weshTextDoesNotInterpretSlashCommandsOrSwitchRecipients() async {
+        let context = MockChatOutgoingContext()
+        let coordinator = ChatOutgoingCoordinator(context: context)
+        coordinator.sendMessage("/msg someone secret", allowCommands: false)
+        await drainMainActorTasks()
+        #expect(context.handledCommands.isEmpty)
+        #expect(context.sentPrivateMessages.isEmpty)
+        #expect(context.sentMeshMessages.first?.content == "/msg someone secret")
+        #expect(context.appendedPublicMessages.first?.conversationID == .mesh)
+    }
+
+    @Test @MainActor
     func sendMessage_routesSlashCommandsAndDropsEmptyContent() async {
         let context = MockChatOutgoingContext()
         let coordinator = ChatOutgoingCoordinator(context: context)

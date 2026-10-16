@@ -199,6 +199,13 @@ final class GossipSyncManager {
         periodicTimer?.cancel(); periodicTimer = nil
     }
 
+    /// Fence persistence without synchronously waiting on the sync queue:
+    /// sync delegates may themselves need the BLE engine to finish.
+    func retireForPanic() {
+        stop()
+        archive?.retireForPanic()
+    }
+
     func scheduleInitialSyncToPeer(_ peerID: PeerID, delaySeconds: TimeInterval = 5.0) {
         queue.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
             guard let self = self else { return }

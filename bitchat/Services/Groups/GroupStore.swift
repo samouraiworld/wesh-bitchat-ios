@@ -23,12 +23,17 @@ final class GroupStore: ObservableObject {
 
     private let keychain: KeychainManagerProtocol
     private let fileURL: URL?
+    private let persistenceRequired: Bool
+    private let wipeFileManager: FileManager
 
     /// - Parameter fileURL: Overrides the on-disk location (tests). Ignored
     ///   when `persistsToDisk` is false.
-    init(keychain: KeychainManagerProtocol, persistsToDisk: Bool = true, fileURL: URL? = nil) {
+    init(keychain: KeychainManagerProtocol, persistsToDisk: Bool = true, fileURL: URL? = nil, wipeFileManager: FileManager = .default) {
         self.keychain = keychain
-        self.fileURL = persistsToDisk ? (fileURL ?? Self.defaultFileURL()) : nil
+        let requiresDisk = persistsToDisk && (fileURL != nil || !TestEnvironment.isRunningTests)
+        self.persistenceRequired = requiresDisk
+        self.wipeFileManager = wipeFileManager
+        self.fileURL = requiresDisk ? (fileURL ?? Self.defaultFileURL()) : nil
         loadFromDisk()
     }
 
@@ -130,14 +135,15 @@ final class GroupStore: ObservableObject {
     /// Panic wipe: drop all group keys and metadata from memory and disk.
     /// (The panic flow also nukes the whole keychain; deleting per-group keys
     /// here keeps the store safe to wipe on its own.)
-    func wipe() {
+    @discardableResult
+    func wipe() -> Bool {
         for group in groups {
             _ = keychain.deleteIdentityKey(forKey: Self.keychainKey(for: group.groupID))
         }
         groups.removeAll()
-        if let fileURL {
-            try? FileManager.default.removeItem(at: fileURL)
-        }
+        // The global panic authority checks the whole Keychain wipe. An
+        // already-absent per-group key after that wipe is not a failure here.
+        return PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
     }
 
     // MARK: - Internals

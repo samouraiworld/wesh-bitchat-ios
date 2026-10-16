@@ -2,6 +2,43 @@ import XCTest
 @testable import bitchat
 
 final class VerificationServiceTests: XCTestCase {
+    func test_unavailableNoiseCannotBuildOrReuseQRCode() throws {
+        let keychain = MockKeychain()
+        let transport = BLEService(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain),
+            initializeBluetoothManagers: false
+        )
+        let service = VerificationService()
+        service.configure(with: transport)
+        let nickname = "synthetic-noise-unavailable-\(UUID().uuidString)"
+        _ = try XCTUnwrap(service.buildMyQRString(nickname: nickname, npub: nil))
+        transport.suspendForPanicReset()
+        XCTAssertNil(service.buildMyQRString(nickname: nickname, npub: nil))
+    }
+
+    func test_lockedNoiseRefusesQRCodeAndRecoversPersistedKeys() throws {
+        let keychain = MockKeychain()
+        let original = NoiseEncryptionService(keychain: keychain)
+        let expectedKey = try XCTUnwrap(original.getStaticPublicKeyData())
+        keychain.simulatedReadError = .deviceLocked
+        let transport = BLEService(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+            identityManager: MockIdentityManager(keychain),
+            initializeBluetoothManagers: false
+        )
+        let service = VerificationService()
+        service.configure(with: transport)
+        XCTAssertNil(service.buildMyQRString(nickname: "synthetic recovery", npub: nil))
+        keychain.simulatedReadError = nil
+        XCTAssertTrue(transport.retryNoiseIdentityPersistence())
+        let encoded = try XCTUnwrap(service.buildMyQRString(nickname: "synthetic recovery", npub: nil))
+        let parsed = try XCTUnwrap(service.verifyScannedQR(encoded))
+        XCTAssertEqual(parsed.noiseKeyHex, expectedKey.hexEncodedString())
+    }
+
     func test_buildMyQRString_roundTripsSuccessfully() throws {
         let (service, noise) = makeService()
         let nickname = "alice-\(UUID().uuidString)"
@@ -12,8 +49,8 @@ final class VerificationServiceTests: XCTestCase {
 
         XCTAssertEqual(parsed.nickname, nickname)
         XCTAssertEqual(parsed.npub, npub)
-        XCTAssertEqual(parsed.noiseKeyHex, noise.getStaticPublicKeyData().hexEncodedString())
-        XCTAssertEqual(parsed.signKeyHex, noise.getSigningPublicKeyData().hexEncodedString())
+        XCTAssertEqual(parsed.noiseKeyHex, noise.getStaticPublicKeyData()!.hexEncodedString())
+        XCTAssertEqual(parsed.signKeyHex, noise.getSigningPublicKeyData()!.hexEncodedString())
     }
 
     func test_buildMyQRString_returnsCachedValueForSameInputs() throws {
@@ -97,7 +134,7 @@ final class VerificationServiceTests: XCTestCase {
                 noiseKeyHex: parsed.noiseKeyHex,
                 nonceA: parsed.nonceA,
                 signature: parsed.signature,
-                signerPublicKeyHex: noise.getSigningPublicKeyData().hexEncodedString()
+                signerPublicKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString()
             )
         )
         XCTAssertFalse(
@@ -105,9 +142,32 @@ final class VerificationServiceTests: XCTestCase {
                 noiseKeyHex: parsed.noiseKeyHex,
                 nonceA: Data([0xFF]),
                 signature: parsed.signature,
-                signerPublicKeyHex: noise.getSigningPublicKeyData().hexEncodedString()
+                signerPublicKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString()
             )
         )
+    }
+
+    func test_freshnessBoundariesAreSymmetric() throws {
+        let (service, noise) = makeService()
+        for offset: Int64 in [-301, -300, 300, 301] {
+            let qr = try makeSignedQR(noise: noise, nickname: "Nora", npub: nil, ts: 1700000000 + offset)
+            XCTAssertEqual(service.verifyScannedQR(qr, now: 1700000000) != nil, abs(offset) <= 300)
+        }
+    }
+
+    func test_cacheIsBoundToLocalIdentity() throws {
+        let (first, _) = makeService()
+        let (second, _) = makeService()
+        let name = "rotation-\(UUID().uuidString)"
+        let before = try XCTUnwrap(first.buildMyQRString(nickname: name, npub: nil))
+        let after = try XCTUnwrap(second.buildMyQRString(nickname: name, npub: nil))
+        XCTAssertNotEqual(before, after)
+    }
+
+    func test_builderRejectsOversizeUTF8Fields() {
+        let (service, _) = makeService()
+        XCTAssertNil(service.buildMyQRString(nickname: String(repeating: "é", count: 128), npub: nil))
+        XCTAssertNil(service.buildMyQRString(nickname: "Nora", npub: String(repeating: "a", count: 256)))
     }
 
     private func makeService() -> (VerificationService, NoiseEncryptionService) {
@@ -129,12 +189,12 @@ final class VerificationServiceTests: XCTestCase {
     ) throws -> String {
         var payload = VerificationService.VerificationQR(
             v: 1,
-            noiseKeyHex: noise.getStaticPublicKeyData().hexEncodedString(),
-            signKeyHex: noise.getSigningPublicKeyData().hexEncodedString(),
+            noiseKeyHex: noise.getStaticPublicKeyData()!.hexEncodedString(),
+            signKeyHex: noise.getSigningPublicKeyData()!.hexEncodedString(),
             npub: npub,
             nickname: nickname,
             ts: ts,
-            nonceB64: Data((0..<16).map(UInt8.init)).base64EncodedString(),
+            nonceB64: Data((0..<16).map(UInt8.init)).base64EncodedString().replacingOccurrences(of: "=", with: ""),
             sigHex: ""
         )
         let signature = try XCTUnwrap(signatureOverride ?? noise.signData(payload.canonicalBytes()))

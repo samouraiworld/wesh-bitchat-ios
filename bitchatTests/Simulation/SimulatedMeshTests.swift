@@ -180,6 +180,8 @@ struct SimulatedMeshTests {
         b.service.suspendForPanicReset()
         b.service.resetIdentityForPanic(currentNickname: "anon", restartServices: false)
         b.service.completePanicReset(restartServices: false)
+        // Explicitly reactivate only the simulated transport; no radio managers exist.
+        b.service.startServices()
         mesh.pump()
         let newBobID = b.service.myPeerID
         #expect(newBobID != oldBobID)
@@ -290,6 +292,8 @@ struct SimulatedMeshTests {
         b.service.suspendForPanicReset()
         b.service.resetIdentityForPanic(currentNickname: "anon", restartServices: false)
         b.service.completePanicReset(restartServices: false)
+        // Explicitly reactivate only the simulated transport; no radio managers exist.
+        b.service.startServices()
         mesh.pump()
         let newBobID = b.service.myPeerID
         #expect(newBobID != oldBobID)

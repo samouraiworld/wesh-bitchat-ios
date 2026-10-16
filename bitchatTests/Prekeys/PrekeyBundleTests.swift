@@ -84,9 +84,9 @@ struct PrekeyBundleTests {
         let owner = NoiseEncryptionService(keychain: MockKeychain())
         let bundle = try #require(owner.currentPrekeyBundle())
 
-        #expect(bundle.noiseStaticPublicKey == owner.getStaticPublicKeyData())
+        #expect(bundle.noiseStaticPublicKey == owner.getStaticPublicKeyData()!)
         #expect(bundle.prekeys.count == PrekeyBundle.maxPrekeys)
-        #expect(owner.verifyPrekeyBundleSignature(bundle, signingPublicKey: owner.getSigningPublicKeyData()))
+        #expect(owner.verifyPrekeyBundleSignature(bundle, signingPublicKey: owner.getSigningPublicKeyData()!))
     }
 
     @Test func forgedSignatureFailsVerification() throws {
@@ -101,7 +101,7 @@ struct PrekeyBundleTests {
             generatedAt: bundle.generatedAt,
             signature: forgedSignature
         )
-        #expect(!owner.verifyPrekeyBundleSignature(forged, signingPublicKey: owner.getSigningPublicKeyData()))
+        #expect(!owner.verifyPrekeyBundleSignature(forged, signingPublicKey: owner.getSigningPublicKeyData()!))
     }
 
     @Test func tamperedContentsFailVerification() throws {
@@ -120,7 +120,7 @@ struct PrekeyBundleTests {
             generatedAt: bundle.generatedAt,
             signature: bundle.signature
         )
-        #expect(!owner.verifyPrekeyBundleSignature(tampered, signingPublicKey: owner.getSigningPublicKeyData()))
+        #expect(!owner.verifyPrekeyBundleSignature(tampered, signingPublicKey: owner.getSigningPublicKeyData()!))
     }
 
     @Test func wrongSigningKeyFailsVerification() throws {
@@ -128,6 +128,6 @@ struct PrekeyBundleTests {
         let other = NoiseEncryptionService(keychain: MockKeychain())
         let bundle = try #require(owner.currentPrekeyBundle())
 
-        #expect(!owner.verifyPrekeyBundleSignature(bundle, signingPublicKey: other.getSigningPublicKeyData()))
+        #expect(!owner.verifyPrekeyBundleSignature(bundle, signingPublicKey: other.getSigningPublicKeyData()!))
     }
 }
