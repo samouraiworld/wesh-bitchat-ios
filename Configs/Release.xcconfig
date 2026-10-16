@@ -5,12 +5,14 @@ IPHONEOS_DEPLOYMENT_TARGET = 16.0
 MACOSX_DEPLOYMENT_TARGET = 13.0
 SWIFT_VERSION = 5.0
 
-DEVELOPMENT_TEAM = L3N5LHJD5Y
+// Wesh release identity (Samouraï Coop). The share extension appends
+// ".ShareExtension" to the bundle ID; entitlements read APP_GROUP_ID.
+DEVELOPMENT_TEAM = UF5852SF57
 CODE_SIGN_STYLE = Automatic
 
-PRODUCT_BUNDLE_IDENTIFIER = chat.bitchat
-APP_GROUP_ID = group.chat.bitchat
+PRODUCT_BUNDLE_IDENTIFIER = org.samouraiworld.wesh.ios
+APP_GROUP_ID = group.org.samouraiworld.wesh.ios
 
-// Optional developer-local Wesh signing, shared by build and archive.
-// Personal identifiers and profiles stay in this ignored file.
+// Optional developer-local override (for example the internal .dev
+// identity), shared by build and archive. It stays untracked.
 #include? "Local.xcconfig"
