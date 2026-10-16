@@ -28,7 +28,7 @@ struct PaveExchangeScreen: View {
     let progress: PaveExchangeProgress
     var camera: Camera = .live
     let onScan: (String) -> Void
-    /// Called once: on « Ouvrir la discussion », or three seconds after both checkmarks are in.
+    /// Called once, on « Ouvrir la discussion »: never by a timer.
     let onComplete: () -> Void
     let onClose: () -> Void
 
@@ -63,10 +63,6 @@ struct PaveExchangeScreen: View {
                     scanner
                 }
                 checkmarks
-                Text(PaveCopy.text("pave.exchange.autoOpen"))
-                    .paveText(.caption)
-                    .foregroundStyle(theme[.inkMuted])
-                    .multilineTextAlignment(.center)
             }
             .padding(.horizontal, PaveSpace.s4)
             .padding(.bottom, PaveSpace.s8)
@@ -75,29 +71,16 @@ struct PaveExchangeScreen: View {
         .task { await keepCodeFresh() }
         .task(id: myNoiseKey) { myFingerprint = await PaveFingerprint.computed(myNoiseKey) }
         .task(id: contactNoiseKey) { contactFingerprint = await PaveFingerprint.computed(contactNoiseKey) }
-        .task(id: progress.isComplete) {
-            // Cancelled when the screen goes away; Close also shuts the latch.
-            guard progress.isComplete else { return }
-            PaveHaptics.play(.scanSuccess)
-            do {
-                try await Task.sleep(nanoseconds: UInt64(PaveCompletionLatch.successHold * 1_000_000_000))
-            } catch {
-                return
-            }
-            openChat()
+        .onChange(of: progress.isComplete) { complete in
+            if complete { PaveHaptics.play(.scanSuccess) }
         }
-    }
-
-    private func close() {
-        latch.close()
-        onClose()
     }
 
     private var fingerprints: PaveExchangeFingerprints {
         PaveExchangeFingerprints(mine: myFingerprint, contact: contactFingerprint, progress: progress)
     }
 
-    /// The button and the timer both lead here; the chat opens once.
+    /// Only « Ouvrir la discussion » leads here; the chat opens once.
     private func openChat() {
         latch.fire { onComplete() }
     }
@@ -125,7 +108,7 @@ struct PaveExchangeScreen: View {
         HStack {
             Text(PaveCopy.text("pave.exchange.title")).paveText(.title).accessibilityAddTraits(.isHeader)
             Spacer()
-            Button(action: close) {
+            Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(PaveTextStyle.headline.font)
                     .frame(width: PaveTouch.minimum, height: PaveTouch.minimum)
@@ -193,14 +176,15 @@ struct PaveExchangeScreen: View {
     private var viewfinder: some View {
         ZStack {
             if camera == .live {
-                CameraScannerView(isActive: !progress.isComplete, onUnavailable: { scannerUnavailable() }) { scanned in
+                CameraScannerView(isActive: !progress.isComplete, onUnavailable: { scannerUnavailable() },
+                                  regionOfInterest: PaveScanArea.viewfinder(in:), requiresSingleCode: true) { scanned in
                     onScan(scanned)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: PaveRadius.control))
             }
             RoundedRectangle(cornerRadius: PaveRadius.control)
                 .strokeBorder(theme[.publicFill], lineWidth: PaveStroke.focus)
-                .frame(width: 150, height: 150)
+                .frame(width: PaveScanArea.side, height: PaveScanArea.side)
             VStack {
                 Spacer()
                 Text(PaveCopy.text("pave.exchange.aim"))

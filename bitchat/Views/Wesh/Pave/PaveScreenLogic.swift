@@ -184,11 +184,8 @@ struct PaveExchangeFingerprints: Equatable {
     }
 }
 
-/// The success card opens the private chat two ways, its button and a timer: the chat opens once.
+/// The success card opens the private chat only on « Ouvrir la discussion », and only once.
 struct PaveCompletionLatch {
-    /// Seconds the success card stays up before the chat opens by itself.
-    static let successHold: TimeInterval = 3
-
     private(set) var fired = false
 
     mutating func fire(_ action: () -> Void) {
@@ -196,10 +193,23 @@ struct PaveCompletionLatch {
         fired = true
         action()
     }
+}
 
-    /// The screen closed first: neither the button nor the timer opens the chat any more.
-    mutating func close() {
-        fired = true
+/// In a crowd, the Échanger scanner reads only the code aimed at: inside the viewfinder, and only
+/// when that frame holds a single code.
+enum PaveScanArea {
+    /// Side of the square viewfinder, in points.
+    static let side: CGFloat = 150
+
+    /// The viewfinder, centered in a camera view of `size`, never larger than the view.
+    static func viewfinder(in size: CGSize) -> CGRect {
+        let edge = min(side, size.width, size.height)
+        return CGRect(x: (size.width - edge) / 2, y: (size.height - edge) / 2, width: edge, height: edge)
+    }
+
+    /// The text of the only QR code in a frame; nil when the frame reports none or several.
+    static func singleCode(_ codes: [String?]) -> String? {
+        codes.count == 1 ? codes[0] : nil
     }
 }
 

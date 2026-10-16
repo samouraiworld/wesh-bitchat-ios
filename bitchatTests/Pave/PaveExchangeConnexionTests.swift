@@ -16,13 +16,35 @@ struct PaveExchangeScreenLogicTests {
         #expect(done.contact == "A1B2 C3D4 E5F6 0718")
     }
 
-    @Test func theChatOpensOnceWhenTheButtonAndTheTimerBothFire() {
+    @Test func theChatOpensOnceEvenOnADoubleTap() {
         var latch = PaveCompletionLatch()
         var opened = 0
         latch.fire { opened += 1 }  // « Ouvrir la discussion »
-        latch.fire { opened += 1 }  // the 3 s timer
+        latch.fire { opened += 1 }  // a second tap
         #expect(opened == 1)
-        #expect(PaveCompletionLatch.successHold == 3)
+    }
+
+    @Test func nothingOpensTheChatButTheButton() throws {
+        // No timer: in a crowd, the chat opens only on an explicit tap.
+        let french = try PaveCatalogStrings.strings("fr")
+        #expect(french["pave.exchange.autoOpen"] == nil)
+        #expect(french["pave.exchange.openChat"] == "Ouvrir la discussion")
+    }
+
+    @Test func theScannerReadsOnlyInsideTheViewfinder() {
+        #expect(PaveScanArea.viewfinder(in: CGSize(width: 300, height: 220))
+            == CGRect(x: 75, y: 35, width: 150, height: 150))
+        // A camera view smaller than the viewfinder: the whole view, never more.
+        #expect(PaveScanArea.viewfinder(in: CGSize(width: 120, height: 100))
+            == CGRect(x: 10, y: 0, width: 100, height: 100))
+    }
+
+    @Test func aFrameWithMoreThanOneCodeIsIgnored() {
+        #expect(PaveScanArea.singleCode(["bitchat://verify?a"]) == "bitchat://verify?a")
+        #expect(PaveScanArea.singleCode(["bitchat://verify?a", "bitchat://verify?b"]) == nil)
+        #expect(PaveScanArea.singleCode(["bitchat://verify?a", nil]) == nil)
+        #expect(PaveScanArea.singleCode([nil]) == nil)
+        #expect(PaveScanArea.singleCode([]) == nil)
     }
 
     @Test func checksNeverCarryARemoteName() throws {
@@ -148,15 +170,6 @@ struct PaveInternetSwitchTests {
 
 @Suite("Pavé review fixes")
 struct PaveReviewFixTests {
-    @Test func closingBeforeTheTimerKeepsTheChatClosed() {
-        var latch = PaveCompletionLatch()
-        var opened = 0
-        latch.close()  // « Fermer » within the 3 s hold
-        latch.fire { opened += 1 }  // the timer, if it still ran
-        #expect(opened == 0)
-        #expect(latch.fired)
-    }
-
     @Test @MainActor func theShortcutWorksAgainAfterTheScreenCloses() {
         let request = PaveEraseRequest()
         #expect(!request.isPresented)

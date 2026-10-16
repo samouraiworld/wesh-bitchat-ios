@@ -34,7 +34,6 @@ enum PaveReservedWords {
         "pave.fingerprint.mine",
         "pave.fingerprint.contact",
         "pave.exchange.aim",
-        "pave.exchange.autoOpen",
         "pave.exchange.cameraA11y",
         "pave.exchange.cameraAllow",
         "pave.exchange.cameraDenied",

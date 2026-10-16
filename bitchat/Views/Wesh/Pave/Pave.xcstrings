@@ -977,23 +977,6 @@
         }
       }
     },
-    "pave.exchange.autoOpen" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "With both checkmarks, the private chat opens by itself."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "À deux coches, la discussion privée s'ouvre toute seule."
-          }
-        }
-      }
-    },
     "pave.exchange.cameraA11y" : {
       "extractionState" : "manual",
       "localizations" : {

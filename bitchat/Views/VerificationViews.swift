@@ -212,6 +212,10 @@ struct CameraScannerView: UIViewRepresentable {
     typealias UIViewType = PreviewView
     var isActive: Bool
     var onUnavailable: (() -> Void)? = nil
+    /// Where codes are read, in the view's coordinates for a given size; nil reads the whole view.
+    var regionOfInterest: ((CGSize) -> CGRect)? = nil
+    /// Ignores every frame that reports more than one QR code.
+    var requiresSingleCode = false
     var onCode: (String) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
@@ -219,8 +223,12 @@ struct CameraScannerView: UIViewRepresentable {
         context.coordinator.setup(
             previewLayer: view.videoPreviewLayer,
             onCode: onCode,
-            onUnavailable: onUnavailable
+            onUnavailable: onUnavailable,
+            regionOfInterest: regionOfInterest,
+            requiresSingleCode: requiresSingleCode
         )
+        let coordinator = context.coordinator
+        view.onLayout = { [weak coordinator] size in coordinator?.layerDidLayout(size) }
         context.coordinator.setActive(isActive)
         return view
     }
@@ -239,9 +247,14 @@ struct CameraScannerView: UIViewRepresentable {
     final class PreviewView: UIView {
         override static var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        var onLayout: ((CGSize) -> Void)?
         override init(frame: CGRect) {
             super.init(frame: frame)
             videoPreviewLayer.videoGravity = .resizeAspectFill
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            onLayout?(bounds.size)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     }
@@ -251,6 +264,10 @@ struct CameraScannerView: NSViewRepresentable {
     typealias NSViewType = PreviewView
     var isActive: Bool
     var onUnavailable: (() -> Void)? = nil
+    /// Where codes are read, in the view's coordinates for a given size; nil reads the whole view.
+    var regionOfInterest: ((CGSize) -> CGRect)? = nil
+    /// Ignores every frame that reports more than one QR code.
+    var requiresSingleCode = false
     var onCode: (String) -> Void
 
     func makeNSView(context: Context) -> PreviewView {
@@ -258,8 +275,12 @@ struct CameraScannerView: NSViewRepresentable {
         context.coordinator.setup(
             previewLayer: view.videoPreviewLayer,
             onCode: onCode,
-            onUnavailable: onUnavailable
+            onUnavailable: onUnavailable,
+            regionOfInterest: regionOfInterest,
+            requiresSingleCode: requiresSingleCode
         )
+        let coordinator = context.coordinator
+        view.onLayout = { [weak coordinator] size in coordinator?.layerDidLayout(size) }
         context.coordinator.setActive(isActive)
         return view
     }
@@ -277,6 +298,7 @@ struct CameraScannerView: NSViewRepresentable {
 
     final class PreviewView: NSView {
         let videoPreviewLayer = AVCaptureVideoPreviewLayer()
+        var onLayout: ((CGSize) -> Void)?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -291,6 +313,7 @@ struct CameraScannerView: NSViewRepresentable {
         override func layout() {
             super.layout()
             videoPreviewLayer.frame = bounds
+            onLayout?(bounds.size)
         }
     }
 }
@@ -307,14 +330,22 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
     private var desiredActive = false
     private var didConfigureSession = false
     private weak var previewLayer: AVCaptureVideoPreviewLayer?
+    private weak var metadataOutput: AVCaptureMetadataOutput?
+    private var regionOfInterest: ((CGSize) -> CGRect)?
+    private var requiresSingleCode = false
+    private var layerSize: CGSize = .zero
 
     func setup(
         previewLayer: AVCaptureVideoPreviewLayer,
         onCode: @escaping (String) -> Void,
-        onUnavailable: (() -> Void)? = nil
+        onUnavailable: (() -> Void)? = nil,
+        regionOfInterest: ((CGSize) -> CGRect)? = nil,
+        requiresSingleCode: Bool = false
     ) {
         self.onCode = onCode
         self.onUnavailable = onUnavailable
+        self.regionOfInterest = regionOfInterest
+        self.requiresSingleCode = requiresSingleCode
         self.previewLayer = previewLayer
         previewLayer.session = session
 
@@ -368,6 +399,7 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
             return false
         }
         session.addOutput(output)
+        metadataOutput = output
         output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
         if output.availableMetadataObjectTypes.contains(.qr) {
             output.metadataObjectTypes = [.qr]
@@ -376,6 +408,19 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
         previewLayer?.session = session
         didConfigureSession = true
         return true
+    }
+
+    func layerDidLayout(_ size: CGSize) {
+        layerSize = size
+        applyRegionOfInterest()
+    }
+
+    /// Restricts detection to the region, converted to the output's coordinates. Valid once the
+    /// session runs and the layer has a size, so it is applied again at both moments.
+    private func applyRegionOfInterest() {
+        guard let regionOfInterest, isRunning, layerSize.width > 0, layerSize.height > 0,
+              let output = metadataOutput, let layer = previewLayer else { return }
+        output.rectOfInterest = layer.metadataOutputRectConverted(fromLayerRect: regionOfInterest(layerSize))
     }
 
     private func reportUnavailable() {
@@ -401,6 +446,7 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
             isRunning = true
             sessionQueue.async {
                 if !self.session.isRunning { self.session.startRunning() }
+                DispatchQueue.main.async { self.applyRegionOfInterest() }
             }
         } else if !active && isRunning {
             isRunning = false
@@ -416,6 +462,14 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
         from connection: AVCaptureConnection
     ) {
         guard desiredActive, !isDisposed else { return }
+        if requiresSingleCode {
+            // A second code in the same frame could be someone else's: read nothing.
+            let codes = metadataObjects.compactMap { $0 as? AVMetadataMachineReadableCodeObject }
+                .filter { $0.type == .qr }
+                .map(\.stringValue)
+            if let code = PaveScanArea.singleCode(codes) { onCode?(code) }
+            return
+        }
         for obj in metadataObjects {
             guard let m = obj as? AVMetadataMachineReadableCodeObject,
                   m.type == .qr,
