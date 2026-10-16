@@ -271,7 +271,7 @@ private struct WeshRequestDetail: View {
                 Section {
                     ForEach(request.messages, id: \.id) { message in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(message.content).font(.body).textSelection(.enabled)
+                            Text(message.content).font(.body)
                             Text(message.timestamp, style: .time).font(.caption).foregroundStyle(theme.secondary)
                         }.padding(.vertical, 6)
                     }

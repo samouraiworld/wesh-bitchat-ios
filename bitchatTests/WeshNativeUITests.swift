@@ -944,6 +944,19 @@ struct WeshNativeUITests {
         #expect(!WeshMessageActions.isLocalSystem(message(peer: PeerID(str: "1122334455667788"))))
     }
 
+    /// System text selection copies to the general pasteboard: plain, synced
+    /// through Universal Clipboard and never expiring.
+    @Test func weshViewsNeverEnableSystemTextSelection() throws {
+        let views = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("bitchat/Views/Wesh")
+        let files = try FileManager.default.contentsOfDirectory(at: views, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty)
+        for file in files {
+            #expect(!(try String(contentsOf: file, encoding: .utf8)).contains(".textSelection(.enabled)"), "\(file.lastPathComponent)")
+        }
+    }
+
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
         #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
         #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")

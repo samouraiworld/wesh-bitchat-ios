@@ -1132,7 +1132,7 @@ private struct WeshMessageBubble: View {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
                 if !own && (!privateChat || isSystem) { Text(isSystem ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
-                Text(WeshIncomingMediaPolicy.displayText(message.content)).font(.body).textSelection(.enabled)
+                Text(WeshIncomingMediaPolicy.displayText(message.content)).font(.body)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }
                     VStack(alignment: .leading, spacing: 4) { metadata }
