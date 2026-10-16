@@ -258,7 +258,7 @@ struct ChatVerificationCoordinatorContextTests {
         coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
         #expect(context.storedVerifiedCalls.map(\.verified) == [true])
         #expect(WeshQRTrust.shared.fingerprints.contains(key.sha256Fingerprint()))
-        #expect(context.postedLocalNotifications.filter { $0.title == "Verified" }.count == 1)
+        #expect(context.postedLocalNotifications.filter { $0.title == "Contact verified" }.count == 1)
         #expect(context.sentChallenges.count == 1)
     }
 

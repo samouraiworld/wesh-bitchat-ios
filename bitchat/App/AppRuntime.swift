@@ -184,7 +184,9 @@ final class AppRuntime: ObservableObject {
     func handleOpenURL(_ url: URL) {
         record(.openedURL(url.absoluteString))
 
-        if url.scheme == "bitchat", url.host == "share" {
+        // Only the scheme registered with the OS; `bitchat://verify` QR
+        // payloads are parsed in-app and never arrive here.
+        if url.scheme == "wesh", url.host == "share" {
             checkForSharedContent()
         }
     }

@@ -1,6 +1,750 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "notification.verified.body" : {
+      "comment" : "Notification body after a QR verification; placeholder is the contact nickname",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You verified %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous avez vérifié %@"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "لقد تحققت من %@"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "আপনি %@ যাচাই করেছেন"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sie haben %@ verifiziert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Has verificado a %@"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "شما %@ را تأیید کردید"
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na-verify mo si %@"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "אימתת את %@"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "आपने %@ को सत्यापित किया"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Anda memverifikasi %@"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hai verificato %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ を確認しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ 님을 확인했습니다"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Anda telah mengesahkan %@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "तपाईंले %@ प्रमाणित गर्नुभयो"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Je hebt %@ geverifieerd"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zweryfikowano %@"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verificou %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Você verificou %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Вы подтвердили %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Du har verifierat %@"
+          }
+        },
+        "ta" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "நீங்கள் %@ ஐச் சரிபார்த்தீர்கள்"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "คุณยืนยัน %@ แล้ว"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ kişisini doğruladınız"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ви підтвердили %@"
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "آپ نے %@ کی تصدیق کی"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bạn đã xác minh %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "你已验证 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "你已驗證 %@"
+          }
+        }
+      }
+    },
+    "notification.verified.title" : {
+      "comment" : "Notification title after a contact QR verification succeeds",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact verified"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact vérifié"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تم التحقق من جهة الاتصال"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "পরিচিতি যাচাই হয়েছে"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kontakt verifiziert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contacto verificado"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "مخاطب تأیید شد"
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na-verify ang contact"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "איש הקשר אומת"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "संपर्क सत्यापित"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kontak terverifikasi"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contatto verificato"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "連絡先を確認しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "연락처 확인됨"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kenalan disahkan"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सम्पर्क प्रमाणित भयो"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contact geverifieerd"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kontakt zweryfikowany"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contacto verificado"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Contato verificado"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Контакт подтверждён"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kontakt verifierad"
+          }
+        },
+        "ta" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "தொடர்பு சரிபார்க்கப்பட்டது"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ยืนยันผู้ติดต่อแล้ว"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kişi doğrulandı"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Контакт підтверджено"
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "رابطے کی تصدیق ہو گئی"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Đã xác minh liên hệ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "联系人已验证"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "聯絡人已驗證"
+          }
+        }
+      }
+    },
+    "notification.dm.title" : {
+      "comment" : "Notification title for a received private message; placeholder is the sender nickname",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🔒 Message from %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🔒 Message de %@"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 رسالة من %@"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@-এর বার্তা"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Nachricht von %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Mensaje de %@"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 پیام از %@"
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Mensahe mula kay %@"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 הודעה מ-%@"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ का संदेश"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Pesan dari %@"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Messaggio da %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ からのメッセージ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ 님의 메시지"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Mesej daripada %@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ को सन्देश"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Bericht van %@"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Wiadomość od %@"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Mensagem de %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Mensagem de %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Сообщение от %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Meddelande från %@"
+          }
+        },
+        "ta" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ இடமிருந்து செய்தி"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 ข้อความจาก %@"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ kişisinden mesaj"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Повідомлення від %@"
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 %@ کا پیغام"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 Tin nhắn từ %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 来自 %@ 的消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🔒 來自 %@ 的訊息"
+          }
+        }
+      }
+    },
+    "notification.mention.title" : {
+      "comment" : "Notification title when someone mentions you in the public channel; placeholder is their nickname",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🫵 %@ mentioned you"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🫵 %@ vous a mentionné"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 أشار إليك %@"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ আপনাকে মেনশন করেছেন"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ hat Sie erwähnt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ te ha mencionado"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ از شما نام برد"
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 Binanggit ka ni %@"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ הזכיר/ה אותך"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ ने आपको मेंशन किया"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ menyebut Anda"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ ti ha menzionato"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ があなたをメンションしました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ 님이 회원님을 멘션했습니다"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ menyebut anda"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ ले तपाईंलाई उल्लेख गर्नुभयो"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ heeft je vermeld"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ wspomniał(a) o Tobie"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ mencionou-o"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ mencionou você"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ упомянул(а) вас"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ nämnde dig"
+          }
+        },
+        "ta" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ உங்களைக் குறிப்பிட்டார்"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ กล่าวถึงคุณ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ sizden bahsetti"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ згадав(-ла) вас"
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ نے آپ کا ذکر کیا"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ đã nhắc đến bạn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ 提到了你"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "🫵 %@ 提到了你"
+          }
+        }
+      }
+    },
     "board.accessibility.post" : {
       "comment" : "Accessibility label for the board post button",
       "extractionState" : "manual",
@@ -13955,184 +14699,184 @@
       "comment" : "Title of the local notification when mesh peers come into range",
       "extractionState" : "manual",
       "localizations" : {
-        "ar" : {
+        "fa" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 أهل bitchat بالقرب منك!"
+            "state" : "needs_review",
+            "value" : "👥 افرادی در نزدیکی در Wesh"
           }
         },
-        "bn" : {
+        "he" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 কাছেই bitchat-এর লোকজন!"
+            "state" : "needs_review",
+            "value" : "👥 אנשים בקרבת מקום ב-Wesh"
           }
         },
-        "de" : {
+        "ru" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatter in der nähe!"
+            "state" : "needs_review",
+            "value" : "👥 Рядом есть люди в Wesh"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "👥 Поруч є люди у Wesh"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "👥 bitchatters nearby!"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 ¡bitchateros cerca!"
-          }
-        },
-        "fa" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 بیت‌چتی‌ها همین نزدیکی‌اند!"
-          }
-        },
-        "fil" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 may mga bitchatter sa malapit!"
+            "value" : "👥 People nearby on Wesh"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "👥 des bitchatteurs dans le coin !"
+            "value" : "👥 Des personnes à proximité sur Wesh"
           }
         },
-        "he" : {
+        "ar" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 ביטצ'אטרים בסביבה!"
+            "state" : "needs_review",
+            "value" : "👥 أشخاص قريبون على Wesh"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "👥 কাছাকাছি Wesh-এ মানুষ"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "👥 Leute in der Nähe auf Wesh"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "👥 Personas cerca en Wesh"
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "👥 May mga tao sa malapit sa Wesh"
           }
         },
         "hi" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 पास में bitchat वाले लोग!"
+            "state" : "needs_review",
+            "value" : "👥 Wesh पर आस-पास लोग"
           }
         },
         "id" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 ada anak bitchat di sekitar!"
+            "state" : "needs_review",
+            "value" : "👥 Orang di sekitar di Wesh"
           }
         },
         "it" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatter nei paraggi!"
+            "state" : "needs_review",
+            "value" : "👥 Persone vicine su Wesh"
           }
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 近くにbitchat仲間がいるよ！"
+            "state" : "needs_review",
+            "value" : "👥 近くに Wesh の利用者がいます"
           }
         },
         "ko" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 근처에 bitchat 친구들이 있어요!"
+            "state" : "needs_review",
+            "value" : "👥 근처의 Wesh 사용자"
           }
         },
         "ms" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 ada geng bitchat berdekatan!"
+            "state" : "needs_review",
+            "value" : "👥 Orang berdekatan di Wesh"
           }
         },
         "ne" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 नजिकै bitchat का मान्छेहरू!"
+            "state" : "needs_review",
+            "value" : "👥 नजिकै Wesh मा मानिसहरू"
           }
         },
         "nl" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatters in de buurt!"
+            "state" : "needs_review",
+            "value" : "👥 Mensen in de buurt op Wesh"
           }
         },
         "pl" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatterzy w pobliżu!"
+            "state" : "needs_review",
+            "value" : "👥 Osoby w pobliżu w Wesh"
           }
         },
         "pt" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatters por perto!"
+            "state" : "needs_review",
+            "value" : "👥 Pessoas por perto no Wesh"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchatters por perto!"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 битчаттеры рядом!"
+            "state" : "needs_review",
+            "value" : "👥 Pessoas por perto no Wesh"
           }
         },
         "sv" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 bitchattare i närheten!"
+            "state" : "needs_review",
+            "value" : "👥 Personer i närheten på Wesh"
           }
         },
         "ta" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 அருகிலேயே bitchat ஆட்கள்!"
+            "state" : "needs_review",
+            "value" : "👥 அருகில் Wesh பயனர்கள்"
           }
         },
         "th" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 มีชาว bitchat อยู่ใกล้ๆ!"
+            "state" : "needs_review",
+            "value" : "👥 มีคนใกล้คุณบน Wesh"
           }
         },
         "tr" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 yakınlarda bitchat'çiler var!"
-          }
-        },
-        "uk" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 бітчатери поруч!"
+            "state" : "needs_review",
+            "value" : "👥 Wesh’te yakındaki kişiler"
           }
         },
         "ur" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 قریب ہی bitchat والے موجود ہیں!"
+            "state" : "needs_review",
+            "value" : "👥 Wesh پر قریب لوگ"
           }
         },
         "vi" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 có dân bitchat ở gần đây!"
+            "state" : "needs_review",
+            "value" : "👥 Có người ở gần trên Wesh"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 附近有 bitchat 小伙伴！"
+            "state" : "needs_review",
+            "value" : "👥 附近有 Wesh 用户"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "👥 附近有 bitchat 夥伴！"
+            "state" : "needs_review",
+            "value" : "👥 附近有 Wesh 使用者"
           }
         }
       }
@@ -82988,181 +83732,181 @@
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "افتح bitchat للقراءة"
+            "value" : "افتح Wesh للقراءة"
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "পড়তে bitchat খুলুন"
+            "value" : "পড়তে Wesh খুলুন"
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "öffne bitchat zum lesen"
+            "value" : "öffne Wesh zum lesen"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "open bitchat to read"
+            "value" : "Open Wesh to read"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "abre bitchat para leer"
+            "value" : "abre Wesh para leer"
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "برای خواندن bitchat را باز کن"
+            "value" : "برای خواندن Wesh را باز کن"
           }
         },
         "fil" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "buksan ang bitchat para makita"
+            "value" : "buksan ang Wesh para makita"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ouvre bitchat pour lire"
+            "value" : "Ouvrez Wesh pour lire"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "פתח את bitchat כדי לקרוא"
+            "value" : "פתח את Wesh כדי לקרוא"
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "पढ़ने के लिए bitchat खोलें"
+            "value" : "पढ़ने के लिए Wesh खोलें"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "buka bitchat untuk membaca"
+            "value" : "buka Wesh untuk membaca"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "apri bitchat per leggere"
+            "value" : "apri Wesh per leggere"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "読むには bitchat を開いてください"
+            "value" : "読むには Wesh を開いてください"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "읽으려면 bitchat을 열어보세요"
+            "value" : "읽으려면 Wesh을 열어보세요"
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "buka bitchat untuk membaca"
+            "value" : "buka Wesh untuk membaca"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "पढ्न bitchat खोल"
+            "value" : "पढ्न Wesh खोल"
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "open bitchat om te lezen"
+            "value" : "open Wesh om te lezen"
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "otwórz bitchat, aby przeczytać"
+            "value" : "otwórz Wesh, aby przeczytać"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "abre o bitchat para ler"
+            "value" : "abre o Wesh para ler"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "abra o bitchat para ler"
+            "value" : "abra o Wesh para ler"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "открой bitchat, чтобы прочитать"
+            "value" : "открой Wesh, чтобы прочитать"
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "öppna bitchat för att läsa"
+            "value" : "öppna Wesh för att läsa"
           }
         },
         "ta" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "படிக்க bitchat ஐத் திறக்கவும்"
+            "value" : "படிக்க Wesh ஐத் திறக்கவும்"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "เปิด bitchat เพื่ออ่าน"
+            "value" : "เปิด Wesh เพื่ออ่าน"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "okumak için bitchat'i aç"
+            "value" : "okumak için Wesh'i aç"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "відкрий bitchat, щоб прочитати"
+            "value" : "відкрий Wesh, щоб прочитати"
           }
         },
         "ur" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "پڑھنے کے لیے bitchat کھولیں"
+            "value" : "پڑھنے کے لیے Wesh کھولیں"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "mở bitchat để đọc"
+            "value" : "mở Wesh để đọc"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开 bitchat 查看"
+            "value" : "打开 Wesh 查看"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟 bitchat 查看"
+            "value" : "開啟 Wesh 查看"
           }
         }
       }
@@ -83192,7 +83936,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "🔒 new dm"
+            "value" : "🔒 New private message"
           }
         },
         "es" : {
@@ -83216,7 +83960,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "🔒 nouveau mp"
+            "value" : "🔒 Nouveau message privé"
           }
         },
         "he" : {
@@ -83564,7 +84308,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "🫵 you were mentioned"
+            "value" : "🫵 You were mentioned"
           }
         },
         "es" : {
@@ -83588,7 +84332,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "🫵 on t'a mentionné"
+            "value" : "🫵 Vous avez été mentionné"
           }
         },
         "he" : {

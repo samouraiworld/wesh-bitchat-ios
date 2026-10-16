@@ -71,7 +71,7 @@ final class NotificationServiceTests: XCTestCase {
         service.sendPrivateMessageNotification(from: "Alice", message: "hi", peerID: peerID)
 
         let request = deliverer.requests.singleValue
-        XCTAssertEqual(request?.content.title, "🔒 DM from Alice")
+        XCTAssertEqual(request?.content.title, "🔒 Message from Alice")
         XCTAssertEqual(request?.content.body, "hi")
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
         XCTAssertEqual(request?.content.userInfo["senderName"] as? String, "Alice")
@@ -110,7 +110,7 @@ final class NotificationServiceTests: XCTestCase {
         service.sendNetworkAvailableNotification(peerCount: 2)
 
         XCTAssertEqual(deliverer.requests.count, 2)
-        XCTAssertEqual(deliverer.requests[0].content.userInfo["deeplink"] as? String, "bitchat://geohash/87yv")
+        XCTAssertEqual(deliverer.requests[0].content.userInfo["deeplink"] as? String, "wesh://geohash/87yv")
         XCTAssertTrue(deliverer.requests[0].identifier.hasPrefix("geo-activity-87yv-"))
         XCTAssertEqual(deliverer.requests[1].identifier, "network-available")
         XCTAssertEqual(deliverer.requests[1].content.interruptionLevel, .timeSensitive)
