@@ -9,41 +9,49 @@ import P256K
 enum WeshQRNpub {
     /// What a verified scan does to the npub bindings.
     enum Outcome: Equatable {
-        /// No usable npub: no npub, malformed, mine, failed proof, or my own
-        /// npubs unknown (fail closed).
+        /// The QR makes no npub claim: the contact's binding is unchanged.
+        case keep
+        /// The claim is unusable (malformed, mine, failed proof, or my own
+        /// npubs unknown): no binding.
         case bluetoothOnly
-        /// Bind to the scanned contact; `unbinding` lose the npub and are flagged.
+        /// Bind to the scanned contact. `unbinding` are unproven incumbents a
+        /// verified proof displaced; they lose the npub and are flagged for review.
         case bound(npub: String, proven: Bool, unbinding: Set<String>)
-        /// Not bound and flagged; `unbinding` lose the npub and are flagged too.
-        case conflict(unbinding: Set<String>)
+        /// A claim to an npub another contact holds that it may not take
+        /// (unproven, or the incumbent is proven): refused, the incumbent is
+        /// kept, and this contact is flagged for review.
+        case conflict
+        /// This contact was proven before and the new QR does not prove its
+        /// claim (e.g. `npubsig` stripped from a shared link): the proven
+        /// binding is kept and a warning shown, never silently downgraded.
+        case keepProven
     }
 
     static let proofDomain = "wesh-npub-proof-v1"
 
-    /// Precedence for one npub claimed by several Noise identities: proven
-    /// wins over unproven (the newest proven over an older proven one); two
-    /// unproven claims unbind both. A losing claim is flagged, never dropped silently.
+    /// Only a verified proof may unbind an incumbent, and only an unproven
+    /// one; nothing displaces a proven incumbent. See NPUB-PROOF.md.
     static func enrollment(npub candidate: String?, npubSigHex: String?, canonicalBytes: Data,
                            noiseKeyHex: String, ownedNpubs: Set<String>?,
                            contacts: [WeshQRTrust.Contact]) -> Outcome {
-        guard let candidate, let xOnly = xOnlyKey(fromNpub: candidate),
-              let ownedNpubs, !ownedNpubs.contains(candidate) else { return .bluetoothOnly }
-        var proven = false
+        guard let candidate else { return .keep }
+        let hex = noiseKeyHex.lowercased()
+        let wasProven = contacts.contains { $0.noiseKeyHex.lowercased() == hex && $0.isNpubProven }
+        let refused: Outcome = wasProven ? .keepProven : .bluetoothOnly
+        guard let xOnly = xOnlyKey(fromNpub: candidate),
+              let ownedNpubs, !ownedNpubs.contains(candidate) else { return refused }
+        let others = contacts.filter { $0.npub == candidate && $0.noiseKeyHex.lowercased() != hex }
         if let npubSigHex {
             // A proof that is present must verify; it is never downgraded to unproven.
-            guard verifyProof(npubSigHex, xOnlyKey: xOnly, canonicalBytes: canonicalBytes) else { return .bluetoothOnly }
-            proven = true
+            guard verifyProof(npubSigHex, xOnlyKey: xOnly, canonicalBytes: canonicalBytes) else { return refused }
+            if others.contains(where: \.isNpubProven) { return .conflict }
+            return .bound(npub: candidate, proven: true, unbinding: Set(others.map { $0.noiseKeyHex.lowercased() }))
         }
-        let hex = noiseKeyHex.lowercased()
-        let holders = contacts.filter { $0.npub == candidate }
-        // Re-enrolling the same identity without the proof keeps its proven binding.
-        if holders.contains(where: { $0.noiseKeyHex.lowercased() == hex && $0.isNpubProven }) { proven = true }
-        let others = holders.filter { $0.noiseKeyHex.lowercased() != hex }
-        let otherKeys = Set(others.map { $0.noiseKeyHex.lowercased() })
-        if others.isEmpty || proven { return .bound(npub: candidate, proven: proven, unbinding: otherKeys) }
-        return .conflict(unbinding: others.contains(where: \.isNpubProven) ? [] : otherKeys)
+        if wasProven { return .keepProven }
+        return others.isEmpty ? .bound(npub: candidate, proven: false, unbinding: []) : .conflict
     }
 
+    // periphery:ignore - consumed by the Internet routing/inbound PR (#7)
     /// Inbound Nostr sender resolution: the one contact bound to this npub.
     static func inboundContact(forNpub npub: String, in contacts: [WeshQRTrust.Contact]) -> WeshQRTrust.Contact? {
         let holders = contacts.filter { $0.npub == npub }
@@ -96,24 +104,37 @@ enum WeshQRNpub {
 extension WeshQRTrust {
     /// Applies a verified scan's npub outcome.
     func enroll(sessionKey: Data, nickname: String, outcome: WeshQRNpub.Outcome) {
+        let hex = sessionKey.hexEncodedString()
+        let current = contacts.first { $0.noiseKeyHex.lowercased() == hex }
         switch outcome {
+        case .keep:
+            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+                   npubProven: current?.isNpubProven ?? false, npubConflict: current?.hasNpubConflict ?? false,
+                   npubProofWarning: current?.hasNpubProofWarning ?? false)
         case .bluetoothOnly:
             record(sessionKey: sessionKey, nickname: nickname)
         case let .bound(npub, proven, unbinding):
             flagNpubConflict(noiseKeysHex: unbinding)
             record(sessionKey: sessionKey, nickname: nickname, npub: npub, npubProven: proven)
-        case .conflict(let unbinding):
-            flagNpubConflict(noiseKeysHex: unbinding)
-            record(sessionKey: sessionKey, nickname: nickname, npubConflict: true)
+        case .conflict:
+            // This contact's earlier binding, if any, is not another's claim: keep it.
+            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+                   npubProven: current?.isNpubProven ?? false, npubConflict: true)
+        case .keepProven:
+            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+                   npubProven: true, npubProofWarning: true)
         }
     }
 }
 
 extension WeshQRTrust.Contact {
     var isNpubProven: Bool { npub != nil && npubProven == true }
-    /// UI: the npub was claimed by another contact too; rescan to settle it.
+    /// UI: another contact holds or claimed the same npub; for review.
     var hasNpubConflict: Bool { npubConflict == true }
+    /// UI: proven before, but the last QR did not prove its npub; binding kept.
+    var hasNpubProofWarning: Bool { npubProofWarning == true }
 
+    // periphery:ignore - consumed by the Internet UI PR (#9)
     /// UI: « Rescannez son QR pour échanger par Internet ». Legacy contacts
     /// and QRs whose npub failed enrollment checks land here.
     var requiresRescanForInternet: Bool { npub == nil }

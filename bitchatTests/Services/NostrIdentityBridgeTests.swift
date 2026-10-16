@@ -45,20 +45,26 @@ struct NostrIdentityBridgeTests {
         #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.storedNostrIdentity() }
     }
 
-    @Test("Owned npubs cover the current and derived identities and fail closed")
-    func locallyOwnedNpubsCoverEveryHeldKey() throws {
+    @Test("Owned npubs come from durable material and fail closed otherwise")
+    func locallyOwnedNpubsFailClosed() throws {
         let keychain = NostrPersistenceKeychain()
         let bridge = NostrIdentityBridge(keychain: keychain)
         #expect(try bridge.locallyOwnedNpubs().isEmpty)
         #expect(keychain.saveCount == 0)
 
         let current = try #require(try bridge.getCurrentNostrIdentity())
-        let geohash = try bridge.deriveIdentity(forGeohash: "u09tu")
-        let rendezvous = try bridge.deriveIdentity(forBridgeRendezvous: "u09t")
-        #expect(try bridge.locallyOwnedNpubs() == [current.npub, geohash.npub, rendezvous.npub])
+        #expect(try bridge.locallyOwnedNpubs() == [current.npub])
 
         keychain.readFailure = .deviceLocked
         #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.locallyOwnedNpubs() }
+        keychain.readFailure = nil
+
+        // A device seed means derived identities exist that cannot be listed,
+        // even on a fresh bridge whose in-memory cache is empty.
+        _ = try bridge.deriveIdentity(forGeohash: "u09tu")
+        #expect(throws: NostrIdentityBridge.StorageError.derivedIdentitiesNotEnumerable) {
+            try NostrIdentityBridge(keychain: keychain).locallyOwnedNpubs()
+        }
     }
 
     @Test("Unreadable seed is preserved and does not cache a replacement")

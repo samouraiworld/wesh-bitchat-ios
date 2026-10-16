@@ -8,6 +8,9 @@ final class NostrIdentityBridge {
         case unavailable
         case invalidStoredIdentity
         case persistenceNotConfirmed
+        /// A device seed exists, so per-geohash/bridge identities exist that
+        /// cannot be enumerated.
+        case derivedIdentitiesNotEnumerable
     }
 
     private let keychainService = "chat.bitchat.nostr"
@@ -67,17 +70,22 @@ final class NostrIdentityBridge {
         }
     }
 
-    /// Every npub this device holds a key for, read-only: the current
-    /// identity plus derived geohash/bridge identities in use. There is no
-    /// retained pre-rotation key store on iOS (panic deletes them all).
-    /// Throws when storage cannot answer, so callers fail closed.
+    /// Every npub this device holds a key for, read-only and computed from
+    /// durable material only. Derived geohash/bridge identities come from the
+    /// device seed for any cell string, so they cannot be listed: when a seed
+    /// is stored this throws instead of guessing. There is no retained
+    /// pre-rotation key store on iOS (panic deletes them all). Throws when
+    /// storage cannot answer, so callers fail closed.
     func locallyOwnedNpubs() throws -> Set<String> {
-        var owned = Set<String>()
-        if let current = try storedNostrIdentity() { owned.insert(current.npub) }
-        cacheLock.lock()
-        owned.formUnion(derivedIdentityCache.values.map(\.npub))
-        cacheLock.unlock()
-        return owned
+        switch keychain.loadWithResult(key: deviceSeedKey, service: keychainService) {
+        case .itemNotFound:
+            break
+        case .success:
+            throw StorageError.derivedIdentitiesNotEnumerable
+        case .accessDenied, .deviceLocked, .authenticationFailed, .otherError:
+            throw StorageError.unavailable
+        }
+        return Set([try storedNostrIdentity()?.npub].compactMap { $0 })
     }
 
     /// Get Nostr public key associated with a Noise public key

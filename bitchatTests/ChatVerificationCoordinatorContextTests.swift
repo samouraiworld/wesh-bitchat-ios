@@ -271,25 +271,25 @@ struct ChatVerificationCoordinatorContextTests {
         // The proof travels from the scan to the enrollment.
         try enroll(npub: theirs.npub, prover: theirs)
         #expect(WeshQRTrust.shared.contacts.first?.isNpubProven == true)
-        // A proof by another key rejects the npub.
+        // A proof by another key cannot downgrade the proven binding: kept, with a warning.
         try enroll(npub: theirs.npub, prover: try NostrIdentity.generate())
-        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        #expect(WeshQRTrust.shared.contacts.first?.isNpubProven == true)
+        #expect(WeshQRTrust.shared.contacts.first?.hasNpubProofWarning == true)
 
-        // Unknown own npubs fail closed.
+        // From a Bluetooth-only start, each refusal leaves the contact Bluetooth-only.
+        WeshQRTrust.shared.clear()
         context.locallyOwnedNpubs = nil
         try enroll(npub: theirs.npub)
-        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil, "unknown own npubs fail closed")
         context.locallyOwnedNpubs = [mine]
-
-        // A QR claiming my own npub enrolls Bluetooth-only.
         try enroll(npub: mine)
         #expect(WeshQRTrust.shared.contacts.count == 1)
         #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
         #expect(WeshQRTrust.shared.contacts.first?.requiresRescanForInternet == true)
-
-        // An invalid point also enrolls Bluetooth-only.
         try enroll(npub: "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzsfj2hcx")
         #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        try enroll(npub: theirs.npub, prover: try NostrIdentity.generate())
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil, "a present proof must verify")
         #expect(WeshQRTrust.shared.fingerprints.contains(key.sha256Fingerprint()))
     }
 

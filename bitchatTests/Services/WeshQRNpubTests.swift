@@ -42,7 +42,7 @@ struct WeshQRNpubTests {
             #expect(WeshQRNpub.xOnlyKey(fromNpub: sample) == nil, "\(sample)")
             #expect(enroll(sample) == .bluetoothOnly, "\(sample)")
         }
-        #expect(enroll(nil) == .bluetoothOnly)
+        #expect(enroll(nil) == .keep, "a QR without npub makes no claim")
     }
 
     @Test func anyLocallyOwnedNpubIsRefusedAndAnUnknownSetFailsClosed() throws {
@@ -67,24 +67,35 @@ struct WeshQRNpubTests {
         #expect(enroll(theirs.npub) == .bound(npub: theirs.npub, proven: false, unbinding: []))
     }
 
-    @Test func provenWinsAndUnprovenNeverDisplacesProven() throws {
+    @Test func onlyAProofDisplacesAndNeverAProvenIncumbent() throws {
         let theirs = try NostrIdentity.generate()
         let unprovenB = Contact(noiseKeyHex: noiseB, nickname: "B", npub: theirs.npub)
         let provenB = Contact(noiseKeyHex: noiseB, nickname: "B", npub: theirs.npub, npubProven: true)
 
-        // Proven new claim takes the npub from an unproven holder, which is flagged.
+        // A verified proof takes the npub from an unproven incumbent, which is flagged.
         #expect(enroll(theirs.npub, proof: try proof(theirs), contacts: [unprovenB])
                 == .bound(npub: theirs.npub, proven: true, unbinding: [noiseB]))
-        // Unproven new claim against a proven holder: new contact flagged, holder untouched.
-        #expect(enroll(theirs.npub, contacts: [provenB]) == .conflict(unbinding: []))
-        // Two unproven claims: both unbound and flagged.
-        #expect(enroll(theirs.npub, contacts: [unprovenB]) == .conflict(unbinding: [noiseB]))
-        // The newest proven claim wins over an older proven one, which is flagged.
-        #expect(enroll(theirs.npub, proof: try proof(theirs), contacts: [provenB])
-                == .bound(npub: theirs.npub, proven: true, unbinding: [noiseB]))
-        // Re-enrolling the same identity without the proof keeps it proven.
+        // An unproven claim never unbinds an incumbent, proven or not.
+        #expect(enroll(theirs.npub, contacts: [unprovenB]) == .conflict)
+        #expect(enroll(theirs.npub, contacts: [provenB]) == .conflict)
+        // Not even a proof displaces a proven incumbent.
+        #expect(enroll(theirs.npub, proof: try proof(theirs), contacts: [provenB]) == .conflict)
+    }
+
+    @Test func aPreviouslyProvenPeerIsNeverSilentlyDowngraded() throws {
+        let theirs = try NostrIdentity.generate()
         let provenA = Contact(noiseKeyHex: noiseA.uppercased(), nickname: "A", npub: theirs.npub, npubProven: true)
-        #expect(enroll(theirs.npub, contacts: [provenA]) == .bound(npub: theirs.npub, proven: true, unbinding: []))
+        // `npubsig` stripped from a shared link, a bad proof, or an unproven other npub.
+        #expect(enroll(theirs.npub, contacts: [provenA]) == .keepProven)
+        #expect(enroll(theirs.npub, proof: String(repeating: "00", count: 64), contacts: [provenA]) == .keepProven)
+        #expect(enroll(try NostrIdentity.generate().npub, contacts: [provenA]) == .keepProven)
+        #expect(enroll("npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzsfj2hcx", contacts: [provenA]) == .keepProven)
+        // A new verified proof by the same peer is a fresh proven binding.
+        let rotated = try NostrIdentity.generate()
+        #expect(enroll(rotated.npub, proof: try proof(rotated), contacts: [provenA])
+                == .bound(npub: rotated.npub, proven: true, unbinding: []))
+        // A QR without npub makes no claim.
+        #expect(enroll(nil, contacts: [provenA]) == .keep)
     }
 
     @Test func storeAppliesOutcomesAndInboundResolvesOnlyAUniqueHolder() throws {
@@ -93,26 +104,31 @@ struct WeshQRNpubTests {
         let keyA = try #require(Data(hexString: noiseA))
         let keyB = try #require(Data(hexString: noiseB))
         let keyC = try #require(Data(hexString: noiseC))
+        func contact(_ hex: String) -> Contact? { store.contacts.first { $0.noiseKeyHex == hex } }
 
         store.enroll(sessionKey: keyB, nickname: "B", outcome: enroll(theirs.npub, as: noiseB, contacts: store.contacts))
         #expect(WeshQRNpub.inboundContact(forNpub: theirs.npub, in: store.contacts)?.nickname == "B")
 
-        // Unproven duplicate: both unbound, both flagged, inbound dropped.
+        // Unproven duplicate: refused and flagged; the incumbent keeps it.
         store.enroll(sessionKey: keyC, nickname: "C", outcome: enroll(theirs.npub, as: noiseC, contacts: store.contacts))
-        #expect(store.contacts.allSatisfy { $0.npub == nil && $0.hasNpubConflict && $0.requiresRescanForInternet })
-        #expect(WeshQRNpub.inboundContact(forNpub: theirs.npub, in: store.contacts) == nil)
+        #expect(contact(noiseC)?.npub == nil && contact(noiseC)?.hasNpubConflict == true)
+        #expect(contact(noiseB)?.npub == theirs.npub && contact(noiseB)?.hasNpubConflict == false)
+        #expect(WeshQRNpub.inboundContact(forNpub: theirs.npub, in: store.contacts)?.nickname == "B")
 
-        // A proven scan settles it.
+        // A verified proof evicts the unproven incumbent, which is flagged for review.
         store.enroll(sessionKey: keyA, nickname: "A",
                      outcome: enroll(theirs.npub, proof: try proof(theirs), as: noiseA, contacts: store.contacts))
-        let a = try #require(store.contacts.first { $0.noiseKeyHex == noiseA })
-        #expect(a.isNpubProven && !a.hasNpubConflict)
+        #expect(contact(noiseA)?.isNpubProven == true)
+        #expect(contact(noiseB)?.npub == nil && contact(noiseB)?.hasNpubConflict == true)
         #expect(WeshQRNpub.inboundContact(forNpub: theirs.npub, in: store.contacts)?.nickname == "A")
-        #expect(store.contacts.filter { $0.npub == theirs.npub }.count == 1)
 
-        // A later verified QR without an npub is the latest signed statement: Bluetooth-only again.
-        store.enroll(sessionKey: keyA, nickname: "A", outcome: .bluetoothOnly)
-        #expect(store.contacts.first { $0.noiseKeyHex == noiseA }?.npub == nil)
+        // The same peer later shows a stripped QR: binding kept, warning shown.
+        store.enroll(sessionKey: keyA, nickname: "A", outcome: enroll(theirs.npub, as: noiseA, contacts: store.contacts))
+        #expect(contact(noiseA)?.isNpubProven == true && contact(noiseA)?.hasNpubProofWarning == true)
+        // A QR with no npub keeps the binding as is.
+        store.enroll(sessionKey: keyA, nickname: "A2", outcome: .keep)
+        #expect(contact(noiseA)?.npub == theirs.npub && contact(noiseA)?.nickname == "A2")
+        #expect(store.contacts.filter { $0.npub == theirs.npub }.count == 1)
     }
 
     @Test func legacyContactWithoutNpubDecodesAndNeedsRescan() throws {

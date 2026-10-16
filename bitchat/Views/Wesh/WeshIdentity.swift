@@ -23,8 +23,11 @@ final class WeshQRTrust: ObservableObject {
         var npub: String? = nil
         /// The QR also proved possession of the npub's key (`npubsig`).
         var npubProven: Bool? = nil
-        /// Another contact claimed the same npub; unbound until a rescan settles it.
+        /// Another contact holds or claimed the same npub: for user review.
         var npubConflict: Bool? = nil
+        /// A previously proven peer showed a QR without a valid proof; the
+        /// proven binding was kept.
+        var npubProofWarning: Bool? = nil
         var id: String { noiseKeyHex }
         var peerID: PeerID { PeerID(hexData: Data(hexString: noiseKeyHex) ?? Data()) }
     }
@@ -40,18 +43,20 @@ final class WeshQRTrust: ObservableObject {
     }
 
     func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil,
-                npubProven: Bool = false, npubConflict: Bool = false) {
+                npubProven: Bool = false, npubConflict: Bool = false, npubProofWarning: Bool = false) {
         guard sessionKey.count == 32 else { return }
         fingerprints.insert(sessionKey.sha256Fingerprint())
         let hex = sessionKey.hexEncodedString()
         contacts.removeAll { $0.noiseKeyHex == hex }
         contacts.append(Contact(noiseKeyHex: hex, nickname: nickname, npub: npub,
                                 npubProven: npub != nil && npubProven ? true : nil,
-                                npubConflict: npubConflict ? true : nil))
+                                npubConflict: npubConflict ? true : nil,
+                                npubProofWarning: npubProofWarning ? true : nil))
         persist()
     }
 
-    /// Unbinds these contacts' npub and marks the conflict (WeshQRNpub precedence).
+    /// A verified proof took these contacts' npub: unbind them and flag them
+    /// for review (WeshQRNpub precedence).
     func flagNpubConflict(noiseKeysHex: Set<String>) {
         guard !noiseKeysHex.isEmpty else { return }
         for index in contacts.indices where noiseKeysHex.contains(contacts[index].noiseKeyHex.lowercased()) {
