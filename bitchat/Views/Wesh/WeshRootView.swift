@@ -990,8 +990,9 @@ private struct WeshConversation: View {
                                         Label("Copier", systemImage: "doc.on.doc")
                                     }
                                     if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
-                                        Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = isPrivate ? title : message.sender }
-                                            .accessibilityLabel("Bloquer " + weshIdentitySummary(isPrivate ? title : message.sender, fingerprint: identity.noiseKey?.sha256Fingerprint()))
+                                        let name = WeshDisplayName.blockTarget(sender: message.sender, privateTitle: title, isPrivate: isPrivate)
+                                        Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = name }
+                                            .accessibilityLabel("Bloquer " + weshIdentitySummary(name, fingerprint: identity.noiseKey?.sha256Fingerprint()))
                                             .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                                     }
                                 }
@@ -1890,8 +1891,7 @@ private struct WeshBlockedContacts: View {
     private var fingerprints: [String] { runtime.chatViewModel.identityManager.getBlockedFingerprints().sorted() }
     private func name(for fingerprint: String) -> String {
         let identity = runtime.chatViewModel.identityManager.getSocialIdentity(for: fingerprint)
-        let name = identity?.localPetname ?? identity?.claimedNickname ?? ""
-        return name.isEmpty ? "Personne sans nom" : name
+        return WeshDisplayName.blockedContact(petname: identity?.localPetname, claimedNickname: identity?.claimedNickname)
     }
 
     var body: some View {

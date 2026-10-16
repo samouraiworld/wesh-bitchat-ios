@@ -18,6 +18,17 @@ enum WeshDisplayName {
     static func clean(_ raw: String, fallback: String = "Contact") -> String {
         InputValidator.validateNickname(raw) ?? fallback
     }
+
+    /// The name a block confirmation, its VoiceOver label and the resulting
+    /// timeline line may show.
+    static func blockTarget(sender: String, privateTitle: String, isPrivate: Bool) -> String {
+        clean(isPrivate ? privateTitle : sender, fallback: "Participant")
+    }
+
+    static func blockedContact(petname: String?, claimedNickname: String?) -> String {
+        let raw = petname ?? claimedNickname ?? ""
+        return raw.isEmpty ? "Personne sans nom" : clean(raw, fallback: "Participant")
+    }
 }
 
 /// QR enrollment is separate from upstream manual verification and transitive vouches.

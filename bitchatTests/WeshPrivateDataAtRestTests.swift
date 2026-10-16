@@ -575,6 +575,18 @@ struct WeshPrivateDataAtRestTests {
 
     // MARK: Contact names
 
+    @Test func blockFlowsNeverCarryARawPeerName() {
+        #expect(WeshDisplayName.blockTarget(sender: "Pi\u{202E}rate", privateTitle: "Nora", isPrivate: false) == "Participant")
+        #expect(WeshDisplayName.blockTarget(sender: " Alex ", privateTitle: "Nora", isPrivate: false) == "Alex")
+        #expect(WeshDisplayName.blockTarget(sender: "Alex", privateTitle: "Nora", isPrivate: true) == "Nora")
+        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: "Mal\u{0007}") == "Participant")
+        #expect(WeshDisplayName.blockedContact(petname: "Voisin", claimedNickname: "Mal\u{0007}") == "Voisin")
+        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: nil) == "Personne sans nom")
+    }
+
+    /// System text selection would copy to the general pasteboard: plain,
+    /// synced through Universal Clipboard and never expiring. Wesh copies only
+    /// through its own local, expiring « Copier le message ».
     @Test func contactNicknamesAreSanitizedWhenRecordedAndWhenMigrated() throws {
         #expect(WeshDisplayName.clean("  Nora  ") == "Nora")
         #expect(WeshDisplayName.clean("No\u{202E}ra") == "Contact")
