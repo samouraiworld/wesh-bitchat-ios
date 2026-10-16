@@ -1650,139 +1650,55 @@ private func bluetoothSummary(_ state: CBManagerState) -> String {
 private struct WeshSettings: View {
     let runtime: AppRuntime
     @EnvironmentObject private var chrome: AppChromeModel
-    @Environment(\.weshTheme) private var theme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var showQR = false
-    var body: some View {
-        List {
-            Section {
-                NavigationLink { WeshProfileEditor() } label: {
-                    HStack(spacing: 16) {
-                        WeshAvatar(symbol: "person")
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(chrome.nickname).font(.headline)
-                            Text("Votre profil").font(.subheadline).foregroundStyle(theme.secondary)
-                        }
-                    }.padding(.vertical, theme.isDark ? 12 : 6)
-                }
-                Button { showQR = true } label: {
-                    Label("Mon QR d’identité", systemImage: "qrcode").frame(minHeight: 48)
-                }
-            }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-            Section {
-                NavigationLink { WeshAppearanceSettings() } label: {
-                    Group {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Apparence")
-                                Text(theme.appearance.title).foregroundStyle(theme.secondary)
-                            }
-                        } else {
-                            HStack {
-                                Label("Apparence", systemImage: "circle.lefthalf.filled")
-                                Spacer()
-                                Text(theme.appearance.title).foregroundStyle(theme.secondary)
-                            }
-                        }
-                    }.frame(minHeight: 48)
-                }
-                NavigationLink { WeshMeetingNote(store: runtime.chatViewModel.weshMeetingNote) } label: {
-                    Label("Note de rendez-vous", systemImage: "calendar").frame(minHeight: 48)
-                }
-            } header: { WeshSectionLabel(text: "À votre façon") }
-            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-            Section {
-                NavigationLink { WeshContacts(runtime: runtime) } label: {
-                    Label("Contacts", systemImage: "person.2").frame(minHeight: 48)
-                }
-                NavigationLink { WeshBlockedContacts(runtime: runtime) } label: {
-                    Label("Contacts bloqués", systemImage: "hand.raised.slash").frame(minHeight: 48)
-                }
-            } header: { WeshSectionLabel(text: "Vos contacts") }
-            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-            Section {
-                NavigationLink { WeshConnectionSettings() } label: {
-                    Label("Connexion à proximité", systemImage: "antenna.radiowaves.left.and.right").frame(minHeight: 48)
-                }
-                NavigationLink { WeshPrivacySettings(runtime: runtime) } label: {
-                    Label("Confidentialité", systemImage: "hand.raised").frame(minHeight: 48)
-                }
-            } header: { WeshSectionLabel(text: "Pour échanger") }
-            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-            Section {
-                Link(destination: WeshLinks.terms) {
-                    Label("Conditions d’utilisation", systemImage: "doc.text").frame(minHeight: 48)
-                }
-                NavigationLink {
-                    PaveLicensesScreen().navigationTitle("Licences").weshInlineTitle()
-                } label: {
-                    Label("Licences", systemImage: "text.book.closed").frame(minHeight: 48)
-                }
-            } header: { WeshSectionLabel(text: "À propos") }
-            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-            Section {
-                WeshValueRow("Version", value: WeshBuildInfo.displayVersion)
-                    .font(.footnote).foregroundStyle(theme.secondary).frame(minHeight: 44)
-            }.listRowBackground(theme.canvas)
-        }
-        .listStyle(.plain).scrollContentBackground(.hidden)
-        .navigationTitle("Réglages").weshCanvas(title: "Réglages")
-        .sheet(isPresented: $showQR) { WeshContactSheet(runtime: runtime) }
-    }
-}
-
-private struct WeshContacts: View {
-    let runtime: AppRuntime
-    @ObservedObject private var trust = WeshQRTrust.shared
-    @ObservedObject private var service: UnifiedPeerService
-    @Environment(\.weshTheme) private var theme
-    @State private var addingContact = false
+    @EnvironmentObject private var peers: PeerListModel
+    @ObservedObject private var meetingNote: WeshMeetingNoteStore
+    @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
+    @AppStorage(NotificationPrivacySettings.hidePreviewsKey) private var hidePreviews = true
+    @State private var destination: PaveSettingsDestination?
+    @State private var connexion = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
-        _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+        _meetingNote = ObservedObject(wrappedValue: runtime.chatViewModel.weshMeetingNote)
+    }
+
+    private var summary: PaveSettingsSummary {
+        let note = meetingNote.content
+        let _ = peers.renderID
+        return PaveSettingsSummary(nickname: chrome.nickname,
+                                   previewsHidden: hidePreviews,
+                                   meetingNote: note.place.isEmpty ? note.title : note.place,
+                                   blockedCount: runtime.chatViewModel.identityManager.getBlockedFingerprints().count,
+                                   theme: appearance.paveTheme)
     }
 
     var body: some View {
-        List {
-            Section {
-                if trust.contacts.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Vos contacts, en personne.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Scannez le QR de quelqu’un pour commencer une discussion privée.").foregroundStyle(theme.secondary)
-                        Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "qrcode.viewfinder") }
-                            .buttonStyle(WeshPrimaryButtonStyle())
-                    }.padding(.vertical, 24).listRowSeparator(.hidden)
-                } else {
-                    ForEach(trust.contacts) { contact in
-                        // Value-based, so a failed removal keeps the pushed page and its message.
-                        NavigationLink(value: contact) {
-                            HStack(spacing: 16) {
-                                WeshAvatar(symbol: "person")
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(PaveDisplayName.safe(contact.nickname)).font(.headline)
-                                    PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
-                                    Text(isBlocked(contact) ? "Bloqué sur ce téléphone" : "Identité vérifiée ici")
-                                        .font(.subheadline).foregroundStyle(theme.secondary)
-                                }
-                            }.padding(.vertical, 12)
-                        }
-                    }
-                }
-            } footer: { Text("Un surnom ne prouve pas une identité. Les vérifications et les blocages concernent ce téléphone.") }
-            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
-        }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Contacts").weshCanvas(title: "Contacts")
-            .navigationDestination(for: WeshQRTrust.Contact.self) { WeshContactDetails(runtime: runtime, contact: $0) }
-            .toolbar { ToolbarItem(placement: .primaryAction) {
-                Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "plus").frame(width: 44, height: 44) }
-            } }
-            .sheet(isPresented: $addingContact) { WeshContactSheet(runtime: runtime) }
-    }
-
-    private func isBlocked(_ contact: WeshQRTrust.Contact) -> Bool {
-        guard let key = contact.peerID.noiseKey else { return false }
-        return runtime.chatViewModel.identityManager.isBlocked(fingerprint: key.sha256Fingerprint())
+        // The hold is the confirmation: no alert after it. The wipe rebuilds the tabs, so its
+        // outcome shows above the app, in the window the « Tout effacer » shortcut uses.
+        PaveSettingsScreen(summary: summary, onErase: {
+            let erased = chrome.panicClearAllData()
+            PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
+            return erased
+        }, onSelect: { selected in
+            if selected == .connexion { connexion = true } else { destination = selected }
+        })
+        .navigationTitle("Réglages")
+        .weshHiddenNavigationBar()
+        .navigationDestination(isPresented: Binding(get: { destination != nil },
+                                                    set: { if !$0 { destination = nil } })) {
+            switch destination {
+            case .profile: WeshProfileEditor()
+            case .discretion: WeshPrivacySettings(runtime: runtime)
+            case .meetingPoint: WeshMeetingNote(store: runtime.chatViewModel.weshMeetingNote)
+            case .blocked: WeshBlockedContacts(runtime: runtime)
+            case .appearance: WeshAppearanceSettings()
+            case .about:
+                PaveAboutScreen(version: WeshBuildInfo.displayVersion)
+                    .navigationTitle(PaveSettingsDestination.about.title).weshInlineTitle()
+            case .connexion, nil: EmptyView()
+            }
+        }
+        .sheet(isPresented: $connexion) { WeshConnectionSettings() }
     }
 }
 
@@ -2091,28 +2007,17 @@ private struct WeshProfileEditor: View {
 private struct WeshConnectionSettings: View {
     @EnvironmentObject private var chrome: AppChromeModel
     @EnvironmentObject private var peers: PeerListModel
-    @Environment(\.weshTheme) private var theme
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        Form {
-            Section {
-                if chrome.noiseIdentityAvailability == .available {
-                    WeshValueRow("Identité locale", value: "Disponible")
-                } else {
-                    WeshNoiseIdentityRecoveryPanel()
-                }
-            }.listRowBackground(theme.canvas)
-            Section {
-                Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
-                if chrome.bluetoothState == .unauthorized { Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44) }
-                WeshValueRow("Connexions", value: String(peers.connectedMeshPeerCount))
-            } footer: {
-                Text("Gardez Wesh ouvert sur les deux téléphones. Une connexion disponible ne confirme pas la réception d’un message.")
-            }.listRowBackground(theme.canvas)
-            Section {
-                WeshValueRow("Transport", value: "Bluetooth")
-                WeshValueRow("Passerelles Internet", value: "Désactivées")
-            }.listRowBackground(theme.canvas)
-        }.scrollContentBackground(.hidden).navigationTitle("Connexion").weshCanvas(title: "Connexion")
+        VStack(spacing: 0) {
+            if chrome.noiseIdentityAvailability != .available {
+                WeshNoiseIdentityRecoveryPanel().padding(16)
+            }
+            PaveConnexionSheet(bluetooth: PaveBluetoothStatus(chrome.bluetoothState),
+                               peersInRange: peers.connectedMeshPeerCount,
+                               internet: WeshInternetMode.shared,
+                               onClose: { dismiss() })
+        }
     }
 }
 
@@ -2121,9 +2026,9 @@ private struct WeshPrivacySettings: View {
     // periphery:ignore - observed so the view re-renders when QR trust changes
     @ObservedObject private var trust = WeshQRTrust.shared
     @Environment(\.weshTheme) private var theme
-    @EnvironmentObject private var chrome: AppChromeModel
     @State private var forgetContacts = false
     @State private var forgetFeedback = ""
+    @AppStorage(NotificationPrivacySettings.hidePreviewsKey) private var hidePreviews = true
     var body: some View {
         Form {
             Section {
@@ -2137,14 +2042,11 @@ private struct WeshPrivacySettings: View {
                 }
             }.listRowBackground(theme.canvas)
             Section {
-                Button("Effacer les données de Wesh ici", role: .destructive) {
-                    chrome.requestPanicWipe()
-                }.frame(minHeight: 48)
-                    .accessibilityHint("Demande confirmation avant d’effacer l’identité, les contacts, l’historique, les brouillons et la note sur ce téléphone")
-            } header: { Text("Effacement local") } footer: {
-                Text("Les copies conservées par vos contacts ne sont pas effacées. En cas d’échec, les échanges restent suspendus et vous pouvez reprendre l’effacement.")
+                Toggle("Masquer les aperçus des notifications", isOn: $hidePreviews).frame(minHeight: 44)
+            } footer: {
+                Text("Les notifications disent qu’un message est arrivé, sans le texte ni le surnom de la personne.")
             }.listRowBackground(theme.canvas)
-        }.scrollContentBackground(.hidden).navigationTitle("Confidentialité").weshCanvas(title: "Confidentialité")
+        }.scrollContentBackground(.hidden).navigationTitle("Discrétion").weshCanvas(title: "Discrétion")
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
                 Button("Annuler", role: .cancel) {}
                 Button("Retirer", role: .destructive) {
@@ -2197,32 +2099,6 @@ private struct WeshMeetingNote: View {
         .alert("Effacer votre note ?", isPresented: $clear) {
             Button("Annuler", role: .cancel) {}
             Button("Effacer", role: .destructive) { store.clear(generation: generation) }
-        }
-    }
-}
-
-private struct WeshValueRow: View {
-    let title: String
-    let value: String
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.weshTheme) private var theme
-
-    init(_ title: String, value: String) {
-        self.title = title
-        self.value = value
-    }
-
-    var body: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                    Text(value).foregroundStyle(theme.secondary)
-                }
-                .accessibilityElement(children: .combine)
-            } else {
-                LabeledContent(title, value: value)
-            }
         }
     }
 }

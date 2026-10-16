@@ -1,3 +1,4 @@
+import CoreBluetooth
 import SwiftUI
 #if os(iOS)
 import UIKit
@@ -105,6 +106,15 @@ enum PaveInternetToggle: Equatable {
 
 enum PaveBluetoothStatus {
     case on, off, unauthorized
+
+    /// Anything but on or refused reads as off: the card then says how to turn it on.
+    init(_ state: CBManagerState) {
+        switch state {
+        case .poweredOn: self = .on
+        case .unauthorized: self = .unauthorized
+        default: self = .off
+        }
+    }
 }
 
 /// Connexion: Bluetooth, phones in range, the Internet switch and what it reveals.
