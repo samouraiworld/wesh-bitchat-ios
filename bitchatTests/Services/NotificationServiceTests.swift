@@ -98,6 +98,35 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
     }
 
+    func test_weshDropsLocationChannelAlertsAndTheirDeepLinks() {
+        let deliverer = RecordingNotificationRequestDeliverer()
+        let service = NotificationService(
+            isRunningTestsProvider: { false },
+            authorizer: RecordingNotificationAuthorizer(),
+            requestDeliverer: deliverer,
+            allowsLocationChannelNotifications: false
+        )
+
+        service.sendGeohashActivityNotification(geohash: "87yv", bodyPreview: "Someone is here")
+
+        XCTAssertTrue(deliverer.requests.isEmpty)
+    }
+
+    func test_onlyAllowlistedInAppDeepLinksAreHandled() throws {
+        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "wesh://share"))))
+        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "WESH://share"))))
+        for rejected in ["wesh://geohash/87yv", "bitchat://share", "https://share", "https://example.org",
+                         "wesh://user@share", "wesh://share:443", "tel:123", "wesh:share"] {
+            XCTAssertFalse(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: rejected))), rejected)
+        }
+    }
+
+    func test_weshSchemeIsRegisteredWithTheSystem() throws {
+        let types = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]])
+        let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        XCTAssertEqual(schemes, ["wesh"])
+    }
+
     func test_wrapperNotifications_setExpectedIdentifiersAndDeepLinks() {
         let deliverer = RecordingNotificationRequestDeliverer()
         let service = NotificationService(

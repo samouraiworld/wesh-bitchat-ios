@@ -125,6 +125,8 @@ final class NotificationService {
     }
 
     private let isRunningTestsProvider: () -> Bool
+    /// Wesh V1 has no location channels: their alerts and deep links are dropped.
+    private let allowsLocationChannelNotifications: Bool
     private let authorizer: NotificationAuthorizing
     private let requestDeliverer: NotificationRequestDelivering
     private let categoryRegistrar: NotificationCategoryRegistering
@@ -135,6 +137,7 @@ final class NotificationService {
     }
 
     private init() {
+        self.allowsLocationChannelNotifications = false
         self.hidePreviewsProvider = { NotificationPrivacySettings.hideMessagePreviews }
         self.isRunningTestsProvider = {
             let env = ProcessInfo.processInfo.environment
@@ -161,8 +164,10 @@ final class NotificationService {
         authorizer: NotificationAuthorizing,
         requestDeliverer: NotificationRequestDelivering,
         categoryRegistrar: NotificationCategoryRegistering = NoopNotificationCategoryRegistrar(),
-        hidePreviewsProvider: @escaping () -> Bool = { NotificationPrivacySettings.hideMessagePreviews }
+        hidePreviewsProvider: @escaping () -> Bool = { NotificationPrivacySettings.hideMessagePreviews },
+        allowsLocationChannelNotifications: Bool = true
     ) {
+        self.allowsLocationChannelNotifications = allowsLocationChannelNotifications
         self.isRunningTestsProvider = isRunningTestsProvider
         self.authorizer = authorizer
         self.requestDeliverer = requestDeliverer
@@ -256,6 +261,7 @@ final class NotificationService {
 
     // Geohash public chat notification with deep link to a specific geohash
     func sendGeohashActivityNotification(geohash: String, titlePrefix: String = "#", bodyPreview: String) {
+        guard allowsLocationChannelNotifications else { return }
         // The geohash itself is location data, so hiding previews withholds it
         // from the alert while leaving the deep link intact for the tap.
         let title = hidePreviews ? Redacted.geohashActivityTitle : "\(titlePrefix)\(geohash)"

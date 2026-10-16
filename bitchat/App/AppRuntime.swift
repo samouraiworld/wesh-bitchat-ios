@@ -186,7 +186,7 @@ final class AppRuntime: ObservableObject {
 
         // Only the scheme registered with the OS; `bitchat://verify` QR
         // payloads are parsed in-app and never arrive here.
-        if url.scheme == "wesh", url.host == "share" {
+        if WeshDeepLinks.isInternal(url), url.host == "share" {
             checkForSharedContent()
         }
     }
@@ -283,9 +283,12 @@ final class AppRuntime: ObservableObject {
             chatViewModel.startPrivateChat(with: peerID)
         }
 
-        if let deepLink = userInfo["deeplink"] as? String, let url = URL(string: deepLink) {
+        // A notification payload never reaches the OS URL router: only an
+        // allowlisted in-app link is handled, here.
+        if let deepLink = userInfo["deeplink"] as? String, let url = URL(string: deepLink),
+           WeshDeepLinks.isInternal(url) {
             record(.deepLinkOpened(deepLink))
-            openExternalURL(url)
+            handleOpenURL(url)
         }
     }
 
@@ -471,14 +474,6 @@ private extension AppRuntime {
         }
     }
 
-    func openExternalURL(_ url: URL) {
-        #if os(iOS)
-        UIApplication.shared.open(url)
-        #else
-        NSWorkspace.shared.open(url)
-        #endif
-    }
-
     func record(_ event: AppEvent) {
         Task {
             await events.emit(event)
@@ -520,5 +515,18 @@ extension AppRuntime {
         // uses.
         if !hasPrivateChatOpen, isLocationChannelActive { return .warnLocally }
         return .forwardToChat
+    }
+}
+
+/// Links the app accepts from the OS or from its own notification payloads.
+enum WeshDeepLinks {
+    static let scheme = "wesh"
+    static let hosts: Set<String> = ["share"]
+
+    static func isInternal(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == scheme, let host = url.host?.lowercased(), hosts.contains(host) else {
+            return false
+        }
+        return url.user == nil && url.password == nil && url.port == nil
     }
 }
