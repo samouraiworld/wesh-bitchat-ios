@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 /// Stable stored IDs keep existing appearance preferences while both metals use pure black.
 enum WeshAppearance: String, CaseIterable, Identifiable {
@@ -70,10 +75,7 @@ private struct WeshCanvas: ViewModifier {
         content
             .foregroundStyle(theme.ink)
             .background(theme.canvas.ignoresSafeArea())
-            .toolbarBackground(theme.canvas, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(theme.scheme, for: .navigationBar)
-            .navigationBarTitleDisplayMode(.inline)
+            .weshNavigationBar(theme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(title == "Wesh" ? "wesh" : title)
@@ -107,5 +109,56 @@ struct WeshSectionLabel: View {
         Text(text).font(.subheadline.weight(.semibold))
             .foregroundStyle(theme.secondary).textCase(nil)
             .padding(.top, 12).padding(.bottom, 4)
+    }
+}
+
+/// Wesh ships on iPhone only; these shims keep the inherited macOS target building.
+enum WeshPlatform {
+    #if os(iOS)
+    static let keyboardWillShow = UIResponder.keyboardWillShowNotification
+    static let keyboardWillHide = UIResponder.keyboardWillHideNotification
+    static let keyboardDidHide = UIResponder.keyboardDidHideNotification
+    #else
+    static let keyboardWillShow = Notification.Name("WeshPlatform.keyboardUnavailable")
+    static let keyboardWillHide = keyboardWillShow
+    static let keyboardDidHide = keyboardWillShow
+    #endif
+
+    static func copy(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
+    }
+}
+
+extension View {
+    @ViewBuilder func weshInlineTitle() -> some View {
+        #if os(iOS)
+        navigationBarTitleDisplayMode(.inline)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder func weshNoAutocapitalization() -> some View {
+        #if os(iOS)
+        textInputAutocapitalization(.never)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder func weshNavigationBar(_ theme: WeshTheme) -> some View {
+        #if os(iOS)
+        toolbarBackground(theme.canvas, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(theme.scheme, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+        #else
+        self
+        #endif
     }
 }

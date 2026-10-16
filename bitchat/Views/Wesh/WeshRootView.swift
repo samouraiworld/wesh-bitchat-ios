@@ -229,8 +229,8 @@ struct WeshRootView: View {
         } message: {
             Text("Cette action efface l’identité Wesh, les contacts et leurs vérifications, l’historique, les fichiers reçus, les brouillons et la note de rendez-vous conservés ici. Elle ne supprime pas les copies détenues par d’autres personnes ni leurs sauvegardes. Elle ne garantit pas un effacement physique du stockage. Cette action est irréversible.")
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+        .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillShow)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillHide)) { _ in keyboardVisible = false }
         .sheet(item: $sharedReview) { offer in
             WeshSharedContentSheet(runtime: runtime, payloadID: offer.id)
                 .environment(\.weshTheme, theme)
@@ -818,9 +818,9 @@ private struct WeshConversation: View {
                             WeshMessageBubble(message: message,
                                 own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender),
                                 privateChat: isPrivate).id(message.id)
-                                .accessibilityAction(named: "Copier le message") { UIPasteboard.general.string = message.content }
+                                .accessibilityAction(named: "Copier le message") { WeshPlatform.copy(message.content) }
                                 .contextMenu {
-                                    Button { UIPasteboard.general.string = message.content } label: {
+                                    Button { WeshPlatform.copy(message.content) } label: {
                                         Label("Copier", systemImage: "doc.on.doc")
                                     }
                                     if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
@@ -842,7 +842,7 @@ private struct WeshConversation: View {
             }
         }
         .weshCanvas(title: title)
-        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(title).weshInlineTitle()
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
                 if chrome.noiseIdentityAvailability != .available {
@@ -980,10 +980,10 @@ private struct WeshConversation: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillShow)) { _ in
             composerFeedback.keyboardWillShow()
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardDidHide)) { _ in
             composerFeedback.keyboardDidHide()
         }
         .onReceive(composerDrafts.changes) { change in
@@ -1212,7 +1212,7 @@ private struct WeshContactSheet: View {
                 DispatchQueue.main.async { accessibilityFocus = focusTarget }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Ajouter un contact").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Ajouter un contact").weshInlineTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fermer") { dismiss() }.frame(minHeight: 44) } }
             .onAppear { qr = chrome.noiseIdentityAvailability == .available ? verification.myQRString() : "" }
             .onChange(of: chrome.noiseIdentityAvailability) { availability in
@@ -1222,8 +1222,8 @@ private struct WeshContactSheet: View {
             .onReceive(renewal) { _ in qr = verification.myQRString() }
             .onReceive(progressRefresh) { _ in refreshProgress() }
             .onChange(of: trust.fingerprints) { _ in refreshProgress() }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in softwareKeyboardVisible = true }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillShow)) { _ in softwareKeyboardVisible = true }
+            .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardDidHide)) { _ in
                 softwareKeyboardVisible = false
                 guard waitingForKeyboard else { return }
                 waitingForKeyboard = false
@@ -1320,7 +1320,7 @@ private struct WeshContactSheet: View {
                 TextField("Lien QR", text: $pastedQR, axis: .vertical)
                     .lineLimit(2...5).focused($pastedQRFocused).padding(12)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.line, lineWidth: 1))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .weshNoAutocapitalization().autocorrectionDisabled()
                     .accessibilityLabel("Lien du QR de votre contact")
                     .accessibilityHint("À comparer en personne avec le lien affiché sur son téléphone")
                 Button("Vérifier ce QR") { scan(pastedQR) }
@@ -1415,7 +1415,7 @@ private struct WeshInformationSheet: View {
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(theme.contentInset)
             }
-            .navigationTitle(isPrivate ? "Discussion privée" : "À propos du salon").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(isPrivate ? "Discussion privée" : "À propos du salon").weshInlineTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
             .weshCanvas(title: isPrivate ? "Discussion privée" : "À propos du salon")
         }.weshSheetBackground()
@@ -1614,7 +1614,7 @@ private struct WeshContactDetails: View {
                 Text("Le blocage ignore ses prochains messages ici et conserve l’historique existant. Retirer le contact suspend les prochains envois privés ; un nouveau scan sera nécessaire. Les messages déjà transmis ne peuvent pas être rappelés.")
             }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Contact").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Contact")
+            .navigationTitle("Contact").weshInlineTitle().weshCanvas(title: "Contact")
             .toolbar { if inSheet { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } } }
             .alert("Bloquer ce contact ?", isPresented: $blocking) {
                 Button("Annuler", role: .cancel) {}
@@ -1681,7 +1681,7 @@ private struct WeshNearbyPeople: View {
             } footer: { Text("Cette liste n’indique ni distance ni réception des messages. Un surnom ne prouve pas une identité. Pour débloquer : Réglages → Contacts bloqués.") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Participants connus").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Participants connus")
+            .navigationTitle("Participants connus").weshInlineTitle().weshCanvas(title: "Participants connus")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
             .alert("Bloquer cette personne ?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
                 Button("Annuler", role: .cancel) { selected = nil }
@@ -1741,7 +1741,7 @@ private struct WeshBlockedContacts: View {
             } footer: { Text("Débloquer ne remplace pas une vérification QR. Les messages des autres téléphones ne sont pas modifiés.") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Contacts bloqués").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Contacts bloqués")
+            .navigationTitle("Contacts bloqués").weshInlineTitle().weshCanvas(title: "Contacts bloqués")
             .alert("Débloquer cette personne ?", isPresented: Binding(get: { selectedFingerprint != nil }, set: { if !$0 { selectedFingerprint = nil } })) {
                 Button("Annuler", role: .cancel) { selectedFingerprint = nil }
                 Button("Débloquer") {
@@ -1790,7 +1790,7 @@ private struct WeshAppearanceSettings: View {
                 Text("Argent ou or, sur noir pur. Le QR reste noir sur blanc pour être facile à scanner.")
                     .font(.subheadline).foregroundStyle(theme.secondary)
             }.padding(theme.contentInset)
-        }.navigationTitle("Apparence").navigationBarTitleDisplayMode(.inline).weshCanvas(title: "Apparence")
+        }.navigationTitle("Apparence").weshInlineTitle().weshCanvas(title: "Apparence")
     }
 }
 
@@ -1825,8 +1825,8 @@ private struct WeshProfileEditor: View {
                     scroll.scrollTo("profileFeedback", anchor: .center)
                     DispatchQueue.main.async { feedbackFocused = true }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in softwareKeyboardVisible = true }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillShow)) { _ in softwareKeyboardVisible = true }
+                .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardDidHide)) { _ in
                     softwareKeyboardVisible = false
                     if waitingForKeyboard { waitingForKeyboard = false; focusRevision += 1 }
                 }
