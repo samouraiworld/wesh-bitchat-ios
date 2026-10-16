@@ -35,13 +35,15 @@ enum PaveDisplayName {
     static let neverMixTogether = ["Latin", "Greek", "Cyrillic", "Armenian"]
     static let alwaysUnnamed = ["Cherokee", "Lisu", "Coptic", "Canadian_Aboriginal", "Old_Italic", "Tifinagh", "Osage"]
 
-    /// Every Unicode script name (PropertyValueAliases, Unicode 17). Swift has no script property,
+    /// Every Unicode script name (PropertyValueAliases, Unicode 16). Swift has no script property,
     /// so letters are placed with ICU `\p{Script=…}` classes; a letter in none of them, such as one
     /// of a script newer than the system's ICU, is refused (see `PaveScriptClassifier`).
+    /// A new script (Unicode 17 and later) joins this list only after a confusables review;
+    /// until then its letters stay refused, failing closed.
     static let unicodeScripts = [
         "Adlam", "Ahom", "Anatolian_Hieroglyphs", "Arabic", "Armenian", "Avestan", "Balinese", "Bamum",
-        "Bassa_Vah", "Batak", "Bengali", "Beria_Erfe", "Bhaiksuki", "Bopomofo", "Brahmi", "Braille", "Buginese", "Buhid",
-        "Canadian_Aboriginal", "Carian", "Caucasian_Albanian", "Chakma", "Cham", "Cherokee", "Chisoi", "Chorasmian",
+        "Bassa_Vah", "Batak", "Bengali", "Bhaiksuki", "Bopomofo", "Brahmi", "Braille", "Buginese", "Buhid",
+        "Canadian_Aboriginal", "Carian", "Caucasian_Albanian", "Chakma", "Cham", "Cherokee", "Chorasmian",
         "Common", "Coptic", "Cuneiform", "Cypriot", "Cypro_Minoan", "Cyrillic", "Deseret", "Devanagari",
         "Dives_Akuru", "Dogra", "Duployan", "Egyptian_Hieroglyphs", "Elbasan", "Elymaic", "Ethiopic", "Garay",
         "Georgian", "Glagolitic", "Gothic", "Grantha", "Greek", "Gujarati", "Gunjala_Gondi", "Gurmukhi",
@@ -56,9 +58,9 @@ enum PaveDisplayName {
         "Old_North_Arabian", "Old_Permic", "Old_Persian", "Old_Sogdian", "Old_South_Arabian", "Old_Turkic",
         "Old_Uyghur", "Oriya", "Osage", "Osmanya", "Pahawh_Hmong", "Palmyrene", "Pau_Cin_Hau", "Phags_Pa",
         "Phoenician", "Psalter_Pahlavi", "Rejang", "Runic", "Samaritan", "Saurashtra", "Sharada", "Shavian",
-        "Siddham", "Sidetic", "SignWriting", "Sinhala", "Sogdian", "Sora_Sompeng", "Soyombo", "Sundanese", "Sunuwar",
-        "Syloti_Nagri", "Syriac", "Tagalog", "Tagbanwa", "Tai_Le", "Tai_Tham", "Tai_Viet", "Tai_Yo", "Takri", "Tamil",
-        "Tangsa", "Tangut", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Tirhuta", "Todhri", "Tolong_Siki", "Toto",
+        "Siddham", "SignWriting", "Sinhala", "Sogdian", "Sora_Sompeng", "Soyombo", "Sundanese", "Sunuwar",
+        "Syloti_Nagri", "Syriac", "Tagalog", "Tagbanwa", "Tai_Le", "Tai_Tham", "Tai_Viet", "Takri", "Tamil",
+        "Tangsa", "Tangut", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Tirhuta", "Todhri", "Toto",
         "Tulu_Tigalari", "Ugaritic", "Vai", "Vithkuqi", "Wancho", "Warang_Citi", "Yezidi", "Yi", "Zanabazar_Square"
     ]
 

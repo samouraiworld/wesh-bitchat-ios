@@ -245,4 +245,11 @@ struct PaveDisplayNameTests {
         #expect(!unknownName.knows("Not_A_Script"))
         #expect(!PaveDisplayName.hasRefusedScripts("Nora", classifier: unknownName))
     }
+
+    @Test func unreviewedScriptsStayUnknown() {
+        // Unicode 17 scripts await a confusables review: their letters are refused like any unknown one.
+        for script in ["Beria_Erfe", "Chisoi", "Sidetic", "Tai_Yo", "Tolong_Siki"] {
+            #expect(!PaveDisplayName.unicodeScripts.contains(script), "\(script) was admitted without review")
+        }
+    }
 }
