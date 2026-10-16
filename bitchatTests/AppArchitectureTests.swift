@@ -515,7 +515,6 @@ struct AppArchitectureTests {
     func peerListModelSurfacesRecentChatsForAbsentPeers() async {
         let viewModel = makeArchitectureViewModel()
         let offlinePeerID = PeerID(str: "00000000000000aa")
-        let groupPeerID = PeerID(groupID: Data(repeating: 0xAB, count: 16))
 
         // A DM thread from a passerby who has since gone offline: not in
         // allPeers, not a favorite — previously unreachable once read.
@@ -531,19 +530,6 @@ struct AppArchitectureTests {
                 senderPeerID: offlinePeerID
             )
         ], for: offlinePeerID)
-        // Group threads have their own section and must not duplicate here.
-        viewModel.seedPrivateChat([
-            BitchatMessage(
-                id: "gm-1",
-                sender: "member",
-                content: "group hello",
-                timestamp: Date(timeIntervalSince1970: 200),
-                isRelay: false,
-                isPrivate: true,
-                recipientNickname: "me",
-                senderPeerID: groupPeerID
-            )
-        ], for: groupPeerID)
 
         let peerListModel = PeerListModel(
             chatViewModel: viewModel,

@@ -109,7 +109,7 @@ struct WeshNativeUITests {
         #expect(feedback.readyFocus == nil)
     }
 
-    @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "groups", "outbox"]) @MainActor
+    @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "outbox"]) @MainActor
     func panicFileStoresRejectUnlinkFailureAndAllowVerifiedRetry(kind: String) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("checked-wipe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -135,9 +135,6 @@ struct WeshNativeUITests {
             wipe = { store.wipe() }
         case "board":
             let store = BoardStore(fileURL: url, wipeFileManager: files)
-            wipe = { store.wipe() }
-        case "groups":
-            let store = GroupStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         default:
             let store = MessageOutboxStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
@@ -190,7 +187,7 @@ struct WeshNativeUITests {
         let wipes = PanicPersistentStoreWipes(
             courier: { wipe("courier") }, bridge: { wipe("bridge") },
             publicArchive: { wipe("archive") }, prekeys: { wipe("prekeys") },
-            board: { wipe("board") }, sharedContent: { wipe("share") }
+            board: { wipe("board") }, legacyGroups: { wipe("groups") }, sharedContent: { wipe("share") }
         )
         let keychain = MockKeychain()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("global-checked-wipe-\(UUID().uuidString)", isDirectory: true)
@@ -200,7 +197,6 @@ struct WeshNativeUITests {
         try Data("synthetic persisted metadata".utf8).write(to: url)
         let files = WeshWipeFileManager()
         files.refuseRemoval = true
-        let group = failing == "groups" ? GroupStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
         let outbox = failing == "outbox" ? MessageOutboxStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
         let transport = MockTransport()
         var committed = 0
@@ -210,10 +206,10 @@ struct WeshNativeUITests {
         let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: MockIdentityManager(keychain), transport: transport, outboxStore: outbox,
             panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true,
-            panicPersistentStoreWipes: wipes, groupStore: group)
+            panicPersistentStoreWipes: wipes)
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
-        #expect(attempts == ["courier", "bridge", "archive", "prekeys", "board", "share"])
+        #expect(attempts == ["courier", "bridge", "archive", "groups", "prekeys", "board", "share"])
         #expect(committed == 0 && vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts)
         #expect(vm.weshMeetingNote.isSuspended)
@@ -223,7 +219,7 @@ struct WeshNativeUITests {
         #expect(vm.panicClearAllData())
         #expect(committed == 1 && !vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts + 1)
-        #expect(attempts.count == 6)
+        #expect(attempts.count == 7)
     }
 
     @Test @MainActor func meetingNoteWipeRemovesEveryPersistedFieldAndRejectsOldEditorEvents() throws {
