@@ -2,7 +2,8 @@
 // Your Apple Developer Team ID - https://stackoverflow.com/a/18727947
 DEVELOPMENT_TEAM = ABC123
 
-// Unique bundle id to be able to register and run locally
+// Bundle and App Group ids are unique across all Apple teams. Outside the
+// Wesh team, replace both with ids registered to your own team.
 PRODUCT_BUNDLE_IDENTIFIER = org.samouraiworld.wesh.ios.dev
 
 // App and share extension must use an App Group registered to your team.
