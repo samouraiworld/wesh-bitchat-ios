@@ -476,7 +476,6 @@ struct NostrTransportTests {
         withExtendedLifetime(transport) {}
     }
 
-    @MainActor
     @Test("Wesh: only QR contacts with a bound npub, only while Internet is On, never favorites")
     @MainActor
     func weshReachabilityFollowsQRContactsAndInternetState() async throws {
@@ -567,6 +566,7 @@ struct NostrTransportTests {
         #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: alice.publicKeyHex, contacts: twoHolders, blockedFingerprints: []) == nil)
     }
 
+    @MainActor
     private func makeDependencies(
         notificationCenter: NotificationCenter = NotificationCenter(),
         loadFavorites: @escaping @MainActor () -> [Data: FavoriteRelationship] = { [:] },
