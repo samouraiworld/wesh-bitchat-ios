@@ -124,13 +124,20 @@ final class WeshQRTrust: ObservableObject {
         return retryWipe()
     }
 
-    /// No file work until the pending-wipe marker is confirmed in the Keychain.
+    /// Marks the wipe pending (Keychain intent, else a sentinel file), then
+    /// always destroys. True only when destruction is verified and a marker
+    /// was in place throughout; anything else stays unavailable and retries.
     private func retryWipe() -> Bool {
-        guard persistIntent() else {
+        guard let storage else { return false }
+        let keychainMarked = persistIntent()
+        let sentinelMarked = storage.markWipePending()
+        let erased = finishWipe()
+        guard erased, keychainMarked || sentinelMarked else {
+            if erased { intent.wipe = true }
             storageState = .unavailable
             return false
         }
-        return finishWipe()
+        return true
     }
 
     private var snapshot: Snapshot {
@@ -186,10 +193,10 @@ final class WeshQRTrust: ObservableObject {
         do { try storage.wipe() } catch { erased = false }
         erased = removeLegacy() && erased
         if erased {
-            // Leaving the marker would erase contacts enrolled after this wipe.
+            // Leaving a marker would erase contacts enrolled after this wipe.
             let pending = intent
             intent = Intent()
-            if !persistIntent() {
+            if !(persistIntent() && storage.clearWipeSentinel()) {
                 intent = pending
                 erased = false
             }
@@ -216,6 +223,7 @@ final class WeshQRTrust: ObservableObject {
                 intent.wipe = intent.wipe || stored.wipe
                 intent.revokedFingerprints.formUnion(stored.revokedFingerprints)
             }
+            if try storage.isWipePending() { intent.wipe = true }
             if intent.wipe {
                 // A list ordered deleted is never applied; retry the wipe.
                 apply(Snapshot())

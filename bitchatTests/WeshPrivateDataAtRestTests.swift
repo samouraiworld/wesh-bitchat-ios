@@ -229,22 +229,47 @@ struct WeshPrivateDataAtRestTests {
         #expect(WeshQRTrust(storage: fixture.store()).contacts.map(\.nickname) == ["Bob"])
     }
 
-    @Test func wipeDoesNoFileWorkUntilItsMarkerIsConfirmed() throws {
+    @Test func wipeDestroysEvenWhenNoMarkerCanBeWrittenButReportsFailure() throws {
         let fixture = Fixture()
         let trust = WeshQRTrust(storage: fixture.store())
         #expect(trust.record(sessionKey: alice, nickname: "Alice"))
+        // Neither the Keychain intent nor the sentinel file can be written.
         fixture.keychain.identitySaveFault = { key, _, _ in key == "record.test.intent" ? .deviceLocked : nil }
+        fixture.failWrites = true
 
         #expect(!trust.clear())
         #expect(trust.contacts.isEmpty && trust.storageState == .unavailable)
-        #expect(FileManager.default.fileExists(atPath: fixture.url.path))
-        trust.reloadIfNeeded()
-        #expect(trust.contacts.isEmpty && trust.storageState == .unavailable)
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(fixture.keychain.getIdentityKey(forKey: "record.test") == nil)
         #expect(!trust.record(sessionKey: bob, nickname: "Bob"))
 
         fixture.keychain.identitySaveFault = nil
+        fixture.failWrites = false
         trust.reloadIfNeeded()
         #expect(trust.storageState == .available && trust.contacts.isEmpty)
+        #expect(trust.record(sessionKey: bob, nickname: "Bob"))
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.map(\.nickname) == ["Bob"])
+    }
+
+    @Test func failedDestructionKeepsTheSentinelWhenTheKeychainIsUnavailable() throws {
+        let fixture = Fixture()
+        #expect(WeshQRTrust(storage: fixture.store()).record(sessionKey: alice, nickname: "Alice"))
+        let trust = WeshQRTrust(storage: fixture.store())
+        fixture.keychain.identitySaveFault = { key, _, _ in key == "record.test.intent" ? .deviceLocked : nil }
+        fixture.failRemovals = true
+
+        #expect(!trust.clear())
+        #expect(FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(try fixture.store().isWipePending())
+        // A relaunch with a readable Keychain still refuses the old list.
+        fixture.keychain.identitySaveFault = nil
+        let relaunched = WeshQRTrust(storage: fixture.store())
+        #expect(relaunched.contacts.isEmpty && relaunched.storageState == .unavailable)
+
+        fixture.failRemovals = false
+        relaunched.reloadIfNeeded()
+        #expect(relaunched.storageState == .available && relaunched.contacts.isEmpty)
+        #expect(!(try fixture.store().isWipePending()))
         #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
     }
 
@@ -329,18 +354,35 @@ struct WeshPrivateDataAtRestTests {
         #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note == "Nouvelle")
     }
 
-    @Test func noteEraseDoesNoFileWorkUntilItsMarkerIsConfirmed() throws {
+    @Test func noteEraseDestroysEvenWhenNoMarkerCanBeWrittenButReportsFailure() throws {
         let fixture = Fixture()
         let note = WeshMeetingNoteStore(storage: fixture.store())
         #expect(note.edit(\.note, value: "Rendez-vous", generation: note.generation))
         fixture.keychain.identitySaveFault = { key, _, _ in key == "record.test.intent" ? .deviceLocked : nil }
+        fixture.failWrites = true
         #expect(!note.clear(generation: note.generation))
         #expect(note.content.note.isEmpty && note.isSuspended)
-        #expect(FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+
         fixture.keychain.identitySaveFault = nil
+        fixture.failWrites = false
         note.reloadIfNeeded()
         #expect(!note.isSuspended && note.storageState == .available)
-        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(note.edit(\.note, value: "Nouvelle", generation: note.generation))
+        #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note == "Nouvelle")
+    }
+
+    @Test func failedNoteDestructionKeepsTheSentinelAndRefusesTheOldNote() throws {
+        let fixture = Fixture()
+        let note = WeshMeetingNoteStore(storage: fixture.store())
+        #expect(note.edit(\.note, value: "Secret", generation: note.generation))
+        fixture.keychain.identitySaveFault = { key, _, _ in key == "record.test.intent" ? .deviceLocked : nil }
+        fixture.failRemovals = true
+        #expect(!note.clear(generation: note.generation))
+        #expect(try fixture.store().isWipePending())
+        fixture.keychain.identitySaveFault = nil
+        let relaunched = WeshMeetingNoteStore(storage: fixture.store())
+        #expect(relaunched.content.note.isEmpty && relaunched.isSuspended)
     }
 
     @Test func pendingNoteEraseInvalidatesOldEditorsAndResumesOnlyAfterConfirmation() throws {

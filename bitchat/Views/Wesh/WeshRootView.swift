@@ -44,17 +44,20 @@ final class WeshMeetingNoteStore: ObservableObject {
     /// erase is retried by the next load instead of the note coming back.
     private static func erase(storage: WeshSealedStore?, legacyDefaults: UserDefaults?) -> Bool {
         var erased = true
+        var marked = true
         if let storage {
-            // No file work until the pending-wipe marker is confirmed.
-            guard storage.writeIntent(pendingWipeMarker) else { return false }
+            // Mark first (Keychain, else a sentinel file), then always destroy.
+            let keychainMarked = storage.writeIntent(pendingWipeMarker)
+            let sentinelMarked = storage.markWipePending()
+            marked = keychainMarked || sentinelMarked
             do { try storage.wipe() } catch { erased = false }
         }
         if let legacyDefaults {
             legacyKeys.forEach { legacyDefaults.removeObject(forKey: $0) }
             erased = erased && legacyKeys.allSatisfy { legacyDefaults.object(forKey: $0) == nil }
         }
-        if erased, let storage { erased = storage.writeIntent(nil) }
-        return erased
+        if erased, let storage { erased = storage.writeIntent(nil) && storage.clearWipeSentinel() }
+        return erased && marked
     }
     private static let pendingWipeMarker = Data("wipe".utf8)
 
@@ -116,7 +119,7 @@ final class WeshMeetingNoteStore: ObservableObject {
     private func load() {
         guard let storage else { return }
         do {
-            if try storage.readIntent() != nil {
+            if try storage.readIntent() != nil || storage.isWipePending() {
                 // A note ordered deleted is never shown again; retry the erase.
                 retryPendingErase()
                 return

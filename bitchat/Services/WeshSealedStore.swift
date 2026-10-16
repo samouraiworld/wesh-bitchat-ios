@@ -116,6 +116,37 @@ final class WeshSealedStore {
         return stored == data
     }
 
+    // MARK: Wipe sentinel
+
+    /// Fallback pending-wipe marker that does not depend on the Keychain: a
+    /// small file beside the record, excluded from backup like the record.
+    private var sentinelURL: URL { fileURL.appendingPathExtension("wipe-pending") }
+
+    @discardableResult
+    func markWipePending() -> Bool {
+        do {
+            try files.write(Data("wipe".utf8), sentinelURL)
+            return try isWipePending()
+        } catch { return false }
+    }
+
+    /// Throws when presence cannot be established; never reads as "absent".
+    func isWipePending() throws -> Bool {
+        do {
+            _ = try files.read(sentinelURL)
+            return true
+        } catch {
+            if Self.isMissing(error) { return false }
+            throw Failure.storageUnavailable
+        }
+    }
+
+    func clearWipeSentinel() -> Bool {
+        do { try files.remove(sentinelURL) }
+        catch { if !Self.isMissing(error) { return false } }
+        return (try? isWipePending()) == false
+    }
+
     private func readBlob() throws -> Data? {
         do {
             let data = try files.read(fileURL)
