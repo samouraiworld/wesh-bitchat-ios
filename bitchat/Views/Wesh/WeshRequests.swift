@@ -62,6 +62,8 @@ final class WeshInboundRequests: ObservableObject {
         let date = now()
         deleted = deleted.filter { date.timeIntervalSince($0.value) < Self.deletedMemory }
         guard deleted[fingerprint + "|" + message.id] == nil else { return false }
+        // Sender-chosen: shown in the list, the detail and the block flow.
+        let nickname = WeshDisplayName.clean(message.sender, fallback: "Participant")
         let shown = BitchatMessage(
             id: message.id, sender: message.sender,
             content: WeshIncomingMediaPolicy.displayText(message.content),
@@ -70,7 +72,7 @@ final class WeshInboundRequests: ObservableObject {
         )
         if let index = requests.firstIndex(where: { $0.id == fingerprint }) {
             guard !requests[index].messages.contains(where: { $0.id == message.id }) else { return false }
-            requests[index].nickname = message.sender
+            requests[index].nickname = nickname
             requests[index].messages.append(shown)
             if requests[index].messages.count > Self.maxMessagesPerRequest {
                 requests[index].messages.removeFirst(requests[index].messages.count - Self.maxMessagesPerRequest)
@@ -84,7 +86,7 @@ final class WeshInboundRequests: ObservableObject {
                 .min(by: { requests[$0].receivedAt < requests[$1].receivedAt }) else { return false }
             requests.remove(at: oldest)
         }
-        requests.append(Request(noiseKey: noiseKey, nickname: message.sender, messages: [shown], receivedAt: date))
+        requests.append(Request(noiseKey: noiseKey, nickname: nickname, messages: [shown], receivedAt: date))
         return true
     }
 

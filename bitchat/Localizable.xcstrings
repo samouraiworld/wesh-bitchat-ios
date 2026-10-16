@@ -97916,6 +97916,192 @@
           }
         }
       }
+    },
+    "wesh.verify.contact_not_saved" : {
+      "comment" : "Shown after a QR scan when the verified contact could not be saved on this phone",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تعذّر حفظ جهة الاتصال على هذا الهاتف. أعد المسح."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "এই ফোনে পরিচিতিটি সংরক্ষণ করা যায়নি। আবার স্ক্যান করুন।"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Kontakt konnte auf diesem Telefon nicht gespeichert werden. Scannen Sie erneut."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The contact could not be saved on this phone. Scan again."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo guardar el contacto en este teléfono. Vuelve a escanear."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مخاطب در این تلفن ذخیره نشد. دوباره اسکن کنید."
+          }
+        },
+        "fil" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hindi ma-save ang contact sa teleponong ito. Mag-scan muli."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le contact n’a pas pu être enregistré sur ce téléphone. Réessayez le scan."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "לא ניתן היה לשמור את איש הקשר בטלפון הזה. סרקו שוב."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इस फ़ोन पर संपर्क सहेजा नहीं जा सका। फिर से स्कैन करें।"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontak tidak dapat disimpan di ponsel ini. Pindai lagi."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossibile salvare il contatto su questo telefono. Ripeti la scansione."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この端末に連絡先を保存できませんでした。もう一度スキャンしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 휴대폰에 연락처를 저장하지 못했습니다. 다시 스캔하세요."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kenalan tidak dapat disimpan pada telefon ini. Imbas semula."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो फोनमा सम्पर्क सुरक्षित गर्न सकिएन। फेरि स्क्यान गर्नुहोस्।"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Het contact kon niet op deze telefoon worden opgeslagen. Scan opnieuw."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nie udało się zapisać kontaktu na tym telefonie. Zeskanuj ponownie."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível guardar o contacto neste telemóvel. Volte a digitalizar."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível salvar o contato neste celular. Escaneie novamente."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось сохранить контакт на этом телефоне. Отсканируйте ещё раз."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontakten kunde inte sparas på den här telefonen. Skanna igen."
+          }
+        },
+        "ta" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "இந்த ஃபோனில் தொடர்பைச் சேமிக்க முடியவில்லை. மீண்டும் ஸ்கேன் செய்யவும்."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ไม่สามารถบันทึกผู้ติดต่อในโทรศัพท์เครื่องนี้ได้ โปรดสแกนอีกครั้ง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kişi bu telefona kaydedilemedi. Yeniden tarayın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не вдалося зберегти контакт на цьому телефоні. Відскануйте ще раз."
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اس فون پر رابطہ محفوظ نہیں ہو سکا۔ دوبارہ اسکین کریں۔"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể lưu liên hệ trên điện thoại này. Hãy quét lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在此手机上保存该联系人。请重新扫描。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法在此手機上儲存該聯絡人。請重新掃描。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

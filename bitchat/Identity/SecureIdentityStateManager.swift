@@ -99,6 +99,9 @@ protocol SecureIdentityStateManagerProtocol {
     // MARK: Secure Loading/Saving
     var isPersistenceAvailable: Bool { get }
     var hasPendingPersistenceChanges: Bool { get }
+    /// True when stored data exists but cannot be decoded with its key. A
+    /// retry cannot fix this; only an explicit local wipe can.
+    var persistenceRequiresRecovery: Bool { get }
     func forceSave()
     
     // MARK: Social Identity Management
@@ -156,6 +159,7 @@ protocol SecureIdentityStateManagerProtocol {
 extension SecureIdentityStateManagerProtocol {
     var isPersistenceAvailable: Bool { true }
     var hasPendingPersistenceChanges: Bool { false }
+    var persistenceRequiresRecovery: Bool { false }
 }
 
 /// Singleton manager for secure identity state persistence and retrieval.
@@ -181,6 +185,7 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
     private var pendingSave = false
     private var encryptionKey: SymmetricKey?
     private var cacheIsLoaded = false
+    private var loadRequiresRecovery = false
 
     /// False while the persisted key/cache cannot be read or decoded. Persistent
     /// mutations are refused until forceSave() successfully retries the load.
@@ -194,6 +199,10 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
     /// Callers must not announce durable success until this becomes false.
     var hasPendingPersistenceChanges: Bool {
         queue.sync { pendingSave }
+    }
+
+    var persistenceRequiresRecovery: Bool {
+        queue.sync { !cacheIsLoaded && loadRequiresRecovery }
     }
 
     init(_ keychain: KeychainManagerProtocol) {
@@ -225,19 +234,23 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
     /// Called during init or under the queue's exclusive barrier. Unknown or
     /// malformed storage is preserved for recovery, never treated as first use.
     private func loadIdentityCache() {
+        loadRequiresRecovery = false
         if encryptionKey == nil {
             switch keychain.getIdentityKeyWithResult(forKey: encryptionKeyName) {
             case .success(let data):
                 guard data.count == 32 else {
                     SecureLogger.warning("Invalid identity cache encryption key; persistence unavailable", category: .security)
+                    loadRequiresRecovery = true
                     return
                 }
                 encryptionKey = SymmetricKey(data: data)
             case .itemNotFound:
                 // A cache without its key is a partial/lost state, not first
                 // use. An unreadable cache cannot establish first use either.
-                guard case .itemNotFound = keychain.getIdentityKeyWithResult(forKey: cacheKey) else {
+                let cacheRead = keychain.getIdentityKeyWithResult(forKey: cacheKey)
+                guard case .itemNotFound = cacheRead else {
                     SecureLogger.warning("Identity cache key missing without confirmed empty storage; preserving cache", category: .security)
+                    if case .success = cacheRead { loadRequiresRecovery = true }
                     return
                 }
                 let newKey = SymmetricKey(size: .bits256)
@@ -269,6 +282,7 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
                 cacheIsLoaded = true
             } catch {
                 SecureLogger.warning("Unreadable identity cache preserved; persistence unavailable", category: .security)
+                loadRequiresRecovery = true
             }
         case .deviceLocked, .authenticationFailed, .accessDenied, .otherError:
             SecureLogger.warning("Identity cache unavailable; persistence deferred", category: .security)

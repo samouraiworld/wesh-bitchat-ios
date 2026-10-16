@@ -227,27 +227,28 @@ struct WeshNativeUITests {
     }
 
     @Test @MainActor func meetingNoteWipeRemovesEveryPersistedFieldAndRejectsOldEditorEvents() throws {
-        let suite = "wesh-note-wipe-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = WeshMeetingNoteStore(defaults: defaults)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("wesh-note-wipe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keychain = MockKeychain()
+        func sealed() -> WeshSealedStore {
+            WeshSealedStore(keychain: keychain, fileURL: root.appendingPathComponent("note.enc"),
+                            keyName: "note.test", context: "wesh.note.test")
+        }
+        let store = WeshMeetingNoteStore(storage: sealed())
         let oldGeneration = store.generation
         #expect(store.edit(\.title, value: "Titre synthétique", generation: oldGeneration))
         #expect(store.edit(\.place, value: "Repère synthétique", generation: oldGeneration))
         #expect(store.edit(\.note, value: "Note synthétique", generation: oldGeneration))
         #expect(store.editDate(123, generation: oldGeneration))
-        #expect(defaults.string(forKey: "wesh.meeting.title") == "Titre synthétique")
-        #expect(defaults.string(forKey: "wesh.meeting.place") == "Repère synthétique")
-        #expect(defaults.string(forKey: "wesh.meeting.note") == "Note synthétique")
-        #expect(defaults.double(forKey: "wesh.meeting.date") == 123)
+        let persisted = WeshMeetingNoteStore(storage: sealed()).content
+        #expect(persisted == .init(title: "Titre synthétique", place: "Repère synthétique", note: "Note synthétique", date: 123))
         store.suspendForPanic()
         let suspendedGeneration = store.generation
         #expect(store.content.title.isEmpty && store.content.place.isEmpty && store.content.note.isEmpty)
         #expect(!store.edit(\.note, value: "Événement pendant effacement", generation: suspendedGeneration))
         #expect(store.wipeForPanic())
-        for key in ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"] {
-            #expect(defaults.object(forKey: key) == nil)
-        }
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("note.enc").path))
+        #expect(keychain.getIdentityKey(forKey: "note.test") == nil)
         store.completePanic()
         #expect(store.edit(\.note, value: "Nouvelle note", generation: store.generation))
         for generation in [oldGeneration, suspendedGeneration] {
@@ -258,10 +259,8 @@ struct WeshNativeUITests {
             #expect(!store.clear(generation: generation))
         }
         #expect(store.content.note == "Nouvelle note")
-        #expect(defaults.string(forKey: "wesh.meeting.note") == "Nouvelle note")
-        #expect(defaults.object(forKey: "wesh.meeting.title") == nil)
-        #expect(defaults.object(forKey: "wesh.meeting.place") == nil)
-        #expect(defaults.object(forKey: "wesh.meeting.date") == nil)
+        let reloaded = WeshMeetingNoteStore(storage: sealed()).content
+        #expect(reloaded.note == "Nouvelle note" && reloaded.title.isEmpty && reloaded.place.isEmpty)
     }
 
     @Test @MainActor func clearingOneMeetingNoteAlsoInvalidatesItsOldBindings() {
@@ -797,6 +796,24 @@ struct WeshNativeUITests {
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: verified, locallyVerified: false))
     }
 
+    @Test @MainActor func panicCancelsAQRScanStartedBeforeTheWipe() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let snapshots = [TransportPeerSnapshot(peerID: fixture.shortID, nickname: "Synthetic peer", isConnected: true,
+                                                   noisePublicKey: fixture.key, lastSeen: Date())]
+            fixture.transport.updatePeerSnapshots(snapshots)
+            fixture.vm.unifiedPeerService.didUpdatePeerSnapshots(snapshots)
+            let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: fixture.key.hexEncodedString(),
+                signKeyHex: String(repeating: "ab", count: 32), npub: nil,
+                nickname: "Synthetic peer", ts: 0, nonceB64: "", sigHex: "")
+            try #require(fixture.vm.verificationCoordinator.beginQRVerification(with: qr))
+            try #require(fixture.vm.weshQRAttemptNonce(for: fixture.key) != nil)
+            fixture.vm.panicClearAllData()
+            // A challenge still waiting for a session would otherwise go out
+            // from the new identity and re-enroll the wiped contact.
+            #expect(fixture.vm.weshQRAttemptNonce(for: fixture.key) == nil)
+        }
+    }
+
     @Test @MainActor func unverifiedPrivateSenderBecomesASilentRequestUntilQRVerification() async throws {
         WeshInboundRequests.shared.clear()
         defer { WeshInboundRequests.shared.clear() }
@@ -879,6 +896,14 @@ struct WeshNativeUITests {
         #expect(requests.requests.count == WeshInboundRequests.maxRequests - 1)
         requests.clear()
         #expect(requests.requests.isEmpty)
+    }
+
+    @Test @MainActor func requestNamesAreSanitizedBeforeDisplayOrBlocking() {
+        let requests = WeshInboundRequests()
+        let message = BitchatMessage(id: "n1", sender: "Ad\u{202E}min", content: "texte", timestamp: Date(), isRelay: false,
+                                     originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        #expect(requests.add(message, from: Data(repeating: 0x54, count: 32)))
+        #expect(requests.requests.first?.nickname == "Participant")
     }
 
     @Test @MainActor func deletedRequestStaysDeletedWhenTheSenderRetriesTheSameMessage() {
@@ -976,10 +1001,14 @@ struct WeshNativeUITests {
     }
 
     @Test @MainActor func contactRemovalRevokesOnlyExactKeyAndPersists() throws {
-        let suite = "wesh-contact-removal-" + UUID().uuidString
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let trust = WeshQRTrust(defaults: defaults)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("wesh-contact-removal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keychain = MockKeychain()
+        func sealed() -> WeshSealedStore {
+            WeshSealedStore(keychain: keychain, fileURL: root.appendingPathComponent("contacts.enc"),
+                            keyName: "contacts.test", context: "wesh.contacts.test")
+        }
+        let trust = WeshQRTrust(storage: sealed())
         let first = Data(repeating: 11, count: 32)
         let second = Data(repeating: 12, count: 32)
         trust.record(sessionKey: first, nickname: "Même surnom")
@@ -988,7 +1017,7 @@ struct WeshNativeUITests {
         #expect(!trust.remove(sessionKey: Data(repeating: 13, count: 32)))
         #expect(trust.contacts.count == 2)
         #expect(trust.remove(sessionKey: first))
-        let reloaded = WeshQRTrust(defaults: defaults)
+        let reloaded = WeshQRTrust(storage: sealed())
         #expect(reloaded.contacts.map(\.noiseKeyHex) == [second.hexEncodedString()])
         #expect(!WeshQRTrust.canSend(sessionKey: first, qrFingerprints: reloaded.fingerprints, locallyVerified: true))
         #expect(WeshQRTrust.canSend(sessionKey: second, qrFingerprints: reloaded.fingerprints, locallyVerified: true))

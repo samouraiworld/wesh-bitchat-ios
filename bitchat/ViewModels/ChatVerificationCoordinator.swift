@@ -164,7 +164,7 @@ extension ChatVerificationContext {
 @MainActor
 final class ChatVerificationCoordinator {
     enum QRProgress: Equatable {
-        case pending, verified, expired, unavailable
+        case pending, verified, expired, unavailable, notSaved
     }
     struct PendingVerification {
         let scannedQRBytes: Data
@@ -176,10 +176,13 @@ final class ChatVerificationCoordinator {
         let nonceA: Data
         let createdAt: Date
         var sent: Bool
+        /// The signed response arrived but the sealed contact write failed.
+        var saveFailed = false
     }
 
     private unowned let context: any ChatVerificationContext
     private let weshMode: Bool
+    private let qrTrust: WeshQRTrust
     private let now: () -> Date
     private var pendingQRVerifications: [PeerID: PendingVerification] = [:]
     private var completedQRNonces: [String: Data] = [:]
@@ -187,9 +190,11 @@ final class ChatVerificationCoordinator {
     private var lastInboundVerifyChallengeAt: [String: Date] = [:]
     private var lastMutualToastAt: [String: Date] = [:]
 
-    init(context: any ChatVerificationContext, weshMode: Bool = false, now: @escaping () -> Date = Date.init) {
+    init(context: any ChatVerificationContext, weshMode: Bool = false, qrTrust: WeshQRTrust? = nil,
+         now: @escaping () -> Date = Date.init) {
         self.now = now
         self.weshMode = weshMode
+        self.qrTrust = qrTrust ?? .shared
         self.context = context
     }
 
@@ -202,13 +207,14 @@ final class ChatVerificationCoordinator {
             $0.noiseKeyHex.lowercased() == noiseKey.hexEncodedString().lowercased()
         }) {
             guard attemptNonce == nil || attemptNonce == pending.nonceA else { return .unavailable }
+            if pending.saveFailed { return .notSaved }
             return (0...60).contains(now().timeIntervalSince(pending.createdAt)) ? .pending : .expired
         }
         guard !context.hasPendingIdentityStateChanges,
               let completedNonce = completedQRNonces[hex],
               attemptNonce == nil || attemptNonce == completedNonce,
               context.isVerifiedFingerprint(noiseKey.sha256Fingerprint()),
-              !weshMode || WeshQRTrust.shared.fingerprints.contains(noiseKey.sha256Fingerprint()) else { return .unavailable }
+              !weshMode || qrTrust.fingerprints.contains(noiseKey.sha256Fingerprint()) else { return .unavailable }
         return .verified
     }
 
@@ -370,7 +376,7 @@ final class ChatVerificationCoordinator {
         }
 
         let peerID = peer.peerID
-        if let pending = pendingQRVerifications[peerID],
+        if let pending = pendingQRVerifications[peerID], !pending.saveFailed,
            pending.scannedQRBytes == qr.canonicalBytes(), pending.npubSigHex == qr.npubSigHex,
            (0...60).contains(now().timeIntervalSince(pending.createdAt)) { return true }
         // Retain the established contact separately; replace only scan progress.
@@ -469,14 +475,24 @@ final class ChatVerificationCoordinator {
         context.saveIdentityState()
         guard context.isIdentityStateAvailable,
               !context.hasPendingIdentityStateChanges else { return }
-        pendingQRVerifications.removeValue(forKey: peerID)
         if weshMode {
+            // The npub outcome is decided from the stored list, never from one
+            // that could not be read (it would drop review flags and conflicts).
+            qrTrust.reloadIfNeeded()
             // The Noise challenge just proved the QR signer holds this session.
-            let outcome = WeshQRNpub.enrollment(npub: pending.npub, npubSigHex: pending.npubSigHex,
-                                                canonicalBytes: pending.scannedQRBytes, noiseKeyHex: pending.noiseKeyHex,
-                                                ownedNpubs: context.locallyOwnedNpubs, contacts: WeshQRTrust.shared.contacts)
-            WeshQRTrust.shared.enroll(sessionKey: sessionKey, nickname: pending.nickname, outcome: outcome)
+            // Success is announced only once the contact is confirmed on disk;
+            // otherwise this attempt stays open and reports the failure.
+            guard qrTrust.storageState == .available,
+                  qrTrust.enroll(sessionKey: sessionKey, nickname: pending.nickname, outcome: WeshQRNpub.enrollment(
+                      npub: pending.npub, npubSigHex: pending.npubSigHex, canonicalBytes: pending.scannedQRBytes,
+                      noiseKeyHex: pending.noiseKeyHex, ownedNpubs: context.locallyOwnedNpubs, contacts: qrTrust.contacts)) else {
+                var failed = pending
+                failed.saveFailed = true
+                pendingQRVerifications[peerID] = failed
+                return
+            }
         }
+        pendingQRVerifications.removeValue(forKey: peerID)
         completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
         context.setStoredVerified(fingerprint, verified: true)
 
