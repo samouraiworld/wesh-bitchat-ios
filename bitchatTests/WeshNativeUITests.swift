@@ -935,6 +935,15 @@ struct WeshNativeUITests {
         }
     }
 
+    @Test func onlyALocallyGeneratedLineIsAppInformation() {
+        func message(peer: PeerID?) -> BitchatMessage {
+            BitchatMessage(id: UUID().uuidString, sender: "system", content: "Texte", timestamp: Date(), isRelay: false,
+                           originalSender: nil, isPrivate: false, recipientNickname: nil, senderPeerID: peer)
+        }
+        #expect(WeshMessageActions.isLocalSystem(message(peer: nil)))
+        #expect(!WeshMessageActions.isLocalSystem(message(peer: PeerID(str: "1122334455667788"))))
+    }
+
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
         #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
         #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")

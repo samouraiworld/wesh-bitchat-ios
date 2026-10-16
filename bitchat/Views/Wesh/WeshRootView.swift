@@ -1016,7 +1016,7 @@ private struct WeshConversation: View {
     /// The author a message action may target: the pinned private identity,
     /// or a public sender whose short ID derives exactly from a known key.
     private func moderationTarget(for message: BitchatMessage, knownKeys: [Data]) -> PeerID? {
-        guard message.sender != "system",
+        guard !WeshMessageActions.isLocalSystem(message),
               !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender) else { return nil }
         if let pinned = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
             return pinned
@@ -1121,6 +1121,7 @@ private struct WeshMessageBubble: View {
     let privateChat: Bool
     @Environment(\.weshTheme) private var theme
     private var filled: Bool { own && !theme.isDark }
+    private var isSystem: Bool { WeshMessageActions.isLocalSystem(message) }
     @ViewBuilder private var metadata: some View {
         Text(message.timestamp, style: .time)
         if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
@@ -1130,7 +1131,7 @@ private struct WeshMessageBubble: View {
         HStack {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
-                if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
+                if !own && (!privateChat || isSystem) { Text(isSystem ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
                 Text(WeshIncomingMediaPolicy.displayText(message.content)).font(.body).textSelection(.enabled)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }

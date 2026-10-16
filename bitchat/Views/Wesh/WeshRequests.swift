@@ -114,6 +114,12 @@ final class WeshInboundRequests: ObservableObject {
 }
 
 extension WeshMessageActions {
+    /// App information is generated locally. A remote peer may still pick the
+    /// nickname "system"; it stays an ordinary, blockable sender.
+    static func isLocalSystem(_ message: BitchatMessage) -> Bool {
+        message.sender == "system" && message.senderPeerID == nil
+    }
+
     /// Public mesh senders use a short ID derived from their Noise key. Only a
     /// known key whose derived ID matches exactly may be reported or blocked.
     static func publicAuthor(of sender: PeerID?, knownNoiseKeys: [Data]) -> PeerID? {
