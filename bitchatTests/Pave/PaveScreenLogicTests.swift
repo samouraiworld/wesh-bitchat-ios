@@ -6,8 +6,6 @@ import Testing
 struct PaveHoldScheduleTests {
     @Test func takesThreeSeconds() {
         #expect(PaveHoldSchedule.duration == 3)
-        #expect(!PaveHoldSchedule.isComplete(elapsed: 2.99))
-        #expect(PaveHoldSchedule.isComplete(elapsed: 3))
     }
 
     @Test func progressIsClamped() {
@@ -35,6 +33,120 @@ struct PaveHoldScheduleTests {
 
     @Test func noPulseBeforeHalfASecond() {
         #expect(PaveHoldSchedule.pulses(after: 0, upTo: 0.49).isEmpty)
+    }
+}
+
+@Suite("Pavé hold tracker fails closed")
+struct PaveHoldTrackerTests {
+    private let start = ContinuousClock.now
+
+    private func at(_ seconds: Double) -> ContinuousClock.Instant {
+        start + .milliseconds(Int((seconds * 1000).rounded()))
+    }
+
+    /// Presses at 0 and ticks every 50 ms up to `seconds`, like the view does.
+    private func held(until seconds: Double) -> PaveHoldTracker {
+        var tracker = PaveHoldTracker()
+        tracker.press(at: at(0))
+        var time = 0.05
+        while time <= seconds + 0.0001 {
+            _ = tracker.tick(at: at(time))
+            time += 0.05
+        }
+        return tracker
+    }
+
+    @Test func fullHoldErasesExactlyOnce() {
+        var tracker = held(until: 3)
+        #expect(tracker.progress == 1)
+        let result1 = tracker.confirm(at: at(3))
+        #expect(result1)
+        let result2 = tracker.confirm(at: at(3.01))
+        #expect(!result2)
+        let result3 = tracker.release(at: at(3.02))
+        #expect(!result3)
+        #expect(!tracker.isHolding)
+    }
+
+    @Test func fullHoldStillErasesWhenThePressEndsJustBeforeCompletion() {
+        var tracker = held(until: 3)
+        let result4 = tracker.release(at: at(3))
+        #expect(result4)
+        let result5 = tracker.confirm(at: at(3.05))
+        #expect(result5)
+        let result6 = tracker.confirm(at: at(3.06))
+        #expect(!result6)
+    }
+
+    @Test func releasingMidHoldNeverErases() {
+        var tracker = held(until: 1.5)
+        let result7 = tracker.release(at: at(1.5))
+        #expect(!result7)
+        // Even a stray completion afterwards is refused.
+        let result8 = tracker.confirm(at: at(3))
+        #expect(!result8)
+        #expect(tracker.progress == 0)
+    }
+
+    @Test func backgroundingMidHoldNeverErases() {
+        var tracker = held(until: 2.5)
+        tracker.cancel()  // scenePhase left .active
+        #expect(!tracker.isHolding)
+        let result9 = tracker.confirm(at: at(3))
+        #expect(!result9)
+    }
+
+    @Test func aSuspendedOrStalledHoldResetsInsteadOfCompleting() {
+        // The release was never delivered and the app stopped ticking for two seconds.
+        var tracker = held(until: 0.5)
+        let pulses = tracker.tick(at: at(2.5))
+        #expect(pulses.isEmpty)
+        #expect(!tracker.isHolding)
+        let result10 = tracker.confirm(at: at(3))
+        #expect(!result10)
+    }
+
+    @Test func aCompletionWithoutRecentTicksIsRefused() {
+        var tracker = held(until: 2.9)
+        // Last tick at 2.9 s; a completion 0.3 s later means the hold went unobserved.
+        let result11 = tracker.confirm(at: at(3.2))
+        #expect(!result11)
+    }
+
+    @Test func anEarlyCompletionIsRefused() {
+        var tracker = held(until: 1)
+        let result12 = tracker.confirm(at: at(1))
+        #expect(!result12)
+    }
+
+    @Test func aReleasedFullHoldExpiresIfTheSystemNeverCompletes() {
+        var tracker = held(until: 3)
+        let result13 = tracker.release(at: at(3))
+        #expect(result13)
+        let result14 = tracker.confirm(at: at(3.5))
+        #expect(!result14)
+    }
+
+    @Test func pulsesRiseOverAFullHold() {
+        var tracker = PaveHoldTracker()
+        tracker.press(at: at(0))
+        var pulses: [Double] = []
+        var time = 0.05
+        while time <= 3.0001 {
+            pulses += tracker.tick(at: at(time))
+            time += 0.05
+        }
+        #expect(pulses == PaveHoldSchedule.pulses(after: 0, upTo: 3))
+    }
+
+    @Test func aNewPressStartsFromZero() {
+        var tracker = held(until: 1)
+        _ = tracker.release(at: at(1))
+        tracker.press(at: at(2))
+        #expect(tracker.isHolding)
+        #expect(tracker.progress == 0)
+        let result15 = tracker.confirm(at: at(2.5))
+        #expect(!result15)
     }
 }
 

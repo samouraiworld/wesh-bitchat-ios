@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// « Maintenir pour tout effacer »: a three-second hold fills a `danger` ring with rising pulses.
-/// Releasing early cancels. Assistive technologies get a double tap and a one-line confirmation.
+/// The system long press owns press tracking and cancellation; `PaveHoldTracker` adds a
+/// monotonic check, so the erase fails closed. Releasing early cancels. Assistive technologies
+/// get a double tap and a one-line confirmation. Keep this view out of scrollable containers.
 struct PaveHoldToErase: View {
     enum Layout {
         /// Ring above the text, for the erase screen.
@@ -15,9 +17,10 @@ struct PaveHoldToErase: View {
 
     @Environment(\.paveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var holdStart: Date?
-    @State private var lastElapsed: TimeInterval = 0
-    @State private var progress: Double = 0
+    @Environment(\.scenePhase) private var scenePhase
+    @GestureState private var pressing = false
+    @State private var tracker = PaveHoldTracker()
+    @State private var holdID = 0
     @State private var showsHoldHint = false
     @State private var confirming = false
 
@@ -43,7 +46,7 @@ struct PaveHoldToErase: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PaveCopy.text("pave.erase.a11yLabel"))
-        .accessibilityValue(holdStart == nil ? "" : "\(Int(progress * 100)) %")
+        .accessibilityValue(tracker.isHolding ? "\(Int(tracker.progress * 100)) %" : "")
         .accessibilityHint(PaveCopy.text("pave.erase.a11yHint"))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { confirming = true }
@@ -51,7 +54,22 @@ struct PaveHoldToErase: View {
             Button(PaveCopy.text("pave.erase.confirmAction"), role: .destructive) { complete() }
             Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
         }
-        .task(id: holdStart) { await runHold() }
+        .onChange(of: pressing) { isPressing in
+            if isPressing {
+                showsHoldHint = false
+                tracker.press(at: .now)
+                holdID += 1
+            } else {
+                // After a completed erase the tracker is already idle: no hint then.
+                let wasHolding = tracker.isHolding
+                if !tracker.release(at: .now) { resetRing(showingHint: wasHolding) }
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { resetRing(showingHint: false) }
+        }
+        .onDisappear { tracker.cancel() }
+        .task(id: holdID) { await followHold() }
     }
 
     private func ring(diameter: CGFloat) -> some View {
@@ -59,7 +77,7 @@ struct PaveHoldToErase: View {
         return ZStack {
             Circle().stroke(theme[.line], lineWidth: lineWidth)
             Circle()
-                .trim(from: 0, to: progress)
+                .trim(from: 0, to: tracker.progress)
                 .stroke(theme[.danger], style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Circle().fill(theme[.danger]).padding(diameter * 0.2)
@@ -69,15 +87,16 @@ struct PaveHoldToErase: View {
         }
         .frame(width: diameter, height: diameter)
         .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard holdStart == nil else { return }
-                    showsHoldHint = false
-                    lastElapsed = 0
-                    holdStart = Date()
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: PaveHoldSchedule.duration, maximumDistance: PaveTouch.minimum / 2)
+                .updating($pressing) { isPressing, state, _ in state = isPressing }
+                .onEnded { _ in
+                    if tracker.confirm(at: .now) {
+                        complete()
+                    } else {
+                        resetRing(showingHint: true)
+                    }
                 }
-                .onEnded { _ in cancelHold() }
         )
     }
 
@@ -101,35 +120,26 @@ struct PaveHoldToErase: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func runHold() async {
-        guard let start = holdStart else { return }
-        while !Task.isCancelled, holdStart == start {
-            let elapsed = Date().timeIntervalSince(start)
-            for intensity in PaveHoldSchedule.pulses(after: lastElapsed, upTo: elapsed) {
+    /// Drives the ring and the pulses while the press lasts; never erases by itself.
+    private func followHold() async {
+        while !Task.isCancelled, tracker.isHolding {
+            try? await Task.sleep(for: PaveHoldTracker.tickInterval)
+            guard !Task.isCancelled else { return }
+            for intensity in tracker.tick(at: .now) {
                 PaveHaptics.play(.holdPulse(intensity: intensity))
             }
-            lastElapsed = elapsed
-            progress = PaveHoldSchedule.progress(elapsed: elapsed)
-            if PaveHoldSchedule.isComplete(elapsed: elapsed) {
-                holdStart = nil
-                complete()
-                return
-            }
-            try? await Task.sleep(nanoseconds: 33_000_000)
         }
     }
 
-    private func cancelHold() {
-        guard holdStart != nil else { return }
-        holdStart = nil
+    private func resetRing(showingHint: Bool) {
         withAnimation(PaveMotion.animation(PaveMotion.stateChange, reduceMotion: reduceMotion)) {
-            progress = 0
-            showsHoldHint = true
+            tracker.cancel()
+            showsHoldHint = showingHint
         }
     }
 
     private func complete() {
-        progress = 0
+        tracker.cancel()
         PaveHaptics.play(.erase)
         onErase()
     }
@@ -183,20 +193,21 @@ struct PaveEraseScreen: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(PaveCopy.text("pave.action.close"))
             }
-            ScrollView {
-                VStack(spacing: PaveSpace.s4) {
-                    PaveHoldToErase {
-                        outcome = erase() ? .erased : .failed
-                        if outcome == .failed { PaveHaptics.play(.failure) }
-                    }
-                    .padding(.vertical, PaveSpace.s12)
-                    Text(PaveCopy.text("pave.erase.othersKeepCopies"))
-                        .paveText(.caption)
-                        .foregroundStyle(theme[.inkMuted])
-                        .multilineTextAlignment(.center)
+            Spacer(minLength: 0)
+            // Not inside a ScrollView: a scroll must never compete with the hold.
+            VStack(spacing: PaveSpace.s4) {
+                PaveHoldToErase {
+                    outcome = erase() ? .erased : .failed
+                    if outcome == .failed { PaveHaptics.play(.failure) }
                 }
-                .frame(maxWidth: .infinity)
+                .padding(.vertical, PaveSpace.s12)
+                Text(PaveCopy.text("pave.erase.othersKeepCopies"))
+                    .paveText(.caption)
+                    .foregroundStyle(theme[.inkMuted])
+                    .multilineTextAlignment(.center)
             }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 0)
         }
     }
 

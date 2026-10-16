@@ -49,34 +49,37 @@ struct PaveSettingsScreen: View {
     @Environment(\.paveTheme) private var theme
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: PaveSpace.s3) {
-                Text(PaveCopy.text("pave.settings.title"))
-                    .paveText(.title)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, PaveSpace.s1)
-                PaveHoldToErase(layout: .row, onErase: onErase)
-                VStack(spacing: 0) {
-                    ForEach(PaveSettingsDestination.allCases) { destination in
-                        row(destination)
-                        if destination != PaveSettingsDestination.allCases.last {
-                            Rectangle().fill(theme[.line]).frame(height: PaveStroke.hairline)
-                                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: PaveSpace.s3) {
+            Text(PaveCopy.text("pave.settings.title"))
+                .paveText(.title)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.bottom, PaveSpace.s1)
+            // Pinned above the scrolling rows: a scroll must never compete with the hold.
+            PaveHoldToErase(layout: .row, onErase: onErase)
+            ScrollView {
+                VStack(alignment: .leading, spacing: PaveSpace.s3) {
+                    VStack(spacing: 0) {
+                        ForEach(PaveSettingsDestination.allCases) { destination in
+                            row(destination)
+                            if destination != PaveSettingsDestination.allCases.last {
+                                Rectangle().fill(theme[.line]).frame(height: PaveStroke.hairline)
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
+                    .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
+                    Text(PaveCopy.text("pave.settings.footer"))
+                        .paveText(.caption)
+                        .foregroundStyle(theme[.inkMuted])
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, PaveSpace.s6)
                 }
-                .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
-                Text(PaveCopy.text("pave.settings.footer"))
-                    .paveText(.caption)
-                    .foregroundStyle(theme[.inkMuted])
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, PaveSpace.s6)
+                .padding(.bottom, PaveSpace.s6)
             }
-            .padding(.horizontal, PaveSpace.s4)
-            .padding(.top, PaveSpace.s4)
-            .padding(.bottom, PaveSpace.s6)
         }
+        .padding(.horizontal, PaveSpace.s4)
+        .padding(.top, PaveSpace.s4)
         .paveScreenBackground()
     }
 

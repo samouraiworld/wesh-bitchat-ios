@@ -10,10 +10,6 @@ struct PaveHoldSchedule {
         min(max(elapsed / duration, 0), 1)
     }
 
-    static func isComplete(elapsed: TimeInterval) -> Bool {
-        elapsed >= duration
-    }
-
     /// Intensities of the pulses crossed between two ticks, rising from 0.3 to 1.
     static func pulses(after previous: TimeInterval, upTo current: TimeInterval) -> [Double] {
         pulseTimes.enumerated().compactMap { index, time in
@@ -80,5 +76,99 @@ struct PaveQRRefreshClock: Equatable {
     func remainingMinutes(at now: Date) -> Int {
         let remaining = Self.lifetime - now.timeIntervalSince(issuedAt)
         return max(1, Int((remaining / 60).rounded(.up)))
+    }
+}
+
+/// Fail-closed state of one hold-to-erase press.
+///
+/// The system long press decides whether the finger stayed down for three seconds. On top of
+/// that, this tracker requires an uninterrupted hold measured on a monotonic clock: a release
+/// that never arrives, an app suspended mid-hold or a stalled main thread resets it, so none
+/// of them can complete an erase. Either order of « press ended » and « press completed » works.
+struct PaveHoldTracker {
+    typealias Instant = ContinuousClock.Instant
+
+    static let tickInterval: Duration = .milliseconds(50)
+    /// A tick later than twice the interval means the hold was not observed: reset.
+    static let maximumGap: Duration = .milliseconds(100)
+    /// Slack between the system's own three-second timer and this clock.
+    static let tolerance: Duration = .milliseconds(150)
+    private static let required: Duration = .seconds(PaveHoldSchedule.duration) - tolerance
+
+    private enum Phase {
+        case idle
+        case holding(start: Instant, lastSeen: Instant)
+        /// The press ended after a full hold; the system completion may still arrive until `deadline`.
+        case released(deadline: Instant)
+    }
+
+    private var phase: Phase = .idle
+    private var pulsedUpTo: TimeInterval = 0
+    private(set) var progress: Double = 0
+
+    var isHolding: Bool {
+        if case .holding = phase { return true }
+        return false
+    }
+
+    mutating func press(at now: Instant) {
+        phase = .holding(start: now, lastSeen: now)
+        pulsedUpTo = 0
+        progress = 0
+    }
+
+    /// Advances the ring; returns the intensities of the pulses crossed since the last tick.
+    mutating func tick(at now: Instant) -> [Double] {
+        guard case let .holding(start, lastSeen) = phase else { return [] }
+        guard now - lastSeen <= Self.maximumGap else {
+            cancel()
+            return []
+        }
+        phase = .holding(start: start, lastSeen: now)
+        let elapsed = Self.seconds(now - start)
+        let pulses = PaveHoldSchedule.pulses(after: pulsedUpTo, upTo: elapsed)
+        pulsedUpTo = elapsed
+        progress = PaveHoldSchedule.progress(elapsed: elapsed)
+        return pulses
+    }
+
+    /// The press ended or was cancelled. Returns whether it can still be confirmed,
+    /// which only a press that already lasted the full duration can, briefly.
+    @discardableResult
+    mutating func release(at now: Instant) -> Bool {
+        guard case let .holding(start, lastSeen) = phase,
+              now - lastSeen <= Self.maximumGap, now - start >= Self.required else {
+            cancel()
+            return false
+        }
+        phase = .released(deadline: now + Self.tolerance)
+        return true
+    }
+
+    /// The system long press completed. True at most once per press.
+    mutating func confirm(at now: Instant) -> Bool {
+        let valid: Bool
+        switch phase {
+        case let .holding(start, lastSeen):
+            valid = now - lastSeen <= Self.maximumGap && now - start >= Self.required
+        case let .released(deadline):
+            valid = now <= deadline
+        case .idle:
+            valid = false
+        }
+        cancel()
+        return valid
+    }
+
+    /// Every other way out: disappearing, leaving the foreground, an assistive confirmation.
+    mutating func cancel() {
+        phase = .idle
+        pulsedUpTo = 0
+        progress = 0
+    }
+
+    private static func seconds(_ duration: Duration) -> TimeInterval {
+        let parts = duration.components
+        return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
     }
 }
