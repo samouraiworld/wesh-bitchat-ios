@@ -91,7 +91,7 @@ enum ComposerDraftStore {
 
 /// RAM access never performs IO. A serial utility queue owns the encrypted
 /// backend. IO only sends asynchronous Main notifications and never waits Main.
-// Mutable RAM state is protected by lock; backend IO is confined to ioQueue.
+/// Mutable RAM state is protected by lock; backend IO is confined to ioQueue.
 final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     struct Change {
         let generation: UInt64
