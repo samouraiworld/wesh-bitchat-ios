@@ -42,7 +42,8 @@ let package = Package(
                 "ViewModels/Extensions/README.md"
             ],
             resources: [
-                .process("Localizable.xcstrings")
+                .process("Localizable.xcstrings"),
+                .process("Views/Wesh/Pave/Pave.xcstrings")
             ]
         ),
         .testTarget(
