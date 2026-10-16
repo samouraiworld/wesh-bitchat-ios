@@ -21,16 +21,36 @@ struct PaveInboxRow: View {
             case let .publicRoom(inRange, lastMessage, time):
                 publicCard(inRange: inRange, lastMessage: lastMessage, time: time)
             case let .contact(name, lastMessage, time):
-                row(name: name, badge: verifiedBadge, preview: lastMessage ?? PaveCopy.text("pave.inbox.noMessage"),
-                    time: time, bordered: false)
+                row(name: name, verified: true,
+                    preview: Text(lastMessage ?? PaveCopy.text("pave.inbox.noMessage")), time: time)
             case let .request(name, count, time):
-                row(name: name, badge: unverifiedBadge, preview: PaveCopy.text("pave.inbox.requestPreview", count),
-                    time: time, bordered: true)
+                row(name: name, verified: false,
+                    preview: Text(PaveCopy.text("pave.inbox.unverified")).foregroundColor(theme[.warning])
+                        + Text(verbatim: " · ")
+                        + Text(PaveCopy.text("pave.inbox.requestPreview", count)),
+                    time: time)
             }
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(.isButton)
         .accessibilityHint(hint)
+    }
+
+    /// Spoken in a fixed order, the trust state before the peer-chosen name.
+    private var accessibilityText: String {
+        switch item {
+        case let .publicRoom(inRange, lastMessage, time):
+            return [PaveCopy.text("pave.inbox.publicTitle"), PaveCopy.text("pave.inbox.publicInRange", inRange),
+                    lastMessage, time].compactMap { $0 }.joined(separator: ", ")
+        case let .contact(name, lastMessage, time):
+            return [PaveCopy.text("pave.inbox.verified"), PaveDisplayName.safe(name),
+                    lastMessage ?? PaveCopy.text("pave.inbox.noMessage"), time].compactMap { $0 }.joined(separator: ", ")
+        case let .request(name, count, time):
+            return [PaveCopy.text("pave.inbox.unverified"), PaveDisplayName.safe(name),
+                    PaveCopy.text("pave.inbox.requestPreview", count), time].joined(separator: ", ")
+        }
     }
 
     private var hint: String {
@@ -64,50 +84,45 @@ struct PaveInboxRow: View {
         .contentShape(RoundedRectangle(cornerRadius: PaveRadius.control))
     }
 
-    private func row(name: String, badge: some View, preview: String, time: String?, bordered: Bool) -> some View {
-        VStack(alignment: .leading, spacing: PaveSpace.s1) {
-            HStack(alignment: .firstTextBaseline, spacing: PaveSpace.s3) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: PaveSpace.s2) {
-                        Text(name).paveText(.headline)
-                        badge
-                    }
-                    VStack(alignment: .leading, spacing: PaveSpace.s1) {
-                        Text(name).paveText(.headline)
-                        badge
+    /// The trust badge is a fixed-size symbol in a fixed leading column: the name, whatever
+    /// its content or length, can neither move it nor sit where it sits.
+    private func row(name: String, verified: Bool, preview: Text, time: String?) -> some View {
+        HStack(alignment: .top, spacing: PaveSpace.s3) {
+            trustBadge(verified: verified)
+            VStack(alignment: .leading, spacing: PaveSpace.s1) {
+                HStack(alignment: .firstTextBaseline, spacing: PaveSpace.s3) {
+                    Text(PaveDisplayName.safe(name))
+                        .paveText(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let time {
+                        Text(time).paveText(.caption).foregroundStyle(theme[.inkMuted]).fixedSize()
                     }
                 }
-                Spacer(minLength: 0)
-                if let time {
-                    Text(time).paveText(.caption).foregroundStyle(theme[.inkMuted])
-                }
+                preview
+                    .paveText(verified ? .body : .label)
+                    .foregroundStyle(theme[.inkMuted])
+                    .lineLimit(1)
             }
-            Text(preview)
-                .paveText(bordered ? .label : .body)
-                .foregroundStyle(theme[.inkMuted])
-                .lineLimit(1)
         }
         .multilineTextAlignment(.leading)
         .foregroundStyle(theme[.ink])
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         .padding(.horizontal, PaveSpace.s4)
         .padding(.vertical, PaveSpace.s3)
-        .background(bordered ? .clear : theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
+        .background(verified ? theme[.surface] : .clear, in: RoundedRectangle(cornerRadius: PaveRadius.control))
         .overlay(RoundedRectangle(cornerRadius: PaveRadius.control)
-            .strokeBorder(bordered ? theme[.lineStrong] : .clear, lineWidth: PaveStroke.control))
+            .strokeBorder(verified ? .clear : theme[.lineStrong], lineWidth: PaveStroke.control))
         .contentShape(RoundedRectangle(cornerRadius: PaveRadius.control))
     }
 
-    private var verifiedBadge: some View {
-        Label(PaveCopy.text("pave.inbox.verified"), systemImage: "checkmark.seal.fill")
-            .paveText(.caption)
-            .foregroundStyle(theme[.success])
-    }
-
-    private var unverifiedBadge: some View {
-        Label(PaveCopy.text("pave.inbox.unverified"), systemImage: "exclamationmark.triangle.fill")
-            .paveText(.caption)
-            .foregroundStyle(theme[.warning])
+    private func trustBadge(verified: Bool) -> some View {
+        Image(systemName: verified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(verified ? theme[.success] : theme[.warning])
+            .frame(width: 28, height: 28)
+            .accessibilityHidden(true)
     }
 }
 
@@ -122,6 +137,9 @@ struct PaveInboxRow_Previews: PreviewProvider {
                                                 time: "17:53")) {}
                     PaveInboxRow(item: .contact(name: "Sami", lastMessage: nil, time: nil)) {}
                     PaveInboxRow(item: .request(name: "Léo 17", messageCount: 1, time: "18:02")) {}
+                    // A hostile nickname: bidi override, fake badge text, a newline and a long tail.
+                    PaveInboxRow(item: .request(name: "\u{202E}Nora ✓ Vérifié\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                                                messageCount: 2, time: "18:05")) {}
                 }
                 .padding(PaveSpace.s4)
             }

@@ -122,3 +122,68 @@ struct PavePaletteContrastTests {
         #expect(PaveTheme(.nuit).rgb(.publicFill) == PaveTheme(.jour).rgb(.publicFill))
     }
 }
+
+@Suite("Pavé display name sanitizer")
+struct PaveDisplayNameTests {
+    @Test func ordinaryNicknamesPassThrough() {
+        #expect(PaveDisplayName.safe("Renard 42") == "Renard 42")
+        #expect(PaveDisplayName.safe("Léo 17") == "Léo 17")
+        #expect(PaveDisplayName.safe("Coquelicot") == "Coquelicot")
+    }
+
+    @Test func stripsBidiControlsAndZeroWidthCharacters() {
+        // RLO, LRI/PDI, ZWSP, ZWJ, LRM: all Cf, none may survive.
+        let hostile = "\u{202E}Nora\u{202C} \u{2066}x\u{2069}\u{200B}\u{200D}\u{200E}"
+        let safe = PaveDisplayName.safe(hostile)
+        #expect(safe == "Nora x")
+        #expect(!safe.unicodeScalars.contains { $0.properties.generalCategory == .format })
+    }
+
+    @Test func stripsControlsAndLineBreaksSoNamesStayOnOneLine() {
+        #expect(PaveDisplayName.safe("Nora\nVérifié") == "NoraVérifié")
+        #expect(PaveDisplayName.safe("Nora\u{2028}\u{2029}\t\u{0007}") == "Nora")
+    }
+
+    @Test func appliesNFKCSoLookalikeFormsCollapse() {
+        // Fullwidth letters and the ﬁ ligature fold to their plain forms.
+        #expect(PaveDisplayName.safe("Ｎｏｒａ") == "Nora")
+        #expect(PaveDisplayName.safe("\u{FB01}nch") == "finch")
+        // Decomposed accents compose: one grapheme, no stray mark.
+        #expect(PaveDisplayName.safe("Le\u{0301}o") == "Léo")
+    }
+
+    @Test func collapsesStackedCombiningMarks() {
+        let zalgo = "N" + String(repeating: "\u{0336}\u{0337}\u{0338}\u{0489}", count: 20) + "ora"
+        let safe = PaveDisplayName.safe(zalgo)
+        let marks = safe.unicodeScalars.filter {
+            [.nonspacingMark, .spacingMark, .enclosingMark].contains($0.properties.generalCategory)
+        }
+        #expect(marks.count <= PaveDisplayName.maximumCombiningMarks)
+        #expect(safe.hasSuffix("ora"))
+        // A mark cannot start the name or hang off a space.
+        #expect(PaveDisplayName.safe("\u{0301}\u{0301}Nora") == "Nora")
+    }
+
+    @Test func collapsesWhitespaceAndClampsLength() {
+        #expect(PaveDisplayName.safe("  Nora \u{00A0}\u{3000}  42  ") == "Nora 42")
+        let long = String(repeating: "x", count: 200)
+        let safe = PaveDisplayName.safe(long)
+        #expect(safe.count == PaveDisplayName.maximumGraphemes)
+        #expect(safe.hasSuffix("…"))
+        #expect(PaveDisplayName.safe(String(repeating: "y", count: 32)).count == 32)
+    }
+
+    @Test func emptyOrInvisibleNamesGetAPlaceholder() {
+        let placeholder = PaveDisplayName.safe("")
+        #expect(!placeholder.isEmpty)
+        #expect(PaveDisplayName.safe("\u{200B}\u{202E} \n") == placeholder)
+    }
+
+    @Test func spoofedBadgeTextStaysPlainNameText() {
+        // The badge is a symbol outside the name; whatever the name says, it is clamped text.
+        let safe = PaveDisplayName.safe("\u{202E}Nora ✓ Vérifié\n" + String(repeating: "x", count: 40))
+        #expect(safe.count <= PaveDisplayName.maximumGraphemes)
+        #expect(!safe.contains("\n"))
+        #expect(!safe.unicodeScalars.contains("\u{202E}"))
+    }
+}

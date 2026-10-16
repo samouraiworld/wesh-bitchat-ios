@@ -19,6 +19,46 @@ enum PaveCopy {
     }
 }
 
+/// Every name that comes from another phone goes through `safe(_:)` before it is drawn.
+/// A peer chooses its nickname freely, so it must not be able to spoof a status, reorder
+/// text with bidi controls, stack combining marks over other lines, or push a badge away.
+enum PaveDisplayName {
+    static let maximumGraphemes = 32
+    /// Combining marks kept after one base character; NFKC already composes ordinary accents.
+    static let maximumCombiningMarks = 2
+
+    static func safe(_ raw: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        var combiningRun = 0
+        var lastWasSpace = true
+        for scalar in raw.precomposedStringWithCompatibilityMapping.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator,
+                 .privateUse, .surrogate, .unassigned:
+                // Cc, Cf (bidi overrides and isolates, zero-width characters), separators, Co, Cs, Cn.
+                continue
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                combiningRun += 1
+                guard combiningRun <= maximumCombiningMarks, !lastWasSpace else { continue }
+                scalars.append(scalar)
+            case .spaceSeparator:
+                combiningRun = 0
+                guard !lastWasSpace else { continue }
+                scalars.append(" ")
+                lastWasSpace = true
+            default:
+                combiningRun = 0
+                lastWasSpace = false
+                scalars.append(scalar)
+            }
+        }
+        let cleaned = String(scalars).trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return PaveCopy.text("pave.name.unnamed") }
+        guard cleaned.count > maximumGraphemes else { return cleaned }
+        return String(cleaned.prefix(maximumGraphemes - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+}
+
 /// The four delivery states shown under a bubble. Read receipts are never shown.
 enum PaveDeliveryState: CaseIterable {
     case waiting, sent, received, failed

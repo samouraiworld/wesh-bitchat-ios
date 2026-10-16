@@ -56,14 +56,14 @@ struct PaveComposer: View {
     private var placeholder: String {
         switch kind {
         case .publicRoom: return PaveCopy.text("pave.composer.publicPlaceholder")
-        case .privateChat(let name): return PaveCopy.text("pave.composer.privatePlaceholder", name)
+        case .privateChat(let name): return PaveCopy.text("pave.composer.privatePlaceholder", PaveDisplayName.safe(name))
         }
     }
 
     private var sendLabel: String {
         switch kind {
         case .publicRoom: return PaveCopy.text("pave.composer.sendPublic")
-        case .privateChat(let name): return PaveCopy.text("pave.composer.sendPrivate", name)
+        case .privateChat(let name): return PaveCopy.text("pave.composer.sendPrivate", PaveDisplayName.safe(name))
         }
     }
 

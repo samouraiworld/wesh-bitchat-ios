@@ -518,6 +518,23 @@
         }
       }
     },
+    "pave.name.unnamed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No nickname"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sans surnom"
+          }
+        }
+      }
+    },
     "pave.status.a11y" : {
       "extractionState" : "manual",
       "localizations" : {

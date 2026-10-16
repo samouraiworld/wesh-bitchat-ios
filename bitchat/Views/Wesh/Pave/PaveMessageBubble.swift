@@ -40,7 +40,7 @@ struct PaveMessageBubble: View {
     let text: String
     let isOwn: Bool
     let kind: PaveConversationKind
-    /// Shown above the first received message of a series.
+    /// Shown above the first received message of a series; peer-chosen, so sanitized before display.
     var senderName: String?
     let time: String
     /// Your messages only.
@@ -55,8 +55,10 @@ struct PaveMessageBubble: View {
     var body: some View {
         VStack(alignment: isOwn ? .trailing : .leading, spacing: PaveSpace.s1) {
             if !isOwn, let senderName {
-                Text(senderName)
+                Text(PaveDisplayName.safe(senderName))
                     .paveText(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .foregroundStyle(theme[.inkMuted])
                     .padding(.leading, PaveSpace.s1)
                     .accessibilityHidden(true)
@@ -140,7 +142,7 @@ struct PaveMessageBubble: View {
     }
 
     private var accessibilityText: String {
-        let author = isOwn ? PaveCopy.text("pave.bubble.you") : (senderName ?? "")
+        let author = isOwn ? PaveCopy.text("pave.bubble.you") : (senderName.map(PaveDisplayName.safe) ?? "")
         var parts = [author, text, time].filter { !$0.isEmpty }
         if let delivery { parts.append(delivery.label) }
         if let transport { parts.append(transport.label) }
