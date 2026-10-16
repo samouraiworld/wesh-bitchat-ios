@@ -206,6 +206,15 @@ extension View {
         #endif
     }
 
+    /// For a screen that draws its own title, like the Pavé settings.
+    @ViewBuilder func weshHiddenNavigationBar() -> some View {
+        #if os(iOS)
+        toolbar(.hidden, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
     @ViewBuilder func weshNoAutocapitalization() -> some View {
         #if os(iOS)
         textInputAutocapitalization(.never)

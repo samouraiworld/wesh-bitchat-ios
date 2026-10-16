@@ -9,11 +9,20 @@ import UIKit
 final class PaveEraseRequest: ObservableObject {
     static let shared = PaveEraseRequest()
     @Published private(set) var isPresented = false
+    /// Where the screen opens: the hold, or the result of a wipe already run from Settings.
+    private(set) var outcome: PaveEraseScreen.Outcome = .ready
     /// Every run of the shortcut, including one while the screen is already up.
     private(set) var requestCount = 0
 
     func request() {
         requestCount += 1
+        outcome = .ready
+        isPresented = true
+    }
+
+    /// Settings ran the wipe itself: show its result above the app, which the wipe rebuilds.
+    func show(_ outcome: PaveEraseScreen.Outcome) {
+        self.outcome = outcome
         isPresented = true
     }
 
@@ -76,7 +85,7 @@ private struct PaveEraseShortcutPresenter: ViewModifier {
     }
 
     private var screen: some View {
-        PaveEraseScreen(erase: erase) { request.close() }
+        PaveEraseScreen(outcome: request.outcome, erase: erase) { request.close() }
             .paveTheme(.nuit)
     }
 }

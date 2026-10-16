@@ -162,6 +162,8 @@ struct PaveAboutScreen: View {
                         Link(destination: donationsURL) { Text(PaveCopy.text("pave.about.donate")) }
                             .buttonStyle(.paveSecondary)
                     }
+                    Link(destination: WeshLinks.terms) { Text(PaveCopy.text("pave.onboarding.readTerms")) }
+                        .buttonStyle(.paveSecondary)
                 }
                 VStack(alignment: .leading, spacing: PaveSpace.s2) {
                     Text(PaveCopy.text("pave.about.licensesTitle"))
@@ -172,6 +174,9 @@ struct PaveAboutScreen: View {
                         .paveText(.label)
                         .fontWeight(.regular)
                         .foregroundStyle(theme[.inkMuted])
+                    // The poster face's OFL, in full.
+                    NavigationLink { PaveLicensesScreen() } label: { Text(PaveCopy.text("pave.about.licensesTitle")) }
+                        .buttonStyle(.paveSecondary)
                 }
                 Text(PaveCopy.text("pave.settings.footer"))
                     .paveText(.caption)
