@@ -88,20 +88,24 @@ final class WeshQRTrust: ObservableObject {
         guard sessionKey.count == 32 else { return false }
         let hex = sessionKey.hexEncodedString()
         let fingerprint = sessionKey.sha256Fingerprint()
-        guard contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint)
-                || intent.revokedFingerprints.contains(fingerprint) else { return false }
+        let known = contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint)
+            || intent.revokedFingerprints.contains(fingerprint)
+        // While the list cannot be read, membership is unknown: record the
+        // revocation anyway so a later load can never restore this key.
+        guard known || (storage != nil && storageState != .available) else { return false }
         intent.revokedFingerprints.insert(fingerprint)
         apply(Self.removing(intent.revokedFingerprints, from: snapshot))
         guard let storage else {
             intent.revokedFingerprints.remove(fingerprint)
             return true
         }
-        _ = persistIntent()
+        let intentPersisted = persistIntent()
         reloadIfNeeded()
         guard storageState == .available, save(snapshot, to: storage) else { return false }
+        // The confirmed file now omits the key; the marker is no longer needed.
         intent.revokedFingerprints = []
         _ = persistIntent()
-        return true
+        return known || intentPersisted
     }
 
     /// Clears RAM first, then confirms the sealed file, its key, any legacy
@@ -117,7 +121,15 @@ final class WeshQRTrust: ObservableObject {
             return erased
         }
         intent = Intent(wipe: true)
-        _ = persistIntent()
+        return retryWipe()
+    }
+
+    /// No file work until the pending-wipe marker is confirmed in the Keychain.
+    private func retryWipe() -> Bool {
+        guard persistIntent() else {
+            storageState = .unavailable
+            return false
+        }
         return finishWipe()
     }
 
@@ -207,7 +219,7 @@ final class WeshQRTrust: ObservableObject {
             if intent.wipe {
                 // A list ordered deleted is never applied; retry the wipe.
                 apply(Snapshot())
-                _ = finishWipe()
+                _ = retryWipe()
                 return
             }
             let value: Snapshot

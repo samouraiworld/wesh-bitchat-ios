@@ -45,7 +45,8 @@ final class WeshMeetingNoteStore: ObservableObject {
     private static func erase(storage: WeshSealedStore?, legacyDefaults: UserDefaults?) -> Bool {
         var erased = true
         if let storage {
-            _ = storage.writeIntent(pendingWipeMarker)
+            // No file work until the pending-wipe marker is confirmed.
+            guard storage.writeIntent(pendingWipeMarker) else { return false }
             do { try storage.wipe() } catch { erased = false }
         }
         if let legacyDefaults {
@@ -60,8 +61,25 @@ final class WeshMeetingNoteStore: ObservableObject {
     var isEditable: Bool { !isSuspended && storageState == .available }
 
     func reloadIfNeeded() {
+        if erasePending { retryPendingErase(); return }
         guard !isSuspended, storageState != .available else { return }
         load()
+    }
+
+    /// A marker found at load time means the note was ordered deleted. The
+    /// retry uses the panic lifecycle: old editor bindings are invalidated
+    /// first, and editing resumes only after a confirmed erase.
+    private var erasePending = false
+
+    private func retryPendingErase() {
+        erasePending = true
+        if !isSuspended { suspendForPanic() }
+        guard wipeForPanic() else {
+            storageState = .unavailable
+            return
+        }
+        erasePending = false
+        completePanic()
     }
 
     @discardableResult
@@ -100,8 +118,7 @@ final class WeshMeetingNoteStore: ObservableObject {
         do {
             if try storage.readIntent() != nil {
                 // A note ordered deleted is never shown again; retry the erase.
-                content = Content()
-                storageState = Self.erase(storage: storage, legacyDefaults: legacyDefaults) ? .available : .unavailable
+                retryPendingErase()
                 return
             }
             if let data = try storage.load() {
@@ -150,6 +167,7 @@ final class WeshMeetingNoteStore: ObservableObject {
         guard erasePersisted() else { return false }
         storageState = .available
         isSaveConfirmed = true
+        erasePending = false
         return true
     }
 
@@ -163,7 +181,12 @@ final class WeshMeetingNoteStore: ObservableObject {
     func clear(generation expected: UInt64) -> Bool {
         guard !isSuspended, expected == generation else { return false }
         suspendForPanic()
-        guard wipeForPanic() else { return false }
+        guard wipeForPanic() else {
+            // Stay suspended; the next foreground retries the erase.
+            erasePending = true
+            storageState = .unavailable
+            return false
+        }
         completePanic()
         return true
     }
