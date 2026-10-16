@@ -1199,6 +1199,10 @@ struct ChatViewModelBluetoothTests {
 // MARK: - Private Media Deletion Tests
 
 struct ChatViewModelPrivateMediaDeletionTests {
+    init() {
+        // Upstream live voice: Wesh refuses inbound media by default.
+        WeshIncomingMediaPolicy.acceptsMedia = true
+    }
 
     @Test @MainActor
     func deleteMediaMessageTombstonesIncomingButNotOutgoingStableMedia() {
