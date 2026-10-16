@@ -182,22 +182,33 @@ struct WeshReportAlerts: ViewModifier {
     let name: String
     @Binding var done: Bool
     let report: (PeerID, String) -> Bool
+    @State private var failed = false
 
     func body(content: Content) -> some View {
         content
             .alert("Signaler ce message ?", isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } })) {
                 Button("Annuler", role: .cancel) { target = nil }
                 Button("Signaler et bloquer", role: .destructive) {
-                    if let target { done = report(target, name) }
+                    if let target {
+                        let reported = report(target, name)
+                        done = reported
+                        failed = !reported
+                    }
                     target = nil
                 }
             } message: {
-                Text("Le signalement reste sur ce téléphone : rien n’est envoyé. \(name) sera bloqué ici et ses messages seront masqués.")
+                // The nickname is chosen by the sender: it never leads the sentence.
+                Text("Le signalement reste sur ce téléphone : rien n’est envoyé. Cette personne sera bloquée ici et ses messages seront masqués.")
             }
             .alert("Signalement enregistré", isPresented: $done) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Cette personne est bloquée sur ce téléphone et ses messages sont masqués. Vous pourrez la débloquer dans Réglages → Contacts bloqués.")
+            }
+            .alert("Signalement impossible", isPresented: $failed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Le blocage n’a pas pu être enregistré sur ce téléphone. Ses messages restent visibles. Réessayez.")
             }
     }
 }
