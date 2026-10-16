@@ -28,7 +28,10 @@ struct ChatViewModelServiceBundle {
             idBridge: idBridge,
             identityManager: identityManager
         )
-        let nostrTransport = NostrTransport(keychain: keychain, idBridge: idBridge)
+        let nostrTransport = NostrTransport(
+            keychain: keychain, idBridge: idBridge,
+            dependencies: .live(idBridge: idBridge, isBlocked: { identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) })
+        )
         nostrTransport.senderPeerID = meshService.myPeerID
         let messageRouter = MessageRouter(
             transports: [meshService, nostrTransport],

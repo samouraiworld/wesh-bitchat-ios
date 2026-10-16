@@ -155,6 +155,11 @@ final class AppRuntime: ObservableObject {
         NetworkActivationService.shared.start()
         if WeshMode.isActive {
             WeshInternetMode.shared.start()
+            // Queued private messages to QR contacts leave as soon as Internet is On.
+            WeshInternetRoute.flushWhenOn(WeshInternetMode.shared.$state) { [weak self] in
+                self?.chatViewModel.messageRouter.flushAllOutbox()
+            }
+            .store(in: &cancellables)
         } else if NetworkActivationService.shared.userInternetEnabled {
             GeohashPresenceService.shared.start()
         }

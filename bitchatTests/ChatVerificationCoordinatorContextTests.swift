@@ -26,6 +26,8 @@ import BitFoundation
 /// `ChatVerificationCoordinator` is testable without a `ChatViewModel`.
 @MainActor
 private final class MockChatVerificationContext: ChatVerificationContext {
+    private(set) var announcedInternetKeys: [PeerID] = []
+    func announceWeshInternetKey(to peerID: PeerID) { announcedInternetKeys.append(peerID) }
     // Fingerprints & verification state
     var isIdentityStateAvailable = true
     var hasPendingIdentityStateChanges = false
@@ -418,6 +420,8 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(!context.postedLocalNotifications.contains { $0.identifier.hasPrefix("verify-success") })
         #expect(coordinator.qrProgress(for: key, attemptNonce: nonce) == .notSaved)
         #expect(coordinator.qrAttemptNonce(for: key) == nonce)
+        // A contact that was not saved is never told my npub.
+        #expect(context.announcedInternetKeys.isEmpty)
 
         // Rescanning the same QR starts a fresh challenge instead of reusing the failed one.
         failWrites = false
@@ -429,6 +433,7 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(trust.fingerprints.contains(key.sha256Fingerprint()))
         #expect(context.storedVerifiedCalls.map(\.verified) == [true])
         #expect(context.postedLocalNotifications.filter { $0.identifier.hasPrefix("verify-success") }.count == 1)
+        #expect(context.announcedInternetKeys == [peerID])
         context.verifiedFingerprints.insert(key.sha256Fingerprint())
         #expect(coordinator.qrProgress(for: key, attemptNonce: retryNonce) == .verified)
     }
