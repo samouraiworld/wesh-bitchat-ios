@@ -179,6 +179,40 @@ struct PaveDisplayNameTests {
         #expect(PaveDisplayName.safe("\u{200B}\u{202E} \n") == placeholder)
     }
 
+    @Test(arguments: [0x3164, 0x2800, 0x1160, 0x115F, 0xFFA0, 0x17B4, 0x180E, 0xFE0F] as [UInt32])
+    func blankButAssignedCharactersNeverMakeAName(_ value: UInt32) throws {
+        let blank = String(Character(try #require(Unicode.Scalar(value))))
+        let placeholder = PaveDisplayName.safe("")
+        #expect(PaveDisplayName.safe(blank) == placeholder)
+        #expect(PaveDisplayName.safe(String(repeating: blank, count: 8)) == placeholder)
+        #expect(PaveDisplayName.safe(blank + " " + blank) == placeholder)
+        #expect(PaveDisplayName.safe("No" + blank + "ra") == "Nora")
+    }
+
+    @Test func fallbackIsSansSurnomInFrench() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("bitchat/Views/Wesh/Pave/Pave.xcstrings")
+        let catalog = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let entry = try #require((catalog["strings"] as? [String: Any])?["pave.name.unnamed"] as? [String: Any])
+        let french = (((entry["localizations"] as? [String: Any])?["fr"] as? [String: Any])?["stringUnit"]
+            as? [String: Any])?["value"] as? String
+        #expect(french == "Sans surnom")
+    }
+
+    @Test(arguments: ["Vous", "vous", "VOUS.", "Vôus", "You", "Sans surnom", "sans  surnom", "No nickname",
+                      "Sans surnom (réservé)"])
+    func reservedInterfaceWordsCannotBeTakenAsNames(_ name: String) {
+        let safe = PaveDisplayName.safe(name)
+        #expect(safe == PaveCopy.text("pave.name.reserved"))
+        #expect(safe != PaveDisplayName.safe(""))
+    }
+
+    @Test func namesThatOnlyContainAReservedWordStayNames() {
+        #expect(PaveDisplayName.safe("Vous 42") == "Vous 42")
+        #expect(PaveDisplayName.safe("Youssef") == "Youssef")
+    }
+
     @Test func spoofedBadgeTextStaysPlainNameText() {
         // The badge is a symbol outside the name; whatever the name says, it is clamped text.
         let safe = PaveDisplayName.safe("\u{202E}Nora ✓ Vérifié\n" + String(repeating: "x", count: 40))
