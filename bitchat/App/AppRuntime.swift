@@ -149,13 +149,8 @@ final class AppRuntime: ObservableObject {
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
-            let nickname = await MainActor.run { self.chatViewModel.nickname }
-            let npub = await MainActor.run {
-                try? self.idBridge.getCurrentNostrIdentity()?.npub
-            }
-            await MainActor.run {
-                _ = VerificationService.shared.buildMyQRString(nickname: nickname, npub: npub)
-            }
+            // Warms the QR cache through the same read-only npub rule as the sheet.
+            await MainActor.run { _ = self.verificationModel.myQRString() }
         }
 
         NetworkActivationService.shared.start()

@@ -59,9 +59,23 @@ final class VerificationModel: ObservableObject {
     }
 
     func myQRString() -> String {
-        // Wesh too: the npub is generated locally and only signed into the QR.
-        let npub = try? chatViewModel.idBridge.getCurrentNostrIdentity()?.npub
-        return VerificationService.shared.buildMyQRString(nickname: currentNickname, npub: npub) ?? ""
+        guard WeshMode.isActive else {
+            let npub = try? chatViewModel.idBridge.getCurrentNostrIdentity()?.npub
+            return VerificationService.shared.buildMyQRString(nickname: currentNickname, npub: npub) ?? ""
+        }
+        // Read-only: showing a QR never creates Nostr key material.
+        let bridge = chatViewModel.idBridge
+        guard let identity = WeshQRNpub.identityForMyQR(
+            internetEnabled: WeshInternetSettings.isEnabled(),
+            panicFenced: chatViewModel.panicRecoveryBlocked,
+            storedIdentity: { try? bridge.storedNostrIdentity() }
+        ) else {
+            return VerificationService.shared.buildMyQRString(nickname: currentNickname, npub: nil) ?? ""
+        }
+        return VerificationService.shared.buildMyQRString(
+            nickname: currentNickname, npub: identity.npub,
+            npubSigner: { WeshQRNpub.signProof(canonicalBytes: $0, identity: identity) }
+        ) ?? ""
     }
 
     func verifyScannedPayload(_ payload: String) -> VerificationScanOutcome {

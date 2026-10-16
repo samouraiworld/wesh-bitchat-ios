@@ -30,6 +30,37 @@ struct NostrIdentityBridgeTests {
         }
     }
 
+    @Test("Read-only accessor never creates key material")
+    func storedIdentityIsReadOnly() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        #expect(try bridge.storedNostrIdentity() == nil)
+        #expect(keychain.saveCount == 0)
+        #expect(keychain.backing.load(key: identityKey, service: service) == nil)
+
+        let created = try #require(try bridge.getCurrentNostrIdentity())
+        #expect(try bridge.storedNostrIdentity()?.npub == created.npub)
+
+        keychain.readFailure = .deviceLocked
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.storedNostrIdentity() }
+    }
+
+    @Test("Owned npubs cover the current and derived identities and fail closed")
+    func locallyOwnedNpubsCoverEveryHeldKey() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        #expect(try bridge.locallyOwnedNpubs().isEmpty)
+        #expect(keychain.saveCount == 0)
+
+        let current = try #require(try bridge.getCurrentNostrIdentity())
+        let geohash = try bridge.deriveIdentity(forGeohash: "u09tu")
+        let rendezvous = try bridge.deriveIdentity(forBridgeRendezvous: "u09t")
+        #expect(try bridge.locallyOwnedNpubs() == [current.npub, geohash.npub, rendezvous.npub])
+
+        keychain.readFailure = .deviceLocked
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.locallyOwnedNpubs() }
+    }
+
     @Test("Unreadable seed is preserved and does not cache a replacement")
     func seedReadFailuresPreserveIdentity() throws {
         for failure: KeychainReadResult in [.deviceLocked, .accessDenied, .authenticationFailed, .otherError(-36)] {

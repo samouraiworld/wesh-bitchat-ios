@@ -95,7 +95,7 @@ private final class MockChatVerificationContext: ChatVerificationContext {
 
     // Noise sessions & verification transport
     var myNoiseStaticKey = Data(repeating: 0x42, count: 32)
-    var ownNostrNpub: String?
+    var locallyOwnedNpubs: Set<String>? = []
     var establishedNoiseSessions: Set<PeerID> = []
     var noiseSessionKeysByPeerID: [PeerID: Data] = [:]
     private(set) var installedCallbacks: (onPeerAuthenticated: (PeerID, String) -> Void, onHandshakeRequired: (PeerID) -> Void)?
@@ -236,7 +236,8 @@ struct ChatVerificationCoordinatorContextTests {
         let key = transport.noiseStaticPublicKeyData()
         let peerID = PeerID(str: "1122334455667788")
         let context = MockChatVerificationContext()
-        context.ownNostrNpub = try NostrIdentity.generate().npub
+        let mine = try NostrIdentity.generate().npub
+        context.locallyOwnedNpubs = [mine]
         context.unifiedPeers = [BitchatPeer(peerID: peerID, noisePublicKey: key, nickname: "Nora")]
         context.establishedNoiseSessions = [peerID]
         context.noiseSessionKeysByPeerID[peerID] = key
@@ -244,10 +245,13 @@ struct ChatVerificationCoordinatorContextTests {
         // The mock does not persist the verified flag the coordinator sets.
         context.verifiedFingerprints.insert(key.sha256Fingerprint())
         let coordinator = ChatVerificationCoordinator(context: context, weshMode: true)
-        func enroll(npub: String?) throws {
-            let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
+        func enroll(npub: String?, prover: NostrIdentity? = nil) throws {
+            var qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: key.hexEncodedString(),
                 signKeyHex: transport.noiseSigningPublicKeyData().hexEncodedString(), npub: npub,
                 nickname: "Nora", ts: 0, nonceB64: "", sigHex: "")
+            if let prover {
+                qr.npubSigHex = try #require(WeshQRNpub.signProof(canonicalBytes: qr.canonicalBytes(), identity: prover)).hexEncodedString()
+            }
             let before = WeshQRTrust.shared.contacts.first?.npub
             #expect(coordinator.beginQRVerification(with: qr))
             let nonce = try #require(coordinator.qrAttemptNonce(for: key))
@@ -258,13 +262,27 @@ struct ChatVerificationCoordinatorContextTests {
             #expect(coordinator.qrProgress(for: key, attemptNonce: nonce) == .verified)
         }
 
-        let theirs = try NostrIdentity.generate().npub
-        try enroll(npub: theirs)
-        #expect(WeshQRTrust.shared.contacts.map(\.npub) == [theirs])
+        let theirs = try NostrIdentity.generate()
+        try enroll(npub: theirs.npub)
+        #expect(WeshQRTrust.shared.contacts.map(\.npub) == [theirs.npub])
+        #expect(WeshQRTrust.shared.contacts.first?.isNpubProven == false)
         #expect(WeshQRTrust.shared.contacts.first?.noiseKeyHex == key.hexEncodedString())
 
+        // The proof travels from the scan to the enrollment.
+        try enroll(npub: theirs.npub, prover: theirs)
+        #expect(WeshQRTrust.shared.contacts.first?.isNpubProven == true)
+        // A proof by another key rejects the npub.
+        try enroll(npub: theirs.npub, prover: try NostrIdentity.generate())
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+
+        // Unknown own npubs fail closed.
+        context.locallyOwnedNpubs = nil
+        try enroll(npub: theirs.npub)
+        #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
+        context.locallyOwnedNpubs = [mine]
+
         // A QR claiming my own npub enrolls Bluetooth-only.
-        try enroll(npub: context.ownNostrNpub)
+        try enroll(npub: mine)
         #expect(WeshQRTrust.shared.contacts.count == 1)
         #expect(WeshQRTrust.shared.contacts.first?.npub == nil)
         #expect(WeshQRTrust.shared.contacts.first?.requiresRescanForInternet == true)
@@ -449,7 +467,8 @@ struct ChatVerificationCoordinatorContextTests {
         WeshQRTrust.shared.clear()
         for contact in contacts {
             if let key = Data(hexString: contact.noiseKeyHex) {
-                WeshQRTrust.shared.record(sessionKey: key, nickname: contact.nickname, npub: contact.npub)
+                WeshQRTrust.shared.record(sessionKey: key, nickname: contact.nickname, npub: contact.npub,
+                                          npubProven: contact.isNpubProven)
             }
         }
         // Hosted tests share the simulator app's preferences. Flush cleanup

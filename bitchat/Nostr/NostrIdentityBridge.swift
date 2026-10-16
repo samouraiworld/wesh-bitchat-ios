@@ -50,6 +50,36 @@ final class NostrIdentityBridge {
         return nostrIdentity
     }
     
+    /// The stored Nostr identity, read-only: nil when none is stored, and it
+    /// never creates one. Throws when storage cannot answer (e.g. locked).
+    /// UI and verification paths must use this, not `getCurrentNostrIdentity()`.
+    func storedNostrIdentity() throws -> NostrIdentity? {
+        switch keychain.loadWithResult(key: currentIdentityKey, service: keychainService) {
+        case .success(let existingData):
+            guard let identity = try? JSONDecoder().decode(NostrIdentity.self, from: existingData) else {
+                throw StorageError.invalidStoredIdentity
+            }
+            return identity
+        case .itemNotFound:
+            return nil
+        case .accessDenied, .deviceLocked, .authenticationFailed, .otherError:
+            throw StorageError.unavailable
+        }
+    }
+
+    /// Every npub this device holds a key for, read-only: the current
+    /// identity plus derived geohash/bridge identities in use. There is no
+    /// retained pre-rotation key store on iOS (panic deletes them all).
+    /// Throws when storage cannot answer, so callers fail closed.
+    func locallyOwnedNpubs() throws -> Set<String> {
+        var owned = Set<String>()
+        if let current = try storedNostrIdentity() { owned.insert(current.npub) }
+        cacheLock.lock()
+        owned.formUnion(derivedIdentityCache.values.map(\.npub))
+        cacheLock.unlock()
+        return owned
+    }
+
     /// Get Nostr public key associated with a Noise public key
     func getNostrPublicKey(for noisePublicKey: Data) -> String? {
         let key = "nostr-noise-\(noisePublicKey.base64EncodedString())"

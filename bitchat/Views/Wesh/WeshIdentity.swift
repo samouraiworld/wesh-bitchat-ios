@@ -21,6 +21,10 @@ final class WeshQRTrust: ObservableObject {
         let nickname: String
         /// Signed by the contact's QR and validated at enrollment; nil = Bluetooth-only.
         var npub: String? = nil
+        /// The QR also proved possession of the npub's key (`npubsig`).
+        var npubProven: Bool? = nil
+        /// Another contact claimed the same npub; unbound until a rescan settles it.
+        var npubConflict: Bool? = nil
         var id: String { noiseKeyHex }
         var peerID: PeerID { PeerID(hexData: Data(hexString: noiseKeyHex) ?? Data()) }
     }
@@ -35,12 +39,26 @@ final class WeshQRTrust: ObservableObject {
         contacts = (defaults.data(forKey: "wesh.qrContacts.v1").flatMap { try? JSONDecoder().decode([Contact].self, from: $0) }) ?? []
     }
 
-    func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil) {
+    func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil,
+                npubProven: Bool = false, npubConflict: Bool = false) {
         guard sessionKey.count == 32 else { return }
         fingerprints.insert(sessionKey.sha256Fingerprint())
         let hex = sessionKey.hexEncodedString()
         contacts.removeAll { $0.noiseKeyHex == hex }
-        contacts.append(Contact(noiseKeyHex: hex, nickname: nickname, npub: npub))
+        contacts.append(Contact(noiseKeyHex: hex, nickname: nickname, npub: npub,
+                                npubProven: npub != nil && npubProven ? true : nil,
+                                npubConflict: npubConflict ? true : nil))
+        persist()
+    }
+
+    /// Unbinds these contacts' npub and marks the conflict (WeshQRNpub precedence).
+    func flagNpubConflict(noiseKeysHex: Set<String>) {
+        guard !noiseKeysHex.isEmpty else { return }
+        for index in contacts.indices where noiseKeysHex.contains(contacts[index].noiseKeyHex.lowercased()) {
+            contacts[index].npub = nil
+            contacts[index].npubProven = nil
+            contacts[index].npubConflict = true
+        }
         persist()
     }
 

@@ -3,9 +3,10 @@ import Foundation
 import XCTest
 @testable import bitchat
 
-/// Same immutable synthetic fixtures as Android SharedSignedQRNpubInteropTest:
+/// Same immutable synthetic fixtures as the Android tests:
 /// `wesh-signed-qr-v1-npub.json` is `wesh-signed-qr-v1.json` with the existing
-/// npub field filled. Proves the QR v1 format is only filled, never changed.
+/// npub field filled, and `wesh-signed-qr-v1-npub-proof.json` adds the optional
+/// `npubsig` (NPUB-PROOF). Proves the QR v1 format is only filled, never changed.
 final class SharedSignedQRNpubInteropTests: XCTestCase {
     private struct Fixture: Decodable {
         let seedHex: String
@@ -21,6 +22,28 @@ final class SharedSignedQRNpubInteropTests: XCTestCase {
         let canonicalHex: String
         let canonicalSHA256: String
         let url: String
+    }
+
+    /// The Android-authored proof fixture: proof fields on top of the npub fixture.
+    private struct ProofFixture: Decodable {
+        let canonicalHex: String
+        let signatureHex: String
+        let npub: String
+        let nostrSecretHex: String
+        let npubProofMessageHex: String
+        let npubSigHex: String
+        let timestamp: Int64
+        let url: String
+    }
+
+    private func proofFixture() throws -> ProofFixture {
+        let bundle = Bundle(for: Self.self)
+        let name = "wesh-signed-qr-v1-npub-proof"
+        let url = try XCTUnwrap(
+            bundle.url(forResource: name, withExtension: "json")
+                ?? bundle.url(forResource: name, withExtension: "json", subdirectory: "Services/Fixtures")
+        )
+        return try JSONDecoder().decode(ProofFixture.self, from: Data(contentsOf: url))
     }
 
     private func fixture(_ name: String) throws -> Fixture {
@@ -91,5 +114,73 @@ final class SharedSignedQRNpubInteropTests: XCTestCase {
             XCTAssertNotNil(VerificationService.VerificationQR.fromURL(try XCTUnwrap(URL(string: url))))
             XCTAssertNil(verifier.verifyScannedQR(url, now: Double(f.timestamp)))
         }
+    }
+
+    func test_npubProofFixtureIsByteIdenticalAndProvesPossession() throws {
+        let f = try proofFixture()
+        let unproven = try fixture("wesh-signed-qr-v1-npub")
+        let npub = f.npub
+        let sigHex = f.npubSigHex
+        XCTAssertEqual(unproven.npub, npub)
+        XCTAssertEqual(f.canonicalHex, unproven.canonicalHex)
+        var built = payload(unproven, npub: npub)
+        built.npubSigHex = sigHex
+        XCTAssertEqual(built.canonicalBytes().hexEncodedString(), unproven.canonicalHex, "the proof stays outside the canonical bytes")
+        XCTAssertEqual(f.signatureHex, unproven.signatureHex)
+        XCTAssertEqual(built.toURLString(), f.url)
+        XCTAssertEqual(f.url, unproven.url + "&npubsig=" + sigHex)
+        XCTAssertEqual(WeshQRNpub.proofMessage(canonicalBytes: built.canonicalBytes()).hexEncodedString(), f.npubProofMessageHex)
+
+        let parsed = try XCTUnwrap(service().verifyScannedQR(f.url, now: Double(f.timestamp)))
+        XCTAssertEqual(parsed.npubSigHex, sigHex)
+        let xOnly = try XCTUnwrap(WeshQRNpub.xOnlyKey(fromNpub: npub))
+        XCTAssertTrue(WeshQRNpub.verifyProof(sigHex, xOnlyKey: xOnly, canonicalBytes: parsed.canonicalBytes()))
+        XCTAssertEqual(WeshQRNpub.enrollment(npub: parsed.npub, npubSigHex: parsed.npubSigHex,
+                                             canonicalBytes: parsed.canonicalBytes(), noiseKeyHex: parsed.noiseKeyHex,
+                                             ownedNpubs: [], contacts: []),
+                       .bound(npub: npub, proven: true, unbinding: []))
+
+        // A fresh proof by the documented secret also verifies (aux randomness differs).
+        let nostr = try NostrIdentity(privateKeyData: try XCTUnwrap(Data(hexString: f.nostrSecretHex)))
+        let fresh = try XCTUnwrap(WeshQRNpub.signProof(canonicalBytes: parsed.canonicalBytes(), identity: nostr))
+        XCTAssertTrue(WeshQRNpub.verifyProof(fresh.hexEncodedString(), xOnlyKey: xOnly, canonicalBytes: parsed.canonicalBytes()))
+    }
+
+    func test_npubsigIsOptionalButMustBeWellFormedAndPaired() throws {
+        let f = try proofFixture()
+        let npub = f.npub
+        let sigHex = f.npubSigHex
+        func parses(_ url: String) throws -> Bool {
+            VerificationService.VerificationQR.fromURL(try XCTUnwrap(URL(string: url))) != nil
+        }
+        XCTAssertTrue(try parses(f.url))
+        XCTAssertFalse(try parses(f.url.replacingOccurrences(of: "&npub=" + npub, with: "")), "npubsig without npub")
+        XCTAssertFalse(try parses(f.url.replacingOccurrences(of: sigHex, with: String(sigHex.dropLast(2)))))
+        XCTAssertFalse(try parses(f.url + "&npubsig=" + sigHex), "duplicate npubsig")
+        // A tampered proof still passes the Ed25519 check (outside the canonical
+        // bytes) but fails at enrollment, leaving the contact Bluetooth-only.
+        let tampered = f.url.replacingOccurrences(of: sigHex, with: "00" + sigHex.dropFirst(2))
+        let parsed = try XCTUnwrap(service().verifyScannedQR(tampered, now: Double(f.timestamp)))
+        XCTAssertEqual(WeshQRNpub.enrollment(npub: parsed.npub, npubSigHex: parsed.npubSigHex,
+                                             canonicalBytes: parsed.canonicalBytes(), noiseKeyHex: parsed.noiseKeyHex,
+                                             ownedNpubs: [], contacts: []),
+                       .bluetoothOnly)
+    }
+
+    func test_buildMyQRStringSignsTheProofOverTheCanonicalBytes() throws {
+        let transport = MockTransport()
+        let builder = VerificationService()
+        builder.configure(with: transport)
+        let nostr = try NostrIdentity.generate()
+        let url = try XCTUnwrap(builder.buildMyQRString(nickname: "Nora", npub: nostr.npub,
+            npubSigner: { WeshQRNpub.signProof(canonicalBytes: $0, identity: nostr) }))
+        let parsed = try XCTUnwrap(builder.verifyScannedQR(url))
+        XCTAssertEqual(parsed.npub, nostr.npub)
+        XCTAssertTrue(WeshQRNpub.verifyProof(try XCTUnwrap(parsed.npubSigHex), xOnlyKey: nostr.publicKey,
+                                             canonicalBytes: parsed.canonicalBytes()))
+        // Without a signer (or without an npub) there is no npubsig.
+        let plain = try XCTUnwrap(builder.buildMyQRString(nickname: "Nora", npub: nil,
+            npubSigner: { WeshQRNpub.signProof(canonicalBytes: $0, identity: nostr) }))
+        XCTAssertFalse(plain.contains("npub"))
     }
 }

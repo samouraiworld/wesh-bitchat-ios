@@ -58,8 +58,9 @@ protocol ChatVerificationContext: AnyObject {
     func noiseSessionPublicKeyData(for peerID: PeerID) -> Data?
     /// Our own Noise static public key.
     func noiseStaticPublicKeyData() -> Data
-    /// Our own npub; a contact's QR may not claim it.
-    var ownNostrNpub: String? { get }
+    /// Every npub this device holds a key for, read-only (never creates a
+    /// key); nil when it cannot be computed. A contact's QR may not claim one.
+    var locallyOwnedNpubs: Set<String>? { get }
     func hasEstablishedNoiseSession(with peerID: PeerID) -> Bool
     func triggerHandshake(with peerID: PeerID)
     func privateMediaPeerDidAuthenticate(_ peerID: PeerID)
@@ -128,7 +129,7 @@ extension ChatViewModel: ChatVerificationContext {
         meshService.noiseStaticPublicKeyData()
     }
 
-    var ownNostrNpub: String? { try? idBridge.getCurrentNostrIdentity()?.npub }
+    var locallyOwnedNpubs: Set<String>? { try? idBridge.locallyOwnedNpubs() }
 
     func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {
         mediaTransferCoordinator.peerDidAuthenticate(peerID.toShort())
@@ -171,6 +172,7 @@ final class ChatVerificationCoordinator {
         let signKeyHex: String
         let nickname: String
         let npub: String?
+        let npubSigHex: String?
         let nonceA: Data
         let createdAt: Date
         var sent: Bool
@@ -369,7 +371,7 @@ final class ChatVerificationCoordinator {
 
         let peerID = peer.peerID
         if let pending = pendingQRVerifications[peerID],
-           pending.scannedQRBytes == qr.canonicalBytes(),
+           pending.scannedQRBytes == qr.canonicalBytes(), pending.npubSigHex == qr.npubSigHex,
            (0...60).contains(now().timeIntervalSince(pending.createdAt)) { return true }
         // Retain the established contact separately; replace only scan progress.
         if let noiseKey = Data(hexString: targetNoise) { cancelQRVerification(for: noiseKey) }
@@ -383,6 +385,7 @@ final class ChatVerificationCoordinator {
             signKeyHex: qr.signKeyHex,
             nickname: qr.nickname,
             npub: qr.npub,
+            npubSigHex: qr.npubSigHex,
             nonceA: nonce,
             createdAt: now(),
             sent: false
@@ -469,9 +472,10 @@ final class ChatVerificationCoordinator {
         pendingQRVerifications.removeValue(forKey: peerID)
         if weshMode {
             // The Noise challenge just proved the QR signer holds this session.
-            let npub = WeshQRNpub.enrollable(pending.npub, noiseKeyHex: pending.noiseKeyHex,
-                                             ownNpub: context.ownNostrNpub, contacts: WeshQRTrust.shared.contacts)
-            WeshQRTrust.shared.record(sessionKey: sessionKey, nickname: pending.nickname, npub: npub)
+            let outcome = WeshQRNpub.enrollment(npub: pending.npub, npubSigHex: pending.npubSigHex,
+                                                canonicalBytes: pending.scannedQRBytes, noiseKeyHex: pending.noiseKeyHex,
+                                                ownedNpubs: context.locallyOwnedNpubs, contacts: WeshQRTrust.shared.contacts)
+            WeshQRTrust.shared.enroll(sessionKey: sessionKey, nickname: pending.nickname, outcome: outcome)
         }
         completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA
         context.setStoredVerified(fingerprint, verified: true)
