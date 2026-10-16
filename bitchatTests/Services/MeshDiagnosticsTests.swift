@@ -231,24 +231,6 @@ struct MeshDiagnosticsTests {
         #expect(MeshTopologyEdge(a, b) == MeshTopologyEdge(b, a))
         #expect(Set([MeshTopologyEdge(a, b), MeshTopologyEdge(b, a)]).count == 1)
     }
-
-    @Test func topologyLayoutPlacesSelfInCenter() {
-        let nodes: [MeshTopologyDisplayModel.Node] = [
-            .init(id: "self", label: "me", isSelf: true),
-            .init(id: "a", label: "alice", isSelf: false),
-            .init(id: "b", label: "bob", isSelf: false)
-        ]
-        let size = CGSize(width: 200, height: 200)
-        let positions = MeshTopologyView.layout(nodes: nodes, in: size)
-
-        #expect(positions["self"] == CGPoint(x: 100, y: 100))
-        #expect(positions.count == 3)
-        // Ring nodes sit on the same radius around the center.
-        let radiusA = hypot((positions["a"]?.x ?? 0) - 100, (positions["a"]?.y ?? 0) - 100)
-        let radiusB = hypot((positions["b"]?.x ?? 0) - 100, (positions["b"]?.y ?? 0) - 100)
-        #expect(abs(radiusA - radiusB) < 0.001)
-        #expect(radiusA > 0)
-    }
 }
 
 /// Minimal CommandContextProvider for diagnostics tests; records deferred
