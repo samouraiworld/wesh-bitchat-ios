@@ -701,6 +701,7 @@ private struct WeshConversation: View {
     @EnvironmentObject private var publicChat: PublicChatModel
     @EnvironmentObject private var inbox: PrivateInboxModel
     @EnvironmentObject private var privateChat: PrivateConversationModel
+    // periphery:ignore - observed so the view re-renders on verification updates
     @EnvironmentObject private var verification: VerificationModel
     @ObservedObject private var trust = WeshQRTrust.shared
     @State private var draft = ""
@@ -1564,6 +1565,7 @@ private struct WeshContactDetails: View {
     let contact: WeshQRTrust.Contact
     var inSheet = false
     @ObservedObject private var service: UnifiedPeerService
+    // periphery:ignore - observed so the view re-renders when QR trust changes
     @ObservedObject private var trust = WeshQRTrust.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.weshTheme) private var theme
@@ -1877,6 +1879,7 @@ private struct WeshConnectionSettings: View {
 
 private struct WeshPrivacySettings: View {
     let runtime: AppRuntime
+    // periphery:ignore - observed so the view re-renders when QR trust changes
     @ObservedObject private var trust = WeshQRTrust.shared
     @Environment(\.weshTheme) private var theme
     @EnvironmentObject private var chrome: AppChromeModel

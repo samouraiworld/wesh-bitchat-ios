@@ -954,6 +954,7 @@ private final class IdentityCacheFaultKeychain: KeychainManagerProtocol {
     }
     func deleteAllKeychainData() -> Bool { backing.deleteAllKeychainData() }
     func secureClear(_ data: inout Data) { backing.secureClear(&data) }
+    // periphery:ignore - protocol conformance of the test double
     func secureClear(_ string: inout String) { backing.secureClear(&string) }
     func verifyIdentityKeyExists() -> Bool { backing.verifyIdentityKeyExists() }
     func save(key: String, data: Data, service: String, accessible: CFString?) { backing.save(key: key, data: data, service: service, accessible: accessible) }

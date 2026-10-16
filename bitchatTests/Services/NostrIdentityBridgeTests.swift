@@ -146,6 +146,7 @@ private final class NostrPersistenceKeychain: KeychainManagerProtocol {
     func deleteIdentityKey(forKey key: String) -> Bool { backing.deleteIdentityKey(forKey: key) }
     func deleteAllKeychainData() -> Bool { backing.deleteAllKeychainData() }
     func secureClear(_ data: inout Data) { backing.secureClear(&data) }
+    // periphery:ignore - protocol conformance of the test double
     func secureClear(_ string: inout String) { backing.secureClear(&string) }
     func verifyIdentityKeyExists() -> Bool { backing.verifyIdentityKeyExists() }
     func getIdentityKeyWithResult(forKey key: String) -> KeychainReadResult { backing.getIdentityKeyWithResult(forKey: key) }

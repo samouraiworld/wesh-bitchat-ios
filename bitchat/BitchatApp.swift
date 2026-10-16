@@ -15,7 +15,6 @@ struct BitchatApp: App {
     static let groupID = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String ?? "group.\(bundleID)"
 
     @StateObject private var runtime: AppRuntime
-    @AppStorage(AppTheme.storageKey) private var appThemeRawValue = AppTheme.matrix.rawValue
     #if os(iOS)
     @Environment(\.scenePhase) var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
