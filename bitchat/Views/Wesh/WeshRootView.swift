@@ -783,7 +783,7 @@ private struct WeshConversation: View {
 
     var body: some View {
         let displayedMessages = messages
-        let knownKeys = isPrivate ? [] : runtime.chatViewModel.unifiedPeerService.peers.map(\.noisePublicKey)
+        let knownKeys: [Data] = isPrivate ? [] : runtime.chatViewModel.unifiedPeerService.peers.map(\.noisePublicKey)
         VStack(spacing: 0) {
             ScrollViewReader { scroll in
                 ScrollView {
@@ -830,18 +830,7 @@ private struct WeshConversation: View {
                                     Button { WeshPlatform.copy(message.content) } label: {
                                         Label("Copier", systemImage: "doc.on.doc")
                                     }
-                                    if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system",
-                                       let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID)
-                                        ?? (isPrivate ? nil : WeshMessageActions.publicAuthor(of: message.senderPeerID, knownNoiseKeys: knownKeys)) {
-                                        if !isPrivate {
-                                            Button("Signaler", role: .destructive) { reportTarget = identity; reportName = message.sender }
-                                                .accessibilityLabel("Signaler " + weshIdentitySummary(message.sender, fingerprint: identity.noiseKey?.sha256Fingerprint()))
-                                                .accessibilityHint("Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone")
-                                        }
-                                        Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = isPrivate ? title : message.sender }
-                                            .accessibilityLabel("Bloquer " + weshIdentitySummary(isPrivate ? title : message.sender, fingerprint: identity.noiseKey?.sha256Fingerprint()))
-                                            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
-                                    }
+                                    moderationActions(for: message, knownKeys: knownKeys)
                                 }
                         }
                     }.padding()
@@ -955,16 +944,9 @@ private struct WeshConversation: View {
             }
             .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
-        .alert("Signaler ce message ?", isPresented: Binding(get: { reportTarget != nil }, set: { if !$0 { reportTarget = nil } })) {
-            Button("Annuler", role: .cancel) { reportTarget = nil }
-            Button("Signaler et bloquer", role: .destructive) {
-                if let target = reportTarget { reportDone = runtime.chatViewModel.reportWeshPublicAuthor(target, displayName: reportName) }
-                reportTarget = nil
-            }
-        } message: { Text("Le signalement reste sur ce téléphone : rien n’est envoyé. \(reportName) sera bloqué ici et ses messages seront masqués.") }
-        .alert("Signalement enregistré", isPresented: $reportDone) {
-            Button("OK", role: .cancel) {}
-        } message: { Text("Cette personne est bloquée sur ce téléphone et ses messages sont masqués. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
+        .modifier(WeshReportAlerts(target: $reportTarget, name: reportName, done: $reportDone) { target, name in
+            runtime.chatViewModel.reportWeshPublicAuthor(target, displayName: name)
+        })
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
         .sheet(isPresented: $contactDetails) {
             if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
@@ -1028,6 +1010,39 @@ private struct WeshConversation: View {
             sharedFeedbackFocused = false
             draftGeneration = composerDrafts.currentGeneration
             draft = composerDrafts.load(draftKey)
+        }
+    }
+
+    /// The author a message action may target: the pinned private identity,
+    /// or a public sender whose short ID derives exactly from a known key.
+    private func moderationTarget(for message: BitchatMessage, knownKeys: [Data]) -> PeerID? {
+        guard message.sender != "system",
+              !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender) else { return nil }
+        if let pinned = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
+            return pinned
+        }
+        return isPrivate ? nil : WeshMessageActions.publicAuthor(of: message.senderPeerID, knownNoiseKeys: knownKeys)
+    }
+
+    @ViewBuilder
+    private func moderationActions(for message: BitchatMessage, knownKeys: [Data]) -> some View {
+        if let identity = moderationTarget(for: message, knownKeys: knownKeys) {
+            let name: String = isPrivate ? title : message.sender
+            let summary: String = weshIdentitySummary(name, fingerprint: identity.noiseKey?.sha256Fingerprint())
+            if !isPrivate {
+                Button("Signaler", role: .destructive) {
+                    reportTarget = identity
+                    reportName = message.sender
+                }
+                .accessibilityLabel("Signaler " + summary)
+                .accessibilityHint("Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone")
+            }
+            Button("Bloquer sur ce téléphone", role: .destructive) {
+                blockTarget = identity
+                blockName = name
+            }
+            .accessibilityLabel("Bloquer " + summary)
+            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
         }
     }
 
