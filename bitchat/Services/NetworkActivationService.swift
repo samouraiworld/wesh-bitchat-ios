@@ -70,8 +70,13 @@ final class NetworkActivationService: ObservableObject {
     private let relayControllerProvider: () -> NetworkActivationRelayControlling
     private let proxyController: NetworkActivationProxyControlling
     private let notificationCenter: NotificationCenter
+    /// Wesh Internet mode: the opt-in toggle is the whole policy and Tor is
+    /// mandatory. The stored direct-mode preference is ignored and erased, and
+    /// the proxy never switches to the direct session.
+    private let weshInternetPolicy: Bool
 
     private init() {
+        weshInternetPolicy = true
         storage = .standard
         locationPermissionPublisher = LocationChannelManager.shared.$permissionState.eraseToAnyPublisher()
         mutualFavoritesPublisher = FavoritesPersistenceService.shared.$mutualFavorites.eraseToAnyPublisher()
@@ -101,8 +106,10 @@ final class NetworkActivationService: ObservableObject {
         torController: NetworkActivationTorControlling,
         relayController: NetworkActivationRelayControlling,
         proxyController: NetworkActivationProxyControlling,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        weshInternetPolicy: Bool = false
     ) {
+        self.weshInternetPolicy = weshInternetPolicy
         self.storage = storage
         self.locationPermissionPublisher = locationPermissionPublisher
         self.mutualFavoritesPublisher = mutualFavoritesPublisher
@@ -135,7 +142,11 @@ final class NetworkActivationService: ObservableObject {
         guard !started else { return }
         started = true
 
-        if let stored = storage.object(forKey: Self.torPreferenceKey) as? Bool {
+        if weshInternetPolicy {
+            // Off-main readers (`persistedTorPreference`) must never see "direct".
+            storage.removeObject(forKey: Self.torPreferenceKey)
+            userTorEnabled = true
+        } else if let stored = storage.object(forKey: Self.torPreferenceKey) as? Bool {
             userTorEnabled = stored
         } else {
             userTorEnabled = true
@@ -213,7 +224,8 @@ final class NetworkActivationService: ObservableObject {
     }
 
     func setUserTorEnabled(_ enabled: Bool) {
-        guard enabled != userTorEnabled else { return }
+        // Wesh: Tor cannot be switched off; `userTorEnabled` stays true.
+        guard !weshInternetPolicy, enabled != userTorEnabled else { return }
         userTorEnabled = enabled
         storage.set(enabled, forKey: Self.torPreferenceKey)
         notificationCenter.post(
@@ -254,6 +266,7 @@ final class NetworkActivationService: ObservableObject {
     /// Base policy: who is allowed to use the network at all (permission or a
     /// mutual favorite), ignoring current link state.
     private func basePolicyAllowed() -> Bool {
+        if weshInternetPolicy { return true }
         let permOK = permissionProvider() == .authorized
         let hasMutual = !mutualFavoritesProvider().isEmpty
         // Being in a location channel counts too. Teleporting into a geohash
@@ -273,7 +286,7 @@ final class NetworkActivationService: ObservableObject {
     }
 
     private func applyTorState(torDesired: Bool) {
-        proxyController.setProxyMode(useTor: torDesired)
+        proxyController.setProxyMode(useTor: torDesired || weshInternetPolicy)
         if torDesired {
             torController.startIfNeeded()
         } else {

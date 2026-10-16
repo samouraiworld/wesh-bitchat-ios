@@ -125,7 +125,8 @@ final class AppRuntime: ObservableObject {
                 }
             )
         )
-        if chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
+        // Wesh Internet mode talks to its pinned relays only: no geo relay directory.
+        if !WeshMode.isActive && chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
             GeoRelayDirectory.shared.prefetchIfNeeded()
         }
         configureComposerDrafts()
@@ -152,7 +153,11 @@ final class AppRuntime: ObservableObject {
         }
 
         NetworkActivationService.shared.start()
-        if NetworkActivationService.shared.userInternetEnabled { GeohashPresenceService.shared.start() }
+        if WeshMode.isActive {
+            WeshInternetMode.shared.start()
+        } else if NetworkActivationService.shared.userInternetEnabled {
+            GeohashPresenceService.shared.start()
+        }
         checkForSharedContent()
         performMediaMaintenance()
 
@@ -207,6 +212,8 @@ final class AppRuntime: ObservableObject {
         case .background:
             composerDrafts.flush()
             record(.scenePhaseChanged(.background))
+            // Before Tor goes dormant, so the drop reads as Paused, not a fault.
+            WeshInternetMode.shared.appDidEnterBackground()
             TorManager.shared.setAppForeground(false)
             TorManager.shared.goDormantOnBackground()
             chatViewModel.endGeohashSampling()
@@ -218,6 +225,7 @@ final class AppRuntime: ObservableObject {
             record(.scenePhaseChanged(.active))
             chatViewModel.meshService.startServices()
             TorManager.shared.setAppForeground(true)
+            WeshInternetMode.shared.appWillEnterForeground()
             let shouldRefreshNostrConnections = didHandleInitialActive && didEnterBackground
 
             if didHandleInitialActive && didEnterBackground {

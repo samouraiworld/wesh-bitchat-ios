@@ -30,6 +30,13 @@ protocol NotificationCategoryRegistering {
     func setCategories(_ categories: Set<UNNotificationCategory>)
 }
 
+protocol NotificationRemoving {
+    func removeAllDeliveredNotifications()
+    func removeAllPendingNotificationRequests()
+}
+
+extension UNUserNotificationCenter: NotificationRemoving {}
+
 private final class NotificationCenterAuthorizerAdapter: NotificationAuthorizing {
     private let center: UNUserNotificationCenter
 
@@ -88,6 +95,11 @@ private struct NoopNotificationCategoryRegistrar: NotificationCategoryRegisterin
     func setCategories(_ categories: Set<UNNotificationCategory>) {}
 }
 
+private struct NoopNotificationRemover: NotificationRemoving {
+    func removeAllDeliveredNotifications() {}
+    func removeAllPendingNotificationRequests() {}
+}
+
 final class NotificationService {
     static let shared = NotificationService()
 
@@ -130,6 +142,7 @@ final class NotificationService {
     private let authorizer: NotificationAuthorizing
     private let requestDeliverer: NotificationRequestDelivering
     private let categoryRegistrar: NotificationCategoryRegistering
+    private let remover: NotificationRemoving
 
     /// Returns true if running in test environment (XCTest, Swift Testing, or CI)
     private var isRunningTests: Bool {
@@ -151,11 +164,13 @@ final class NotificationService {
             self.authorizer = NoopNotificationAuthorizer()
             self.requestDeliverer = NoopNotificationRequestDeliverer()
             self.categoryRegistrar = NoopNotificationCategoryRegistrar()
+            self.remover = NoopNotificationRemover()
         } else {
             let center = UNUserNotificationCenter.current()
             self.authorizer = NotificationCenterAuthorizerAdapter(center: center)
             self.requestDeliverer = NotificationCenterRequestDelivererAdapter(center: center)
             self.categoryRegistrar = NotificationCenterCategoryRegistrarAdapter(center: center)
+            self.remover = center
         }
     }
 
@@ -164,6 +179,7 @@ final class NotificationService {
         authorizer: NotificationAuthorizing,
         requestDeliverer: NotificationRequestDelivering,
         categoryRegistrar: NotificationCategoryRegistering = NoopNotificationCategoryRegistrar(),
+        remover: NotificationRemoving = NoopNotificationRemover(),
         hidePreviewsProvider: @escaping () -> Bool = { NotificationPrivacySettings.hideMessagePreviews },
         allowsLocationChannelNotifications: Bool = true
     ) {
@@ -172,7 +188,15 @@ final class NotificationService {
         self.authorizer = authorizer
         self.requestDeliverer = requestDeliverer
         self.categoryRegistrar = categoryRegistrar
+        self.remover = remover
         self.hidePreviewsProvider = hidePreviewsProvider
+    }
+
+    /// Panic wipe: alerts already shown or scheduled can name a sender or
+    /// quote a message, so none may outlive the local data.
+    func removeAllNotifications() {
+        remover.removeAllDeliveredNotifications()
+        remover.removeAllPendingNotificationRequests()
     }
 
     func requestAuthorization() {
@@ -254,7 +278,8 @@ final class NotificationService {
         let identifier = "private-\(UUID().uuidString)"
         // Routing payload, not display copy: `userInfo` never reaches the lock
         // screen, and the conversation to open still has to be identifiable.
-        let userInfo = ["peerID": peerID.id, "senderName": sender]
+        // The sender's name stays out of the payload: it is not needed to route.
+        let userInfo = ["peerID": peerID.id]
 
         sendLocalNotification(title: title, body: body, identifier: identifier, userInfo: userInfo)
     }

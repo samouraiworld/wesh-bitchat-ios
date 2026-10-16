@@ -1199,7 +1199,6 @@ struct ChatViewModelBluetoothTests {
 // MARK: - Private Media Deletion Tests
 
 struct ChatViewModelPrivateMediaDeletionTests {
-
     @Test @MainActor
     func deleteMediaMessageTombstonesIncomingButNotOutgoingStableMedia() {
         let (viewModel, transport) = makeTestableViewModel()
@@ -1535,6 +1534,7 @@ struct ChatViewModelPrivateMediaDeletionTests {
             kind: .canceled
         ))
         let coordinator = viewModel.liveVoiceCoordinator
+        coordinator.acceptsIncomingMedia = { true }
         defer {
             coordinator.handleVoiceFramePayload(
                 from: peerID,
@@ -2093,7 +2093,7 @@ struct ChatViewModelPanicTests {
     func panicClearAllData_stopsNetworkBeforeWipeAndRestartsAfterCommit() {
         var events: [String] = []
         let lifecycle = PanicNetworkLifecycle(
-            stop: { events.append("stop") },
+            stop: { events.append("stop"); return true },
             restart: { events.append("restart") }
         )
         let (viewModel, _) = makeTestableViewModel(
@@ -2106,6 +2106,40 @@ struct ChatViewModelPanicTests {
         #expect(completed)
         #expect(events == ["stop", "wipe", "restart"])
         #expect(viewModel.networkActivationAllowed)
+    }
+
+    @Test @MainActor
+    func panicNetworkWipeFailureKeepsRecoveryPendingAndServicesStopped() {
+        var events: [String] = []
+        let operations = PanicRecoveryOperations(
+            isPending: { false },
+            begin: {
+                events.append("begin")
+                return PanicRecoveryIntent(
+                    fileMarkerEstablished: true,
+                    externalMarkerEstablished: false
+                )
+            },
+            wipeMedia: { _ in events.append("wipe") },
+            complete: { events.append("complete") }
+        )
+        // E.g. the Arti directory survived because Tor did not stop in time.
+        let lifecycle = PanicNetworkLifecycle(
+            stop: { events.append("stop"); return false },
+            restart: { events.append("restart") }
+        )
+        let (viewModel, transport) = makeTestableViewModel(
+            panicRecoveryOperations: operations,
+            panicNetworkLifecycle: lifecycle
+        )
+        let startsBeforePanic = transport.startServicesCallCount
+
+        let completed = viewModel.panicClearAllData()
+
+        #expect(!completed)
+        #expect(events == ["stop", "begin", "wipe"])
+        #expect(transport.startServicesCallCount == startsBeforePanic)
+        #expect(!viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
@@ -2126,7 +2160,7 @@ struct ChatViewModelPanicTests {
             complete: { events.append("complete") }
         )
         let lifecycle = PanicNetworkLifecycle(
-            stop: { events.append("stop") },
+            stop: { events.append("stop"); return true },
             restart: { events.append("restart") }
         )
         let (viewModel, transport) = makeTestableViewModel(

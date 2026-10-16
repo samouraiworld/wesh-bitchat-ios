@@ -88,6 +88,11 @@ struct NostrRelayManagerDependencies {
     /// for someone who denied location and has no mutual favorites.
     var isInLocationChannel: () -> Bool = { false }
     var selectedChannelPublisher: AnyPublisher<ChannelID, Never> = Empty().eraseToAnyPublisher()
+    /// Wesh Internet mode: when set, these are the only relays ever contacted
+    /// (built-in, custom and geohash relays are ignored), they need no
+    /// favorite/location gate (`activationAllowed` is the toggle), and Tor is
+    /// used whatever the stored Tor preference says.
+    var weshPinnedRelays: [String]?
 }
 
 private extension NostrRelayManagerDependencies {
@@ -121,7 +126,8 @@ private extension NostrRelayManagerDependencies {
                 if case .location = LocationChannelManager.shared.selectedChannel { return true }
                 return false
             },
-            selectedChannelPublisher: LocationChannelManager.shared.$selectedChannel.eraseToAnyPublisher()
+            selectedChannelPublisher: LocationChannelManager.shared.$selectedChannel.eraseToAnyPublisher(),
+            weshPinnedRelays: WeshInternetPolicy.pinnedRelays
         )
     }
 }
@@ -180,7 +186,7 @@ final class NostrRelayManager: ObservableObject {
 
     private func reloadDefaultRelays() {
         var seen = Set<String>()
-        defaultRelays = (Self.builtInRelays + dependencies.customRelays())
+        defaultRelays = (dependencies.weshPinnedRelays ?? (Self.builtInRelays + dependencies.customRelays()))
             .compactMap { NostrRelayURL.normalized($0) }
             .filter { seen.insert($0).inserted }
         defaultRelaySet = Set(defaultRelays)
@@ -281,7 +287,7 @@ final class NostrRelayManager: ObservableObject {
     // overflow warning (first + every Nth drop).
     private var pendingSendDropCount = 0
     private let encoder = JSONEncoder()
-    private var shouldUseTor: Bool { dependencies.userTorEnabled() }
+    private var shouldUseTor: Bool { dependencies.weshPinnedRelays != nil || dependencies.userTorEnabled() }
     
     // Exponential backoff configuration
     private let initialBackoffInterval: TimeInterval = TransportConfig.nostrRelayInitialBackoffSeconds
@@ -807,7 +813,8 @@ final class NostrRelayManager: ObservableObject {
     }
 
     private func applyDefaultRelayPolicy(force: Bool = false) {
-        let shouldAllow = hasMutualFavorites || hasLocationPermission || dependencies.isInLocationChannel()
+        let shouldAllow = dependencies.weshPinnedRelays != nil
+            || hasMutualFavorites || hasLocationPermission || dependencies.isInLocationChannel()
         if !force && shouldAllow == allowDefaultRelays { return }
         allowDefaultRelays = shouldAllow
         if shouldAllow {
@@ -861,6 +868,7 @@ final class NostrRelayManager: ObservableObject {
         for rawURL in urls {
             guard let url = NostrRelayURL.normalized(rawURL) else { continue }
             if !allowDefaultRelays && defaultRelaySet.contains(url) { continue }
+            if dependencies.weshPinnedRelays != nil && !defaultRelaySet.contains(url) { continue }
             if seen.insert(url).inserted {
                 result.append(url)
             }

@@ -103,7 +103,9 @@ enum WeshQRNpub {
 
 extension WeshQRTrust {
     /// Applies a verified scan's npub outcome.
-    func enroll(sessionKey: Data, nickname: String, outcome: WeshQRNpub.Outcome) {
+    /// False when the sealed contact write was not confirmed.
+    @discardableResult
+    func enroll(sessionKey: Data, nickname: String, outcome: WeshQRNpub.Outcome) -> Bool {
         let hex = sessionKey.hexEncodedString()
         let current = contacts.first { $0.noiseKeyHex.lowercased() == hex }
         // Review flags stay pending until the user settles them; a later scan never clears them.
@@ -111,20 +113,20 @@ extension WeshQRTrust {
         let warning = current?.hasNpubProofWarning ?? false
         switch outcome {
         case .keep:
-            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+            return record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
                    npubProven: current?.isNpubProven ?? false, npubConflict: conflict, npubProofWarning: warning)
         case .bluetoothOnly:
-            record(sessionKey: sessionKey, nickname: nickname, npubConflict: conflict, npubProofWarning: warning)
+            return record(sessionKey: sessionKey, nickname: nickname, npubConflict: conflict, npubProofWarning: warning)
         case let .bound(npub, proven, unbinding):
-            flagNpubConflict(noiseKeysHex: unbinding)
-            record(sessionKey: sessionKey, nickname: nickname, npub: npub, npubProven: proven,
+            guard flagNpubConflict(noiseKeysHex: unbinding) else { return false }
+            return record(sessionKey: sessionKey, nickname: nickname, npub: npub, npubProven: proven,
                    npubConflict: conflict, npubProofWarning: warning)
         case .conflict:
             // This contact's earlier binding, if any, is not another's claim: keep it.
-            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+            return record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
                    npubProven: current?.isNpubProven ?? false, npubConflict: true, npubProofWarning: warning)
         case .keepProven:
-            record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
+            return record(sessionKey: sessionKey, nickname: nickname, npub: current?.npub,
                    npubProven: true, npubConflict: conflict, npubProofWarning: true)
         }
     }

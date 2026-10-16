@@ -111,6 +111,21 @@ protocol ChatPrivateConversationContext: AnyObject {
     func updatePeerFavoritedUs(noiseKey: Data, favorited: Bool, nickname: String, nostrPublicKey: String?)
     /// Posts the incoming-private-message local notification.
     func notifyPrivateMessage(from senderName: String, message: String, peerID: PeerID)
+
+    // MARK: Wesh admission
+    /// True when the owner took a message from a sender that is not a
+    /// verified contact: it must not enter the conversation store, notify,
+    /// or be acknowledged as read.
+    func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool
+    /// False when only QR-verified contacts may reach this device privately
+    /// and this sender is not one. Its traffic is dropped before any side
+    /// effect: no store, no favorite update, no acknowledgement.
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool
+}
+
+extension ChatPrivateConversationContext {
+    func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool { false }
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool { true }
 }
 
 extension ChatViewModel: ChatPrivateConversationContext {
@@ -181,6 +196,7 @@ extension ChatViewModel: ChatPrivateConversationContext {
     }
 
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
+        guard messageRouter.admitsControlMessage(to: peerID) else { return }
         meshService.sendReadReceipt(receipt, to: peerID)
     }
 
@@ -503,6 +519,8 @@ final class ChatPrivateConversationCoordinator {
         if context.isNostrBlocked(pubkeyHexLowercased: senderPubkey) {
             return
         }
+        // Wesh: only an npub bound to a QR-verified contact gets an ack or a store.
+        guard context.admitsPrivateSender(convKey) else { return }
 
         guard markInboundGeoDMSeen(messageId) else { return }
 
@@ -575,7 +593,8 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
-        guard let messageID = String(data: payload.data, encoding: .utf8) else { return }
+        guard context.admitsPrivateSender(convKey),
+              let messageID = String(data: payload.data, encoding: .utf8) else { return }
 
         let aliases = accountConversationAliases(for: convKey)
         let clearedRetainedMessage = convKey.noiseKey != nil
@@ -612,7 +631,8 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
-        guard let messageID = String(data: payload.data, encoding: .utf8) else { return }
+        guard context.admitsPrivateSender(convKey),
+              let messageID = String(data: payload.data, encoding: .utf8) else { return }
 
         let aliases = accountConversationAliases(for: convKey)
         let clearedRetainedMessage = convKey.noiseKey != nil
@@ -662,9 +682,13 @@ final class ChatPrivateConversationCoordinator {
         }
 
         if message.content.hasPrefix("[FAVORITED]") || message.content.hasPrefix("[UNFAVORITED]") {
+            // A marker can bind an npub and post a line: QR-verified senders only.
+            guard context.admitsPrivateSender(peerID) else { return }
             handleFavoriteNotification(message.content, from: peerID, senderNickname: message.sender)
             return
         }
+
+        if context.divertUnverifiedPrivateMessage(message, from: peerID) { return }
 
         migratePrivateChatsIfNeeded(for: peerID, senderNickname: message.sender)
 
