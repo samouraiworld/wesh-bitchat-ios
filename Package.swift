@@ -71,7 +71,9 @@ let package = Package(
                 // receive compatibility independently of the local generator.
                 .process("Nostr/Fixtures"),
                 // Signed QR vectors shared with the Android client.
-                .process("Services/Fixtures")
+                .process("Services/Fixtures"),
+                // Remote nickname vectors shared with the Android client.
+                .process("Pave/Fixtures")
             ]
         )
     ]

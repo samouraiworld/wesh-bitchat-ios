@@ -5,9 +5,11 @@ enum PaveInboxItem {
     /// The public room card, always first.
     case publicRoom(inRange: Int, lastMessage: String?, time: String?)
     /// A verified contact; the preview is the last message, never a status line.
-    case contact(name: String, lastMessage: String?, time: String?)
+    /// `fingerprint` is `PaveFingerprint.short(_:)` of the contact's Noise static key, nil when
+    /// unknown; it has no default, so no row shows a remote name without it.
+    case contact(name: String, fingerprint: String?, lastMessage: String?, time: String?)
     /// An unverified request; its content stays hidden until codes are exchanged.
-    case request(name: String, messageCount: Int, time: String)
+    case request(name: String, fingerprint: String?, messageCount: Int, time: String)
 }
 
 struct PaveInboxRow: View {
@@ -20,11 +22,11 @@ struct PaveInboxRow: View {
             switch item {
             case let .publicRoom(inRange, lastMessage, time):
                 publicCard(inRange: inRange, lastMessage: lastMessage, time: time)
-            case let .contact(name, lastMessage, time):
-                row(name: name, verified: true,
+            case let .contact(name, fingerprint, lastMessage, time):
+                row(name: name, fingerprint: fingerprint, verified: true,
                     preview: Text(lastMessage ?? PaveCopy.text("pave.inbox.noMessage")), time: time)
-            case let .request(name, count, time):
-                row(name: name, verified: false,
+            case let .request(name, fingerprint, count, time):
+                row(name: name, fingerprint: fingerprint, verified: false,
                     preview: Text(PaveCopy.text("pave.inbox.unverified")).foregroundColor(theme[.warning])
                         + Text(verbatim: " · ")
                         + Text(PaveCopy.text("pave.inbox.requestPreview", count)),
@@ -38,17 +40,19 @@ struct PaveInboxRow: View {
         .accessibilityHint(hint)
     }
 
-    /// Spoken in a fixed order, the trust state before the peer-chosen name.
+    /// Spoken in a fixed order, the trust state before the peer-chosen name and its fingerprint.
     private var accessibilityText: String {
         switch item {
         case let .publicRoom(inRange, lastMessage, time):
             return [PaveCopy.text("pave.inbox.publicTitle"), PaveCopy.text("pave.inbox.publicInRange", inRange),
                     lastMessage, time].compactMap { $0 }.joined(separator: ", ")
-        case let .contact(name, lastMessage, time):
+        case let .contact(name, fingerprint, lastMessage, time):
             return [PaveCopy.text("pave.inbox.verified"), PaveDisplayName.safe(name),
+                    PaveFingerprint.accessibilityText(fingerprint),
                     lastMessage ?? PaveCopy.text("pave.inbox.noMessage"), time].compactMap { $0 }.joined(separator: ", ")
-        case let .request(name, count, time):
+        case let .request(name, fingerprint, count, time):
             return [PaveCopy.text("pave.inbox.unverified"), PaveDisplayName.safe(name),
+                    PaveFingerprint.accessibilityText(fingerprint),
                     PaveCopy.text("pave.inbox.requestPreview", count), time].joined(separator: ", ")
         }
     }
@@ -86,7 +90,7 @@ struct PaveInboxRow: View {
 
     /// The trust badge is a fixed-size symbol in a fixed leading column: the name, whatever
     /// its content or length, can neither move it nor sit where it sits.
-    private func row(name: String, verified: Bool, preview: Text, time: String?) -> some View {
+    private func row(name: String, fingerprint: String?, verified: Bool, preview: Text, time: String?) -> some View {
         HStack(alignment: .top, spacing: PaveSpace.s3) {
             trustBadge(verified: verified)
             VStack(alignment: .leading, spacing: PaveSpace.s1) {
@@ -100,6 +104,7 @@ struct PaveInboxRow: View {
                         Text(time).paveText(.caption).foregroundStyle(theme[.inkMuted]).fixedSize()
                     }
                 }
+                PaveFingerprintText(fingerprint: fingerprint)
                 preview
                     .paveText(verified ? .body : .label)
                     .foregroundStyle(theme[.inkMuted])
@@ -133,13 +138,14 @@ struct PaveInboxRow_Previews: PreviewProvider {
                 VStack(spacing: PaveSpace.s2) {
                     PaveInboxRow(item: .publicRoom(inRange: 7, lastMessage: "Point d'eau ouvert au coin de la place.",
                                                    time: "18:01")) {}
-                    PaveInboxRow(item: .contact(name: "Nora", lastMessage: "Oui, j'arrive par la rue de la Paix.",
-                                                time: "17:53")) {}
-                    PaveInboxRow(item: .contact(name: "Sami", lastMessage: nil, time: nil)) {}
-                    PaveInboxRow(item: .request(name: "Léo 17", messageCount: 1, time: "18:02")) {}
+                    PaveInboxRow(item: .contact(name: "Nora", fingerprint: "7F3A 91C2 0B5E 44D8",
+                                                lastMessage: "Oui, j'arrive par la rue de la Paix.", time: "17:53")) {}
+                    PaveInboxRow(item: .contact(name: "Sami", fingerprint: nil, lastMessage: nil, time: nil)) {}
+                    PaveInboxRow(item: .request(name: "Léo 17", fingerprint: "0B5E 44D8 7F3A 91C2",
+                                                messageCount: 1, time: "18:02")) {}
                     // A hostile nickname: bidi override, fake badge text, a newline and a long tail.
                     PaveInboxRow(item: .request(name: "\u{202E}Nora ✓ Vérifié\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                                                messageCount: 2, time: "18:05")) {}
+                                                fingerprint: "A1B2 C3D4 E5F6 0718", messageCount: 2, time: "18:05")) {}
                 }
                 .padding(PaveSpace.s4)
             }
