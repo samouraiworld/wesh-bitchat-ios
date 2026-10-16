@@ -121,11 +121,18 @@ protocol ChatPrivateConversationContext: AnyObject {
     /// and this sender is not one. Its traffic is dropped before any side
     /// effect: no store, no favorite update, no acknowledgement.
     func admitsPrivateSender(_ peerID: PeerID) -> Bool
+    /// Wesh: `[FAVORITED]`/`[UNFAVORITED]` notices are never trusted (the npub
+    /// comes only from the QR), so they are dropped without any effect.
+    var ignoresFavoriteNotices: Bool { get }
+    /// Wesh: the QR contact's nickname for a Nostr sender resolved to this key.
+    func qrContactNickname(forNoiseKey noiseKey: Data) -> String?
 }
 
 extension ChatPrivateConversationContext {
     func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool { false }
     func admitsPrivateSender(_ peerID: PeerID) -> Bool { true }
+    var ignoresFavoriteNotices: Bool { false }
+    func qrContactNickname(forNoiseKey noiseKey: Data) -> String? { nil }
 }
 
 extension ChatViewModel: ChatPrivateConversationContext {
@@ -537,6 +544,9 @@ final class ChatPrivateConversationCoordinator {
         // fallback (e.g. "anon#678e") that would mislabel favorite-transport
         // DMs. Geohash conversations (nostr_ keys) keep the geo name.
         let senderName: String = {
+            if let noiseKey = convKey.noiseKey, let qrNickname = context.qrContactNickname(forNoiseKey: noiseKey) {
+                return qrNickname
+            }
             if let noiseKey = convKey.noiseKey,
                let favoriteNickname = context.favoriteRelationship(forNoiseKey: noiseKey)?.peerNickname,
                !favoriteNickname.isEmpty {
@@ -814,6 +824,7 @@ final class ChatPrivateConversationCoordinator {
     /// transport. `peerID` must resolve to a noise key — a full 64-hex ID or
     /// one the unified peer list knows; otherwise the notification is dropped.
     func handleFavoriteNotification(_ content: String, from peerID: PeerID, senderNickname: String) {
+        guard !context.ignoresFavoriteNotices else { return }
         let isFavorite = content.hasPrefix("[FAVORITED]")
         let parts = content.split(separator: ":")
 
