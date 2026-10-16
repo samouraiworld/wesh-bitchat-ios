@@ -404,7 +404,10 @@ extension ChatViewModel {
               identityManager.isPersistenceAvailable,
               !identityManager.hasPendingPersistenceChanges else { return false }
         let fingerprint = key.sha256Fingerprint()
+        // Same trust as the Bluetooth gate (WeshQRTrust.canSend): QR-enrolled and still verified here.
         guard !identityManager.isBlocked(fingerprint: fingerprint),
+              !isPeerBlocked(getShortIDForNoiseKey(peerID)),
+              peerIdentityStore.isVerified(fingerprint),
               WeshQRTrust.shared.fingerprints.contains(fingerprint),
               let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex) == key }),
               WeshInternetRoute.deliveryNpub(for: contact) != nil else { return false }
@@ -417,7 +420,7 @@ extension ChatViewModel {
     /// created here); once per contact and npub in this process.
     @MainActor
     func announceWeshInternetKey(to peerID: PeerID) {
-        guard weshPrivatePolicyEnabled,
+        guard weshPrivatePolicyEnabled, !panicRecoveryBlocked, weshInternetIsOn(),
               let sessionKey = noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID)),
               canSendWeshPrivate(to: PeerID(hexData: sessionKey)),
               let npub = idBridge.messagingIdentity(weshActive: true)?.npub else { return }

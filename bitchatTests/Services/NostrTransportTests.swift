@@ -491,6 +491,8 @@ struct NostrTransportTests {
         let favorite = makeRelationship(peerNoisePublicKey: favoriteKey, peerNostrPublicKey: favoriteNpub.npub, peerNickname: "Fav")
         let recipients = CurrentValueSubject<[PeerID: String], Never>([contactPeer: contactNpub.npub])
         let online = CurrentValueSubject<Bool, Never>(false)
+        final class Blocked { var keys: Set<Data> = [] }
+        let blocked = Blocked()
         let probe = NostrTransportProbe()
         let transport = NostrTransport(
             keychain: keychain,
@@ -502,7 +504,8 @@ struct NostrTransportTests {
                 sendEvent: probe.record(event:),
                 relayConnectivity: { Just(true).eraseToAnyPublisher() },
                 weshRecipients: { recipients.eraseToAnyPublisher() },
-                weshOnline: { online.eraseToAnyPublisher() }
+                weshOnline: { online.eraseToAnyPublisher() },
+                weshIsBlocked: { blocked.keys.contains($0) }
             )
         )
         transport.senderPeerID = PeerID(str: "0123456789abcdef")
@@ -526,6 +529,12 @@ struct NostrTransportTests {
         #expect(probe.sentEvents.count == 1)
         let result = try decodeEmbeddedPayload(from: probe.sentEvents[0], recipient: contactNpub)
         #expect(try decodePrivateMessage(from: result.payload).messageID == "pm-wesh")
+
+        // A blocked contact is never sent anything, even if still in the map.
+        blocked.keys = [contactKey]
+        transport.sendPrivateMessage("blocked", to: contactPeer, recipientNickname: "QR", messageID: "pm-blocked")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.count == 1)
 
         // A contact losing its npub (rescan, conflict) is no longer reachable.
         recipients.send([:])
@@ -569,7 +578,8 @@ struct NostrTransportTests {
         scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { _, _ in },
         relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() },
         weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
-        weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil
+        weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
+        weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
     ) -> NostrTransport.Dependencies {
         NostrTransport.Dependencies(
             notificationCenter: notificationCenter,
@@ -582,7 +592,8 @@ struct NostrTransportTests {
             scheduleAfter: scheduleAfter,
             relayConnectivity: relayConnectivity,
             weshRecipients: weshRecipients,
-            weshOnline: weshOnline
+            weshOnline: weshOnline,
+            weshIsBlocked: weshIsBlocked
         )
     }
 

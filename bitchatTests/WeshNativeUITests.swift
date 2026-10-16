@@ -658,14 +658,20 @@ struct WeshNativeUITests {
         let identity = MockIdentityManager(storage)
         let vm = ChatViewModel(keychain: storage, idBridge: NostrIdentityBridge(keychain: MockKeychain()),
                                identityManager: identity, transport: MockTransport(), weshPrivatePolicyEnabled: true)
-        var online = false
-        vm.weshInternetIsOn = { online }
+        final class Online { var value = false }
+        let state = Online()
+        vm.weshInternetIsOn = { state.value }
 
         // Enrolled but Bluetooth-only (no npub in its QR): never over Internet.
-        online = true
+        state.value = true
+        vm.peerIdentityStore.setVerified(key.sha256Fingerprint(), verified: true)
         #expect(!vm.canSendWeshInternet(to: peer))
         WeshQRTrust.shared.record(sessionKey: key, nickname: "Synthetic Internet peer", npub: contactNostr.npub, npubProven: true)
         #expect(vm.canSendWeshInternet(to: peer))
+        // Un-verified locally: same as the Bluetooth gate, no Internet either.
+        vm.peerIdentityStore.setVerified(key.sha256Fingerprint(), verified: false)
+        #expect(!vm.canSendWeshInternet(to: peer))
+        vm.peerIdentityStore.setVerified(key.sha256Fingerprint(), verified: true)
         #expect(vm.canSendWeshMessage(to: peer))
         #expect(vm.messageRouter.privateSendPolicy?(peer, nil) == key)
         #expect(vm.messageRouter.privateSendPolicy?(peer, Data(repeating: 0x01, count: 32)) == nil)
@@ -674,12 +680,12 @@ struct WeshNativeUITests {
         #expect(vm.ignoresFavoriteNotices)
 
         // Fail closed: Internet not On.
-        online = false
+        state.value = false
         #expect(!vm.canSendWeshInternet(to: peer))
         #expect(vm.messageRouter.privateSendPolicy?(peer, nil) == nil)
 
         // Blocked: no send, and its Nostr traffic resolves to nobody.
-        online = true
+        state.value = true
         identity.setBlocked(key.sha256Fingerprint(), isBlocked: true)
         #expect(!vm.canSendWeshInternet(to: peer))
         #expect(vm.qrContactNoiseKey(forNostrPubkey: contactNostr.publicKeyHex) == nil)
