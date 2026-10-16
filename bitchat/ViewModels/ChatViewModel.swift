@@ -1759,6 +1759,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // wipe commits only once an empty cache is confirmed writable again.
         let identityCacheWipeCompleted = identityManager.isPersistenceAvailable
         peerIdentityStore.clearAll()
+        // A scan pending from before the wipe must not complete under the new
+        // identity and re-enroll the contact that was just erased.
+        verificationCoordinator.cancelAllQRVerifications()
         let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
         UserDefaults.standard.removeObject(forKey: "wesh.publicDisclosureAccepted.v1")
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()

@@ -796,6 +796,24 @@ struct WeshNativeUITests {
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: verified, locallyVerified: false))
     }
 
+    @Test @MainActor func panicCancelsAQRScanStartedBeforeTheWipe() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let snapshots = [TransportPeerSnapshot(peerID: fixture.shortID, nickname: "Synthetic peer", isConnected: true,
+                                                   noisePublicKey: fixture.key, lastSeen: Date())]
+            fixture.transport.updatePeerSnapshots(snapshots)
+            fixture.vm.unifiedPeerService.didUpdatePeerSnapshots(snapshots)
+            let qr = VerificationService.VerificationQR(v: 1, noiseKeyHex: fixture.key.hexEncodedString(),
+                signKeyHex: String(repeating: "ab", count: 32), npub: nil,
+                nickname: "Synthetic peer", ts: 0, nonceB64: "", sigHex: "")
+            try #require(fixture.vm.verificationCoordinator.beginQRVerification(with: qr))
+            try #require(fixture.vm.weshQRAttemptNonce(for: fixture.key) != nil)
+            fixture.vm.panicClearAllData()
+            // A challenge still waiting for a session would otherwise go out
+            // from the new identity and re-enroll the wiped contact.
+            #expect(fixture.vm.weshQRAttemptNonce(for: fixture.key) == nil)
+        }
+    }
+
     @Test func historicalMessageBlockUsesPinnedIdentityAndRejectsShortAlias() {
         let first = PeerID(hexData: Data(repeating: 31, count: 32))
         let second = PeerID(hexData: Data(repeating: 32, count: 32))
