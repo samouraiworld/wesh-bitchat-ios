@@ -91,7 +91,6 @@ struct PacketPayloadCapInteropTests {
             (.nostrCarrier, try maxNostrCarrier(), true),
             (.requestSync, maxRequestSync(), false),
             (.courierEnvelope, try maxCourierEnvelope(), false),
-            (.groupMessage, try maxGroupMessage(), false),
             (.prekeyBundle, try maxPrekeyBundle(), false),
             (.voiceFrame, try maxVoiceFrame(), false)
             // announceV2's largest payload is checked in BitFoundation's
@@ -184,20 +183,6 @@ struct PacketPayloadCapInteropTests {
             copies: CourierEnvelope.maxCopies,
             prekeyID: 7
         ).encode())
-    }
-
-    private func maxGroupMessage() throws -> Data {
-        try GroupCrypto.sealMessage(
-            content: String(repeating: "g", count: InputValidator.Limits.maxMessageLength),
-            messageID: UUID().uuidString,
-            senderNickname: String(repeating: "n", count: 50),
-            senderSigningKey: Data(repeating: 0x51, count: 32),
-            timestampMs: 1_740_000_000_000,
-            groupID: Data(repeating: 0x52, count: BitchatGroup.groupIDLength),
-            epoch: 1,
-            key: Data(repeating: 0x53, count: BitchatGroup.keyLength),
-            sign: { [signature] _ in signature }
-        )
     }
 
     private func maxPrekeyBundle() throws -> Data {

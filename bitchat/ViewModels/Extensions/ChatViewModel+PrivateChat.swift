@@ -15,12 +15,6 @@ extension ChatViewModel {
     @MainActor
     func sendPrivateMessage(_ content: String, to peerID: PeerID) {
         if weshPrivatePolicyEnabled && (peerID.noiseKey == nil || !canSendWeshMessage(to: peerID)) { return }
-        // Group chats reuse the private-chat surface but broadcast a sealed
-        // envelope instead of routing to a single peer.
-        if peerID.isGroup {
-            groupCoordinator.sendGroupMessage(content, to: peerID)
-            return
-        }
         privateConversationCoordinator.sendPrivateMessage(content, to: peerID)
     }
 
@@ -73,7 +67,7 @@ extension ChatViewModel {
         guard PTTSettings.liveVoiceEnabled else { return nil }
 
         if let selectedPeer = selectedPrivateChatPeer {
-            guard !selectedPeer.isGeoDM, !selectedPeer.isGeoChat, !selectedPeer.isGroup else { return nil }
+            guard !selectedPeer.isGeoDM, !selectedPeer.isGeoChat else { return nil }
             // A conversation can be selected under the stable 64-hex Noise key
             // (e.g. after migration on disconnect), but Noise sessions are keyed
             // by the 16-hex routing ID — normalize once and send to that same

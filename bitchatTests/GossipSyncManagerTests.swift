@@ -249,10 +249,9 @@ struct GossipSyncManagerTests {
         #expect(allTypes.contains(.fragment))
         #expect(allTypes.contains(.fileTransfer))
         #expect(allTypes.contains(.prekeyBundle))
-        #expect(allTypes.contains(.groupMessage))
-        // The message schedule also asks for group messages (bit 10);
-        // responders that don't know the bit just ignore it.
-        #expect(decoded.contains { $0.types == SyncTypeFlags.publicMessages.union(.groupMessage) })
+        // Wesh has no groups, so it never asks peers for group messages.
+        #expect(!allTypes.contains(.groupMessage))
+        #expect(decoded.contains { $0.types == .publicMessages })
         #expect(decoded.contains { $0.types == .fragment })
         #expect(decoded.contains { $0.types == .fileTransfer })
         #expect(decoded.contains { $0.types == .prekeyBundle })
@@ -820,10 +819,9 @@ struct GossipSyncManagerTests {
         let junkSender = try #require(Data(hexString: "f0f1f2f3f4f5f6f7"))
         let honestSender = try #require(Data(hexString: "a0a1a2a3a4a5a6a7"))
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
-        // Unsigned group ciphertext needs no key to mint.
         for i in 0..<40 {
             manager.onPublicPacketSeen(BitchatPacket(
-                type: MessageType.groupMessage.rawValue,
+                type: MessageType.message.rawValue,
                 senderID: junkSender,
                 recipientID: nil,
                 timestamp: nowMs + 3_600_000 + UInt64(i),
@@ -1012,11 +1010,10 @@ struct GossipSyncManagerTests {
         #expect(manager._messageCount(for: PeerID(hexData: packets[2].senderID)) == 1)
     }
 
-    @Test func fragmentFileAndGroupStoresEvictOldestPastTheirByteBudgets() async throws {
+    @Test func fragmentAndFileStoresEvictOldestPastTheirByteBudgets() async throws {
         var config = GossipSyncManager.Config()
         config.fragmentByteBudget = 250
         config.fileTransferByteBudget = 250
-        config.groupMessageByteBudget = 250
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
         config.fileTransferSyncIntervalSeconds = 0
@@ -1026,13 +1023,13 @@ struct GossipSyncManagerTests {
         manager.delegate = delegate
 
         var expectedIDs: Set<Data> = []
-        for type in [MessageType.fragment, .fileTransfer, .groupMessage] {
+        for type in [MessageType.fragment, .fileTransfer] {
             let packets = try makeBudgetPackets(type: type)
             packets.forEach(manager.onPublicPacketSeen)
             expectedIDs.formUnion(packets.dropFirst().map { PacketIdUtil.computeId($0) })
         }
 
-        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: [.fragment, .fileTransfer, .groupMessage])
+        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: [.fragment, .fileTransfer])
         manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
 
         try await TestHelpers.waitFor({ delegate.packets.count >= expectedIDs.count }, timeout: TestConstants.settleTimeout)
@@ -1040,6 +1037,27 @@ struct GossipSyncManagerTests {
         manager._performMaintenanceSynchronously(now: Date())
         #expect(Set(delegate.packets.map { PacketIdUtil.computeId($0) }) == expectedIDs)
         #expect(delegate.packets.count == expectedIDs.count)
+    }
+
+    @Test func groupMessagesFromBitChatPeersAreNeitherStoredNorServed() throws {
+        var config = GossipSyncManager.Config()
+        config.messageSyncIntervalSeconds = 0
+        config.fragmentSyncIntervalSeconds = 0
+        config.fileTransferSyncIntervalSeconds = 0
+        config.prekeyBundleSyncIntervalSeconds = 0
+        let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
+        let delegate = RecordingDelegate()
+        manager.delegate = delegate
+
+        for packet in try makeBudgetPackets(type: .groupMessage) {
+            manager.onPublicPacketSeen(packet)
+        }
+        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: SyncTypeFlags.publicMessages.union(.groupMessage))
+        manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
+        // Barrier: flush the sync queue so a late reply would be visible.
+        manager._performMaintenanceSynchronously(now: Date())
+
+        #expect(!delegate.packets.contains { $0.type == MessageType.groupMessage.rawValue })
     }
 
     @Test func archiveRestoreStopsAtTheByteBudgetKeepingTheNewest() throws {

@@ -29,16 +29,6 @@ struct GeohashPersonRow: Identifiable, Equatable {
     let isBlocked: Bool
 }
 
-struct GroupChatRow: Identifiable, Equatable {
-    let peerID: PeerID
-    let name: String
-    let memberCount: Int
-    let isCreator: Bool
-    let hasUnread: Bool
-
-    var id: String { peerID.id }
-}
-
 /// A direct conversation whose person is NOT in any roster above it. Without
 /// this section, a DM from a passerby became unreachable the moment they went
 /// offline: the roster filters to connected/reachable/mutual-favorite, the
@@ -58,7 +48,6 @@ final class PeerListModel: ObservableObject {
     @Published private(set) var allPeers: [BitchatPeer] = []
     @Published private(set) var meshRows: [MeshPeerRow] = []
     @Published private(set) var geohashPeople: [GeohashPersonRow] = []
-    @Published private(set) var groupRows: [GroupChatRow] = []
     @Published private(set) var recentChatRows: [RecentChatRow] = []
     @Published private(set) var reachableMeshPeerCount = 0
     @Published private(set) var connectedMeshPeerCount = 0
@@ -169,13 +158,6 @@ final class PeerListModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        chatViewModel.groupStore.$groups
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refresh()
-            }
-            .store(in: &cancellables)
-
         peerIdentityStore.$encryptionStatuses
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -264,7 +246,6 @@ final class PeerListModel: ObservableObject {
         }
 
         let geohashPeople = buildGeohashPeople()
-        let groupRows = buildGroupRows()
         let recentChatRows = buildRecentChatRows(meshRows: meshRows, geohashPeople: geohashPeople)
 
         self.meshRows = meshRows
@@ -272,7 +253,6 @@ final class PeerListModel: ObservableObject {
         connectedMeshPeerCount = meshCounts.connected
         self.geohashPeople = geohashPeople
         visibleGeohashPeerCount = geohashPeople.count
-        self.groupRows = groupRows
         self.recentChatRows = recentChatRows
         renderID = (
             meshRows.map {
@@ -280,9 +260,6 @@ final class PeerListModel: ObservableObject {
             } +
             geohashPeople.map {
                 "geo:\($0.id)-\($0.isTeleported)-\($0.isBlocked)-\($0.displayName)"
-            } +
-            groupRows.map {
-                "group:\($0.id)-\($0.name)-\($0.memberCount)-\($0.hasUnread)"
             } +
             recentChatRows.map {
                 "chat:\($0.id)-\($0.displayName)-\($0.hasUnread)"
@@ -324,8 +301,7 @@ final class PeerListModel: ObservableObject {
         for (id, conversation) in conversations.conversationsByID {
             guard case .direct(let handle) = id else { continue }
             let peerID = handle.routingPeerID
-            // Groups have their own section; blocked people get no row.
-            guard !peerID.isGroup else { continue }
+            // Blocked people get no row.
             guard let lastMessage = conversation.messages.last else { continue }
             guard !chatViewModel.isPeerBlocked(peerID) else { continue }
 
@@ -375,19 +351,6 @@ final class PeerListModel: ObservableObject {
             return id
         case .migrated(_, let to):
             return to
-        }
-    }
-
-    private func buildGroupRows() -> [GroupChatRow] {
-        let myFingerprint = chatViewModel.meshService.noiseIdentityFingerprint()
-        return chatViewModel.groupStore.groups.map { group in
-            GroupChatRow(
-                peerID: group.peerID,
-                name: group.name,
-                memberCount: group.members.count,
-                isCreator: group.creatorFingerprint == myFingerprint,
-                hasUnread: chatViewModel.hasUnreadMessages(for: group.peerID)
-            )
         }
     }
 

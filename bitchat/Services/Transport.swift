@@ -69,9 +69,6 @@ enum TransportEvent: @unchecked Sendable {
     case messageReceived(BitchatMessage)
     case publicMessageReceived(peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?)
     case noisePayloadReceived(peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date)
-    /// Encrypted group broadcast (MessageType 0x25). Opaque here — the group
-    /// coordinator decrypts and authenticates against the roster.
-    case groupMessageReceived(payload: Data, timestamp: Date)
     /// Public live-voice burst packet (MessageType 0x29), already
     /// signature-verified against the claimed sender.
     case publicVoiceFrameReceived(peerID: PeerID, nickname: String, payload: Data, timestamp: Date)
@@ -285,8 +282,6 @@ extension BitchatDelegate {
             )
         case let .noisePayloadReceived(peerID, type, payload, timestamp):
             didReceiveNoisePayload(from: peerID, type: type, payload: payload, timestamp: timestamp)
-        case let .groupMessageReceived(payload, timestamp):
-            didReceiveGroupMessage(payload: payload, timestamp: timestamp)
         case let .publicVoiceFrameReceived(peerID, nickname, payload, timestamp):
             didReceivePublicVoiceFrame(from: peerID, nickname: nickname, payload: payload, timestamp: timestamp)
         case .peerConnected(let peerID):
@@ -311,7 +306,6 @@ extension BLEService: Transport {}
 extension BLEService: MeshFileTransferring {}
 extension BLEService: MeshVoiceStreaming {}
 extension BLEService: MeshCourierTransporting {}
-extension BLEService: MeshGroupMessaging {}
 extension BLEService: MeshBoardBroadcasting {}
 extension BLEService: MeshDiagnosing {}
 extension BLEService: MeshVerifying {}

@@ -74,15 +74,6 @@ protocol CommandContextProvider: AnyObject {
     /// Toggles the favorite via the unified peer flow, which persists by the
     /// real noise key and notifies the peer over mesh or Nostr.
     func toggleFavorite(peerID: PeerID)
-
-    // MARK: - Groups
-    // Group logic lives in `ChatGroupCoordinator`; these forward the parsed
-    // /group subcommands.
-    func groupCreate(named name: String) -> CommandResult
-    func groupInvite(nickname: String) -> CommandResult
-    func groupRemove(nickname: String) -> CommandResult
-    func groupLeave() -> CommandResult
-    func groupList() -> CommandResult
 }
 
 /// Processes chat commands in a focused, efficient way
@@ -132,9 +123,6 @@ final class CommandProcessor {
             return handleBlock(args)
         case "/unblock":
             return handleUnblock(args)
-        case "/group":
-            if inGeoPublic || inGeoDM { return .error(message: String(localized: "command.error.groups_mesh_only", defaultValue: "groups are only for mesh peers in #mesh", comment: "Error when a group command is used outside the mesh channel")) }
-            return handleGroup(args)
         case "/fav":
             if inGeoPublic || inGeoDM { return .error(message: String(localized: "command.error.favorites_mesh_only", defaultValue: "favorites are only for mesh peers in #mesh", comment: "Error when a favorites command is used outside the mesh channel")) }
             return handleFavorite(args, add: true)
@@ -162,7 +150,7 @@ final class CommandProcessor {
     /// suggestion panel hides once arguments are typed, and typos used to
     /// dead-end in a bare "unknown command" — this is the way out.
     static var helpText: String {
-        String(localized: "command.help.text", defaultValue: "commands:\n/msg @name [message] — start a private chat\n/who — list who's here\n/clear — clear this chat\n/hug @name — send a hug\n/slap @name — slap with a large trout\n/block @name · /unblock @name\n/fav @name · /unfav @name — favorites (mesh only)\n/group create <name> — start an encrypted group\n/group invite @name · /group remove @name — manage members (creator)\n/group leave · /group list — leave or list your groups\n/ping @name — measure round-trip time (mesh only)\n/trace @name — estimated mesh path (mesh only)\n/pay <token> — send a cashu ecash token in this chat\n/drop <message> — pin a note to this place for 24h (needs location)\n/help — this list", comment: "The /help reference list; command syntax stays verbatim, only the descriptions after each dash are translated")
+        String(localized: "command.help.text", defaultValue: "commands:\n/msg @name [message] — start a private chat\n/who — list who's here\n/clear — clear this chat\n/hug @name — send a hug\n/slap @name — slap with a large trout\n/block @name · /unblock @name\n/fav @name · /unfav @name — favorites (mesh only)\n/ping @name — measure round-trip time (mesh only)\n/trace @name — estimated mesh path (mesh only)\n/pay <token> — send a cashu ecash token in this chat\n/drop <message> — pin a note to this place for 24h (needs location)\n/help — this list", comment: "The /help reference list; command syntax stays verbatim, only the descriptions after each dash are translated")
     }
 
     /// /drop <text> — a dead drop: pins a note to the current building-level
@@ -401,32 +389,6 @@ final class CommandProcessor {
         return .error(message: String(format: String(localized: "command.unblock.failed", defaultValue: "cannot unblock %@: not found", comment: "Error when /unblock can't resolve the target"), locale: .current, nickname))
     }
     
-    private static var groupUsage: String { String(localized: "command.group.usage", defaultValue: "usage: /group create <name> · invite @name · remove @name · leave · list", comment: "Usage hint for /group subcommands") }
-
-    private func handleGroup(_ args: String) -> CommandResult {
-        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-        guard let subcommand = parts.first else {
-            return .error(message: Self.groupUsage)
-        }
-        let rest = parts.count > 1 ? String(parts[1]) : ""
-        guard let provider = contextProvider else { return .handled }
-
-        switch subcommand {
-        case "create":
-            return provider.groupCreate(named: rest)
-        case "invite":
-            return provider.groupInvite(nickname: rest)
-        case "remove":
-            return provider.groupRemove(nickname: rest)
-        case "leave":
-            return provider.groupLeave()
-        case "list":
-            return provider.groupList()
-        default:
-            return .error(message: Self.groupUsage)
-        }
-    }
-
     // MARK: - Mesh Diagnostics
 
     private enum MeshPeerResolution {

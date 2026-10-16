@@ -17,7 +17,7 @@ import BitFoundation
 final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeletionPersisting,
     MeshFileTransferring, MeshVerifying, MeshCourierTransporting,
     MeshDiagnosing, MeshPublicArchiving, MeshVoiceStreaming,
-    MeshGroupMessaging, MeshBoardBroadcasting {
+    MeshBoardBroadcasting {
 
     // MARK: - Protocol Properties
 
@@ -369,19 +369,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
     }
     func sendVoiceFrameBroadcast(_ burstContent: Data) {
         sentVoiceBroadcasts.append(burstContent)
-    }
-
-    private(set) var sentGroupInvites: [(Data, PeerID)] = []
-    private(set) var sentGroupKeyUpdates: [(Data, PeerID)] = []
-    private(set) var broadcastGroupMessages: [Data] = []
-    func sendGroupInvite(_ statePayload: Data, to peerID: PeerID) {
-        sentGroupInvites.append((statePayload, peerID))
-    }
-    func sendGroupKeyUpdate(_ statePayload: Data, to peerID: PeerID) {
-        sentGroupKeyUpdates.append((statePayload, peerID))
-    }
-    func broadcastGroupMessage(_ envelope: Data) {
-        broadcastGroupMessages.append(envelope)
     }
 
     private(set) var sentBoardPayloads: [Data] = []
