@@ -1,3 +1,4 @@
+import BitLogger
 import Foundation
 
 /// QR verification scaffolding: schema, signing, and basic challenge/response helpers.
@@ -20,6 +21,9 @@ final class VerificationService {
         let ts: Int64
         let nonceB64: String
         var sigHex: String
+        /// Wesh: optional BIP-340 proof by the npub's key over the canonical
+        /// bytes (NPUB-PROOF). Outside the canonical bytes; BitChat ignores it.
+        var npubSigHex: String? = nil
 
         static let context = "bitchat-verify-v1"
 
@@ -46,17 +50,23 @@ final class VerificationService {
             var comps = URLComponents()
             comps.scheme = "bitchat"
             comps.host = "verify"
-            comps.queryItems = [
-                URLQueryItem(name: "v", value: String(v)),
-                URLQueryItem(name: "noise", value: noiseKeyHex),
-                URLQueryItem(name: "sign", value: signKeyHex),
-                URLQueryItem(name: "nick", value: nickname),
-                URLQueryItem(name: "ts", value: String(ts)),
-                URLQueryItem(name: "nonce", value: nonceB64),
-                URLQueryItem(name: "sig", value: sigHex)
-            ] + (npub != nil ? [URLQueryItem(name: "npub", value: npub)] : [])
+            // Strict RFC 3986 query encoding: URLComponents leaves "+" raw,
+            // and Android's getQueryParameter decodes it as a space, which
+            // breaks the signed nickname across platforms.
+            let items: [(String, String)] = [
+                ("v", String(v)), ("noise", noiseKeyHex), ("sign", signKeyHex), ("nick", nickname),
+                ("ts", String(ts)), ("nonce", nonceB64), ("sig", sigHex)
+            ] + (npub.map { [("npub", $0)] } ?? [])
+              + (npub != nil ? (npubSigHex.map { [("npubsig", $0)] } ?? []) : [])
+            comps.percentEncodedQueryItems = items.map {
+                URLQueryItem(name: $0.0, value: $0.1.addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed))
+            }
             return comps.string ?? ""
         }
+
+        /// RFC 3986 unreserved characters only.
+        static let queryValueAllowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
         static func validHex(_ value: String, bytes: Int) -> Bool {
             value.utf8.count == bytes * 2 && value.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
@@ -67,33 +77,40 @@ final class VerificationService {
                   url.scheme == "bitchat", url.host == "verify",
                   url.user == nil, url.password == nil, url.port == nil, url.fragment == nil, url.path.isEmpty,
                   let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
-            let allowed: Set<String> = ["v", "noise", "sign", "nick", "ts", "nonce", "sig", "npub"]
+            let allowed: Set<String> = ["v", "noise", "sign", "nick", "ts", "nonce", "sig", "npub", "npubsig"]
             guard items.allSatisfy({ allowed.contains($0.name) }), Set(items.map(\.name)).count == items.count else { return nil }
             func val(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+            // Wesh: an empty `npub`/`npubsig` signs the same bytes as none, so it is none.
+            let npub = val("npub").flatMap { $0.isEmpty ? nil : $0 }
+            let npubSig = val("npubsig").flatMap { $0.isEmpty ? nil : $0 }
             guard let vStr = val("v"), let v = Int(vStr),
                   let noise = val("noise"), let sign = val("sign"),
                   let nick = val("nick"), let tsStr = val("ts"), let ts = Int64(tsStr),
                   let nonce = val("nonce"), let sig = val("sig") else { return nil }
             guard v == 1, validHex(noise, bytes: 32), validHex(sign, bytes: 32), validHex(sig, bytes: 64),
-                  nick.utf8.count <= 255, (val("npub")?.utf8.count ?? 0) <= 255,
+                  nick.utf8.count <= 255, (npub?.utf8.count ?? 0) <= 255,
+                  npubSig.map({ npub != nil && validHex($0, bytes: 64) && $0 == $0.lowercased() }) ?? true,
                   nonce.count == 22, nonce.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }),
                   let nonceData = Data(base64Encoded: nonce.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") + "=="), nonceData.count == 16,
                   nonceData.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") == nonce else { return nil }
-            return VerificationQR(v: v, noiseKeyHex: noise, signKeyHex: sign, npub: val("npub"), nickname: nick, ts: ts, nonceB64: nonce, sigHex: sig)
+            return VerificationQR(v: v, noiseKeyHex: noise, signKeyHex: sign, npub: npub, nickname: nick, ts: ts, nonceB64: nonce, sigHex: sig,
+                                  npubSigHex: npubSig)
         }
     }
 
     // MARK: - Public API
 
-    /// Build a signed QR string for the current identity
-    func buildMyQRString(nickname: String, npub: String?) -> String? {
+    /// Build a signed QR string for the current identity. `npubSigner` signs
+    /// the canonical bytes with the npub's key (Wesh proof of possession).
+    func buildMyQRString(nickname: String, npub: String?, npubSigner: ((Data) -> Data?)? = nil) -> String? {
         // Simple short-lived cache to speed up sheet opening
-        struct Cache { static var last: (nick: String, npub: String?, noise: String, sign: String, builtAt: Date, value: String)? }
+        struct Cache { static var last: (nick: String, npub: String?, proven: Bool, noise: String, sign: String, builtAt: Date, value: String)? }
+        let proven = npub != nil && npubSigner != nil
         guard nickname.utf8.count <= 255, (npub?.utf8.count ?? 0) <= 255, let transport else { return nil }
         let noiseKey = transport.noiseStaticPublicKeyData().hexEncodedString()
         let signKey = transport.noiseSigningPublicKeyData().hexEncodedString()
         guard VerificationQR.validHex(noiseKey, bytes: 32), VerificationQR.validHex(signKey, bytes: 32) else { return nil }
-        if let c = Cache.last, c.nick == nickname, c.npub == npub, c.noise == noiseKey, c.sign == signKey, Date().timeIntervalSince(c.builtAt) < 60 {
+        if let c = Cache.last, c.nick == nickname, c.npub == npub, c.proven == proven, c.noise == noiseKey, c.sign == signKey, Date().timeIntervalSince(c.builtAt) < 60 {
             return c.value
         }
         let ts = Int64(Date().timeIntervalSince1970)
@@ -104,7 +121,7 @@ final class VerificationService {
         let payload = VerificationQR(v: 1, noiseKeyHex: noiseKey, signKeyHex: signKey, npub: npub, nickname: nickname, ts: ts, nonceB64: nonceB64, sigHex: "")
         let msg = payload.canonicalBytes()
         guard let sig = transport.noiseSignData(msg), sig.count == 64 else { return nil }
-        let signed = VerificationQR(v: payload.v,
+        var signed = VerificationQR(v: payload.v,
                                     noiseKeyHex: payload.noiseKeyHex,
                                     signKeyHex: payload.signKeyHex,
                                     npub: payload.npub,
@@ -112,8 +129,16 @@ final class VerificationService {
                                     ts: payload.ts,
                                     nonceB64: payload.nonceB64,
                                     sigHex: sig.hexEncodedString())
+        if proven {
+            guard let proof = npubSigner?(msg), proof.count == 64 else {
+                // Never show an unproven npub in its place: fall back to the Bluetooth-only QR.
+                SecureLogger.warning("npub proof signing failed; showing the QR without npub", category: .security)
+                return buildMyQRString(nickname: nickname, npub: nil)
+            }
+            signed.npubSigHex = proof.hexEncodedString()
+        }
         let out = signed.toURLString()
-        Cache.last = (nickname, npub, noiseKey, signKey, Date(), out)
+        Cache.last = (nickname, npub, proven, noiseKey, signKey, Date(), out)
         return out
     }
 

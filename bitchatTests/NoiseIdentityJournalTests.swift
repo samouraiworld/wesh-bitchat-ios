@@ -45,6 +45,34 @@ struct NoiseIdentityJournalTests {
         #expect(storage.identityDeleteCount == 1)
     }
 
+    /// A Keychain call parked in one store must not stall identity setup on an
+    /// unrelated store. The lock used to be process-wide: one test holding it
+    /// while it waited for its own task starved Swift's cooperative pool in
+    /// parallel CI runs, and nothing could release it.
+    @Test func identitySetupOnOneStoreNeverWaitsForAnotherStore() async throws {
+        let parked = MockKeychain()
+        let gate = ParkedKeychainCall()
+        parked.identitySaveFault = { key, _, _ in
+            if key == journalKey { gate.park() }
+            return nil
+        }
+        let holder = Thread { _ = NoiseEncryptionService(keychain: parked); gate.finish() }
+        holder.start()
+        defer { gate.release() }
+        #expect(await TestHelpers.waitUntil({ gate.isParked }, timeout: TestConstants.longTimeout))
+
+        let unrelated = ParkedKeychainCall()
+        let other = Thread {
+            _ = NoiseEncryptionService(keychain: MockKeychain())
+            unrelated.finish()
+        }
+        other.start()
+        #expect(await TestHelpers.waitUntil({ unrelated.isFinished }, timeout: TestConstants.longTimeout))
+
+        gate.release()
+        #expect(await TestHelpers.waitUntil({ gate.isFinished }, timeout: TestConstants.longTimeout))
+    }
+
     @Test func unconfirmedJournalNeverWritesLegacyAndRetriesTheExactRAMCandidate() throws {
         for fault: KeychainSaveResult in [.accessDenied, .success] {
             let storage = MockKeychain()
@@ -299,5 +327,35 @@ struct NoiseIdentityJournalTests {
             storage.identityDeleteFault = nil
             #expect(!service.retryIdentityPersistence())
         }
+    }
+}
+
+/// Parks a Keychain call on a plain thread until released; never used from
+/// the Swift cooperative pool, which must not be blocked indefinitely.
+private final class ParkedKeychainCall: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var parked = false
+    private var released = false
+    private var finished = false
+
+    var isParked: Bool { condition.lock(); defer { condition.unlock() }; return parked }
+    var isFinished: Bool { condition.lock(); defer { condition.unlock() }; return finished }
+
+    func park() {
+        condition.lock(); defer { condition.unlock() }
+        parked = true
+        condition.broadcast()
+        while !released { condition.wait() }
+    }
+
+    func release() {
+        condition.lock(); defer { condition.unlock() }
+        released = true
+        condition.broadcast()
+    }
+
+    func finish() {
+        condition.lock(); defer { condition.unlock() }
+        finished = true
     }
 }

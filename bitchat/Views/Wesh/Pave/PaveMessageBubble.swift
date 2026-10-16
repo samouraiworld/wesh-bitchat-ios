@@ -142,7 +142,7 @@ struct PaveMessageBubble: View {
     }
 
     private var accessibilityText: String {
-        let author = isOwn ? PaveCopy.text("pave.bubble.you") : (senderName.map(PaveDisplayName.safe) ?? "")
+        let author = isOwn ? PaveCopy.text("pave.bubble.you") : (senderName.map { PaveDisplayName.safe($0) } ?? "")
         var parts = [author, text, time].filter { !$0.isEmpty }
         if let delivery { parts.append(delivery.label) }
         if let transport { parts.append(transport.label) }

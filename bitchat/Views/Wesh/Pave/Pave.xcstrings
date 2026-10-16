@@ -637,6 +637,23 @@
         }
       }
     },
+    "pave.delivery.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réessayer"
+          }
+        }
+      }
+    },
     "pave.delivery.sent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1215,6 +1232,40 @@
         }
       }
     },
+    "pave.fingerprint.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key fingerprint"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte de la clé"
+          }
+        }
+      }
+    },
+    "pave.fingerprint.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fingerprint unavailable"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte indisponible"
+          }
+        }
+      }
+    },
     "pave.inbox.contactHint" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1388,6 +1439,23 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "pave.inbox.requests" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requests"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demandes"
           }
         }
       }
