@@ -59,6 +59,38 @@ struct WeshInternetStateMachineTests {
         #expect(machine.state == .off)
     }
 
+    @Test func artiExitIsAStickyErrorUntilRetry() {
+        for start in [Inputs(torReady: true, torProgress: 100, relayConnected: true), Inputs(torProgress: 40)] {
+            var machine = WeshInternetStateMachine(enabled: true, inputs: start)
+            machine.handle(.torStopped)
+            #expect(machine.state == .error(.torStopped))
+            // Tor inputs, a network change, a stall and a resume leave it in place.
+            machine.handle(.inputs(Inputs(networkReachable: false)))
+            machine.handle(.inputs(Inputs(torReady: true, torProgress: 100, relayConnected: true)))
+            machine.handle(.stallTimeout)
+            machine.handle(.background)
+            machine.handle(.foreground)
+            #expect(machine.state == .error(.torStopped))
+            machine.handle(.retry)
+            #expect(machine.state == .on)
+        }
+        // A soft error becomes the hard one; Off, Paused and a route fault stay as they are.
+        var machine = WeshInternetStateMachine(enabled: true)
+        machine.handle(.stallTimeout)
+        machine.handle(.torStopped)
+        #expect(machine.state == .error(.torStopped))
+        machine = WeshInternetStateMachine()
+        machine.handle(.torStopped)
+        #expect(machine.state == .off)
+        machine = WeshInternetStateMachine(enabled: true)
+        machine.handle(.background)
+        machine.handle(.torStopped)
+        #expect(machine.state == .paused)
+        machine = WeshInternetStateMachine(enabled: true, inputs: Inputs(torProgress: 10, relayConnected: true))
+        machine.handle(.torStopped)
+        #expect(machine.state == .error(.routeFault))
+    }
+
     @Test func stallAndNoNetworkAreErrors() {
         var machine = WeshInternetStateMachine(enabled: true)
         machine.handle(.stallTimeout)
@@ -121,6 +153,7 @@ struct WeshInternetModeTests {
     private final class Harness {
         let defaults: UserDefaults
         let inputs = CurrentValueSubject<WeshInternetStateMachine.Inputs, Never>(.init())
+        let torStopped = PassthroughSubject<Void, Never>()
         var events: [String] = []
         var torForcible = true
         var keyStorable = true
@@ -150,7 +183,8 @@ struct WeshInternetModeTests {
                     return self.deleteResults.isEmpty ? true : self.deleteResults.removeFirst()
                 },
                 inputs: inputs.eraseToAnyPublisher(),
-                scheduleAfter: { delay, action in self.scheduled.append((delay, action)) }
+                scheduleAfter: { delay, action in self.scheduled.append((delay, action)) },
+                torStoppedUnexpectedly: torStopped.eraseToAnyPublisher()
             ))
         }
 
@@ -214,6 +248,60 @@ struct WeshInternetModeTests {
         #expect(relaunched.state == .off)
         #expect(!harness.defaults.bool(forKey: WeshInternetSettings.enabledKey))
         #expect(harness.networkEnabled.last == false)
+    }
+
+    @Test func switchingOffStopsArtiThenDeletesItsDirectory() {
+        let harness = Harness()
+        let mode = enabledMode(harness)
+        harness.events.removeAll()
+        harness.deleteResults = [false, true]
+
+        #expect(mode.setEnabled(false))
+
+        // Network off first, Arti confirmed stopped, then delete and verify (retried inline).
+        #expect(harness.events == ["network:off", "stopTor", "deleteArti", "deleteArti"])
+        #expect(mode.state == .off)
+    }
+
+    @Test func switchingOffKeepsArtiDirectoryWhileArtiHasNotStopped() {
+        let harness = Harness()
+        let mode = enabledMode(harness)
+        harness.events.removeAll()
+        harness.artiExitsInTime = false
+
+        #expect(mode.setEnabled(false))
+
+        // Never deleted under a running Arti; the next launch (toggle off) deletes it.
+        #expect(harness.events == ["network:off", "stopTor"])
+        harness.events.removeAll()
+        harness.make().start()
+        #expect(harness.events == ["network:off", "deleteArti"])
+    }
+
+    @Test func artiExitMidSessionIsAnErrorWithTheNetworkOffUntilRetry() async {
+        let harness = Harness()
+        let mode = enabledMode(harness)
+        harness.inputs.send(.init(torReady: true, torProgress: 100, relayConnected: true))
+        await settle()
+        #expect(mode.state == .on)
+        harness.events.removeAll()
+
+        harness.torStopped.send()
+        await settle()
+
+        #expect(mode.state == .error(.torStopped))
+        // Relays are torn down; nothing reconnects, directly or otherwise.
+        #expect(harness.events == ["network:off"])
+        harness.inputs.send(.init(torReady: false, torProgress: 0, relayConnected: false))
+        await settle()
+        mode.appDidEnterBackground()
+        mode.appWillEnterForeground()
+        #expect(mode.state == .error(.torStopped))
+        #expect(harness.networkEnabled == [false])
+
+        mode.retry()
+        #expect(mode.state == .connecting(torProgress: 0))
+        #expect(Array(harness.events.suffix(2)) == ["network:on", "retry"])
     }
 
     @Test func enablingIsRefusedWhenTorCannotBeForced() {
