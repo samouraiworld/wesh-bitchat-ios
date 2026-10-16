@@ -27,6 +27,10 @@ jobs:
             path: localPackages/BitLogger
           - name: BitFoundation
             path: localPackages/BitFoundation
+          # TorManager liveness and the SOCKS address-type check; the Rust
+          # library is linked from the vendored xcframework, never rebuilt.
+          - name: Arti
+            path: localPackages/Arti
 
     steps:
       - name: Checkout code
@@ -146,6 +150,18 @@ jobs:
 
       - name: Check clean recipe safety
         run: bash scripts/check-just-clean-safety.sh
+
+      # BITCHAT_DEV_ALLOW_CLEARNET compiles Tor enforcement out. Checked in
+      # the sources (xcconfigs, Release configurations, package manifests)
+      # and in the build settings Release actually resolves to.
+      - name: Release builds keep Tor enforced
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s scripts/tests -p "test_check_release_tor_enforced.py" -v
+          for scheme in "bitchat (iOS)" "bitchat (macOS)"; do
+            xcodebuild -project bitchat.xcodeproj -scheme "$scheme" \
+              -configuration Release -showBuildSettings
+          done | python3 scripts/check_release_tor_enforced.py . --build-settings -
 
       - name: Build iOS (simulator, no signing)
         # Build both simulator architectures so CI validates every vendored

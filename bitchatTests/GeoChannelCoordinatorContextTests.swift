@@ -8,9 +8,9 @@
 //
 // Scope note: the location/bookmark managers are real `LocationStateManager`
 // instances backed by throwaway `UserDefaults` suites and mocked CoreLocation
-// seams. `TorManager` has no test seam (private init singleton); sampling
-// tests pin `TorManager.shared` to foreground (its default) so the
-// begin-sampling branch is deterministic.
+// seams. These tests use the `TorManager.shared` singleton; sampling tests
+// pin it to foreground (it starts in background) so the begin-sampling
+// branch is deterministic.
 //
 
 import Testing
