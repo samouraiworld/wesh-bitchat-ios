@@ -20,7 +20,11 @@ final class SharedSignedQRInteropTests: XCTestCase {
     }
 
     private func fixture() throws -> Fixture {
+        #if SWIFT_PACKAGE
+        let bundle = Bundle.module
+        #else
         let bundle = Bundle(for: Self.self)
+        #endif
         let url = try XCTUnwrap(
             bundle.url(forResource: "wesh-signed-qr-v1", withExtension: "json")
                 ?? bundle.url(forResource: "wesh-signed-qr-v1", withExtension: "json", subdirectory: "Services/Fixtures")
