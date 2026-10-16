@@ -1533,7 +1533,7 @@ struct PrivateMediaEndToEndTests {
         engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
     ) -> BLEService {
         let keychain = MockKeychain()
-        return BLEService(
+        let service = BLEService(
             keychain: keychain,
             idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: identityManager ?? MockIdentityManager(keychain),
@@ -1541,6 +1541,8 @@ struct PrivateMediaEndToEndTests {
             incomingFileStore: BLEIncomingFileStore(baseDirectory: baseDirectory),
             engineScheduler: engineScheduler
         )
+        service.acceptsIncomingMedia = { true }
+        return service
     }
 
     private func establishSession(alice: BLEService, bob: BLEService) async throws {

@@ -1199,7 +1199,6 @@ struct ChatViewModelBluetoothTests {
 // MARK: - Private Media Deletion Tests
 
 struct ChatViewModelPrivateMediaDeletionTests {
-
     @Test @MainActor
     func deleteMediaMessageTombstonesIncomingButNotOutgoingStableMedia() {
         let (viewModel, transport) = makeTestableViewModel()
@@ -1535,6 +1534,7 @@ struct ChatViewModelPrivateMediaDeletionTests {
             kind: .canceled
         ))
         let coordinator = viewModel.liveVoiceCoordinator
+        coordinator.acceptsIncomingMedia = { true }
         defer {
             coordinator.handleVoiceFramePayload(
                 from: peerID,

@@ -61,6 +61,8 @@ struct BLEFileTransferHandlerEnvironment {
         _ completion: @escaping () -> Void,
         _ finalization: @escaping (TransportEventDeliveryOutcome) -> Void
     ) -> Void
+    /// Wesh: media is shown as a placeholder and never written to disk.
+    var rejectsIncomingMedia: () -> Bool = { false }
 }
 
 /// Process-lifetime reservation cache for stable private-media IDs.
@@ -249,6 +251,28 @@ final class BLEFileTransferHandler {
                 "🚫 Dropping private media from blocked peer \(peerID.id.prefix(8))… before disk write",
                 category: .security
             )
+            return true
+        }
+
+        if env.rejectsIncomingMedia() {
+            // No disk write and no ACK: only a text placeholder reaches the UI.
+            // A stable ID keeps sender retries from repeating the placeholder.
+            let messageID = usesDurableReceipts
+                ? PrivateMediaMessageIdentity.stableID(for: filePacket, senderPeerID: peerID, recipientPeerID: localPeerID)
+                : UUID().uuidString
+            let placeholder = BitchatMessage(
+                id: messageID,
+                sender: senderNickname,
+                content: WeshIncomingMediaPolicy.placeholder,
+                timestamp: timestamp,
+                isRelay: false,
+                originalSender: nil,
+                isPrivate: isPrivate,
+                recipientNickname: nil,
+                senderPeerID: peerID,
+                deliveryStatus: isPrivate ? .delivered(to: env.localNickname(), at: timestamp) : nil
+            )
+            env.deliverMessage(placeholder, { true }, {}, { _ in })
             return true
         }
 

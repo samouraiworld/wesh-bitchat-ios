@@ -542,7 +542,7 @@ private struct WeshInbox: View {
                                 if !dynamicTypeSize.isAccessibilitySize { WeshAvatar(symbol: "person") }
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(row.nickname).font(.headline)
-                                    Text(inbox.messages(for: row.peerID).last?.content ?? "Identité vérifiée sur ce téléphone")
+                                    Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? "Identité vérifiée sur ce téléphone")
                                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                         .font(.subheadline).foregroundStyle(theme.secondary)
                                     if dynamicTypeSize.isAccessibilitySize && hasUnread {
@@ -560,6 +560,7 @@ private struct WeshInbox: View {
                 }
             } header: { WeshSectionLabel(text: "Discussions privées") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+            WeshRequestsSection(runtime: runtime)
         }
         .listStyle(.plain).scrollContentBackground(.hidden)
         .navigationTitle("Wesh")
@@ -712,6 +713,9 @@ private struct WeshConversation: View {
     @State private var contactDetails = false
     @State private var blockTarget: PeerID?
     @State private var blockName = ""
+    @State private var reportTarget: PeerID?
+    @State private var reportName = ""
+    @State private var reportDone = false
     @State private var showingParticipants = false
     @AppStorage("wesh.publicMuted") private var publicMuted = false
     @EnvironmentObject private var actions: ConversationUIModel
@@ -779,6 +783,7 @@ private struct WeshConversation: View {
 
     var body: some View {
         let displayedMessages = messages
+        let knownKeys: [Data] = isPrivate ? [] : runtime.chatViewModel.unifiedPeerService.peers.map(\.noisePublicKey)
         VStack(spacing: 0) {
             ScrollViewReader { scroll in
                 ScrollView {
@@ -825,11 +830,7 @@ private struct WeshConversation: View {
                                     Button { WeshPlatform.copy(message.content) } label: {
                                         Label("Copier", systemImage: "doc.on.doc")
                                     }
-                                    if !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender), message.sender != "system", let identity = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
-                                        Button("Bloquer sur ce téléphone", role: .destructive) { blockTarget = identity; blockName = isPrivate ? title : message.sender }
-                                            .accessibilityLabel("Bloquer " + weshIdentitySummary(isPrivate ? title : message.sender, fingerprint: identity.noiseKey?.sha256Fingerprint()))
-                                            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
-                                    }
+                                    moderationActions(for: message, knownKeys: knownKeys)
                                 }
                         }
                     }.padding()
@@ -943,6 +944,9 @@ private struct WeshConversation: View {
             }
             .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
+        .modifier(WeshReportAlerts(target: $reportTarget, name: reportName, done: $reportDone) { target, name in
+            runtime.chatViewModel.reportWeshPublicAuthor(target, displayName: name)
+        })
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
         .sheet(isPresented: $contactDetails) {
             if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
@@ -1006,6 +1010,39 @@ private struct WeshConversation: View {
             sharedFeedbackFocused = false
             draftGeneration = composerDrafts.currentGeneration
             draft = composerDrafts.load(draftKey)
+        }
+    }
+
+    /// The author a message action may target: the pinned private identity,
+    /// or a public sender whose short ID derives exactly from a known key.
+    private func moderationTarget(for message: BitchatMessage, knownKeys: [Data]) -> PeerID? {
+        guard !WeshMessageActions.isLocalSystem(message),
+              !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender) else { return nil }
+        if let pinned = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
+            return pinned
+        }
+        return isPrivate ? nil : WeshMessageActions.publicAuthor(of: message.senderPeerID, knownNoiseKeys: knownKeys)
+    }
+
+    @ViewBuilder
+    private func moderationActions(for message: BitchatMessage, knownKeys: [Data]) -> some View {
+        if let identity = moderationTarget(for: message, knownKeys: knownKeys) {
+            let name: String = isPrivate ? title : message.sender
+            let summary: String = weshIdentitySummary(name, fingerprint: identity.noiseKey?.sha256Fingerprint())
+            if !isPrivate {
+                Button("Signaler", role: .destructive) {
+                    reportTarget = identity
+                    reportName = message.sender
+                }
+                .accessibilityLabel("Signaler " + summary)
+                .accessibilityHint("Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone")
+            }
+            Button("Bloquer sur ce téléphone", role: .destructive) {
+                blockTarget = identity
+                blockName = name
+            }
+            .accessibilityLabel("Bloquer " + summary)
+            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
         }
     }
 
@@ -1084,6 +1121,7 @@ private struct WeshMessageBubble: View {
     let privateChat: Bool
     @Environment(\.weshTheme) private var theme
     private var filled: Bool { own && !theme.isDark }
+    private var isSystem: Bool { WeshMessageActions.isLocalSystem(message) }
     @ViewBuilder private var metadata: some View {
         Text(message.timestamp, style: .time)
         if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
@@ -1093,8 +1131,8 @@ private struct WeshMessageBubble: View {
         HStack {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
-                if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
-                Text(message.content).font(.body).textSelection(.enabled)
+                if !own && (!privateChat || isSystem) { Text(isSystem ? "Information" : message.sender).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
+                Text(WeshIncomingMediaPolicy.displayText(message.content)).font(.body)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }
                     VStack(alignment: .leading, spacing: 4) { metadata }
@@ -1133,7 +1171,7 @@ enum WeshDelivery {
     }
 }
 
-private struct WeshContactSheet: View {
+struct WeshContactSheet: View {
     let runtime: AppRuntime
     @Environment(\.dismiss) private var dismiss
     @Environment(\.weshTheme) private var theme
@@ -1495,6 +1533,12 @@ private struct WeshSettings: View {
                     Label("Confidentialité", systemImage: "hand.raised").frame(minHeight: 48)
                 }
             } header: { WeshSectionLabel(text: "Pour échanger") }
+            .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
+            Section {
+                Link(destination: WeshLinks.terms) {
+                    Label("Conditions d’utilisation", systemImage: "doc.text").frame(minHeight: 48)
+                }
+            } header: { WeshSectionLabel(text: "À propos") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
                 WeshValueRow("Version", value: WeshBuildInfo.displayVersion)

@@ -459,6 +459,9 @@ final class BLEService: NSObject {
     private lazy var fragmentHandler = BLEFragmentHandler(environment: makeFragmentHandlerEnvironment())
     // File-transfer orchestration (queue hops stay in the environment closures)
     private lazy var fileTransferHandler = BLEFileTransferHandler(environment: makeFileTransferHandlerEnvironment())
+    /// Wesh refuses inbound media (placeholder only). Upstream media tests
+    /// opt in on their own instance; set it before any traffic.
+    var acceptsIncomingMedia: () -> Bool = { WeshIncomingMediaPolicy.acceptsMedia }
 
     // MARK: - Gossip Sync
     private var gossipSyncManager: GossipSyncManager?
@@ -2818,7 +2821,8 @@ final class BLEService: NSObject {
                     completion: completion,
                     finalization: finalization
                 )
-            }
+            },
+            rejectsIncomingMedia: { [weak self] in !(self?.acceptsIncomingMedia() ?? false) }
         )
     }
     

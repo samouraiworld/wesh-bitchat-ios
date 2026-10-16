@@ -6,6 +6,7 @@ import Testing
 struct BLEFileTransferHandlerTests {
     private final class Recorder {
         var localNickname = "Me"
+        var rejectsMedia = false
         var peers: [PeerID: BLEPeerInfo] = [:]
         var signedName: String?
         var signatureVerifies = false
@@ -117,7 +118,7 @@ struct BLEFileTransferHandlerTests {
     }
 
     private func makeHandler(recorder: Recorder) -> BLEFileTransferHandler {
-        let environment = BLEFileTransferHandlerEnvironment(
+        var environment = BLEFileTransferHandlerEnvironment(
             localPeerID: { [localPeerID] in localPeerID },
             localNickname: { recorder.localNickname },
             peersSnapshot: { recorder.peers },
@@ -190,7 +191,47 @@ struct BLEFileTransferHandlerTests {
                 completion()
             }
         )
+        environment.rejectsIncomingMedia = { recorder.rejectsMedia }
         return BLEFileTransferHandler(environment: environment)
+    }
+
+    @Test
+    func weshPublicMediaBecomesAPlaceholderWithoutDiskWrite() throws {
+        let recorder = Recorder()
+        recorder.rejectsMedia = true
+        recorder.peers = [remotePeerID: makePeerInfo(remotePeerID, nickname: "Alice", isVerified: true, signingPublicKey: sampleSigningKey)]
+        recorder.signatureVerifies = true
+        let handler = makeHandler(recorder: recorder)
+        let packet = try makeFileTransferPacket(sender: remotePeerID, mimeType: "application/pdf", content: Data("%PDF-1.7".utf8))
+
+        #expect(handler.handle(packet, from: remotePeerID))
+
+        #expect(recorder.saveCalls.isEmpty)
+        #expect(recorder.quotaReservations.isEmpty)
+        #expect(recorder.deliveredMessages.map(\.content) == ["Média non pris en charge"])
+        #expect(recorder.deliveredMessages.first?.isPrivate == false)
+    }
+
+    @Test
+    func weshPrivateMediaBecomesAPlaceholderWithoutDiskWriteOrAck() throws {
+        let recorder = Recorder()
+        recorder.rejectsMedia = true
+        recorder.peers = [remotePeerID: makePeerInfo(remotePeerID, nickname: "Alice", isVerified: true)]
+        let handler = makeHandler(recorder: recorder)
+        let content = Data([0xFF, 0xD8, 0xFF]) + Data(repeating: 0x41, count: 128)
+        let file = BitchatFilePacket(fileName: "img_20260725_105708_1CC2760D-76AA-40C3-8013-C7FAA6C2EF99.jpg", fileSize: UInt64(content.count), mimeType: "image/jpeg", content: content)
+        let payload = try #require(file.encode())
+
+        #expect(handler.handlePrivatePayload(payload, from: remotePeerID, timestamp: Date(timeIntervalSince1970: 5)))
+        #expect(handler.handlePrivatePayload(payload, from: remotePeerID, timestamp: Date(timeIntervalSince1970: 6)))
+
+        #expect(recorder.saveCalls.isEmpty)
+        #expect(recorder.receiptCommits.isEmpty)
+        #expect(recorder.deliveryAcks.isEmpty)
+        #expect(recorder.deliveredMessages.map(\.content) == ["Média non pris en charge", "Média non pris en charge"])
+        // Retries carry the same stable ID, so the conversation keeps one bubble.
+        #expect(Set(recorder.deliveredMessages.map(\.id)).count == 1)
+        #expect(recorder.deliveredMessages.first?.isPrivate == true)
     }
 
     @Test

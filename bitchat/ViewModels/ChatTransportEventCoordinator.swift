@@ -123,6 +123,9 @@ extension ChatViewModel: ChatTransportEventContext {
     }
 
     func sendMeshDeliveryAck(for messageID: String, to peerID: PeerID) {
+        // In Wesh, "Réception confirmée" must mean the message reached a
+        // verified conversation, not an unverified request.
+        guard messageRouter.admitsControlMessage(to: peerID) else { return }
         meshService.sendDeliveryAck(for: messageID, to: peerID)
     }
 
