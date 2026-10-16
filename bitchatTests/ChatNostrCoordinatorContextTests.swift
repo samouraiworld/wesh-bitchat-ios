@@ -108,6 +108,8 @@ private final class MockChatNostrContext: ChatNostrContext {
     var geohashIdentities: [String: NostrIdentity] = [:]
     var nostrIdentity: NostrIdentity?
     var blockedNostrPubkeys: Set<String> = []
+    var admitsSender: (PeerID) -> Bool = { _ in true }
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool { admitsSender(peerID) }
     var displayNamesByPubkey: [String: String] = [:]
 
     private struct NoIdentity: Error {}
@@ -420,6 +422,39 @@ struct ChatNostrCoordinatorContextTests {
     // `test_receiveEvent_invalidSignatureDoesNotPoisonDuplicateCache` and
     // `test_receiveGiftWrap_tamperedSignatureIsDroppedAndDoesNotPoisonDedup`.
     // The inbound pipeline only ever sees verified events.
+
+    @Test @MainActor
+    func directMessagesFromANonAdmittedSenderReachNoHandlerOnEitherPath() async throws {
+        let context = MockChatNostrContext()
+        let coordinator = ChatNostrCoordinator(context: context)
+        let recipient = try NostrIdentity.generate()
+        let sender = try NostrIdentity.generate()
+        context.nostrIdentity = recipient
+        context.admitsSender = { _ in false }
+        func wrap(_ content: String) throws -> NostrEvent {
+            try NostrProtocol.createPrivateMessage(content: content, recipientPubkey: recipient.publicKeyHex, senderIdentity: sender)
+        }
+        let contents = [
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .delivered, messageID: "mine-1")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .readReceipt, messageID: "mine-1")),
+            try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: "Salut ?", messageID: "pm-1"))
+        ]
+        for content in contents {
+            await coordinator.inbound.processNostrMessage(try wrap(content))
+            coordinator.inbound.handleGiftWrap(try wrap(content), id: recipient)
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        await drainMainQueue()
+
+        #expect(context.handledDelivered.isEmpty)
+        #expect(context.handledReadReceipts.isEmpty)
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.nostrKeyMapping.isEmpty)
+
+        context.admitsSender = { _ in true }
+        await coordinator.inbound.processNostrMessage(try wrap(contents[0]))
+        #expect(context.handledDelivered.count == 1)
+    }
 
     @Test @MainActor
     func processNostrMessage_duplicateDeliveryProcessesOnce() async throws {

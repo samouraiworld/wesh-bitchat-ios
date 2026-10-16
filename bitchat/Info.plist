@@ -25,7 +25,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>bitchat</string>
+				<string>wesh</string>
 			</array>
 		</dict>
 	</array>
@@ -42,11 +42,11 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Wesh uses the camera to scan a contact’s live identity QR code in person.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>bitchat uses your location to compute optional geohash channels, bridge cells, and nearby place labels. Exact coordinates are not included in bitchat messages.</string>
+	<string>Wesh uses your location only if you turn on an optional location feature. This version of Wesh does not ask for it.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>bitchat uses the microphone while you record voice notes or hold live push-to-talk, then sends that audio to your selected mesh conversation.</string>
+	<string>Wesh uses the microphone only if you record audio in an optional feature. This version of Wesh does not ask for it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>bitchat lets you pick images from your photo library to share with nearby peers.</string>
+	<string>Wesh opens your photo library only if you pick an image to share in an optional feature. This version of Wesh does not ask for it.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

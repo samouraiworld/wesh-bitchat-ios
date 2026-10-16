@@ -1249,8 +1249,13 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         if weshPrivatePolicyEnabled {
             messageRouter.privateSendPolicy = { [weak self] recipient, pinnedKey in
-                guard let self, self.canSendWeshPrivate(to: recipient),
-                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(recipient)),
+                guard let self else { return nil }
+                // Receipts and acks address the live short mesh ID; admit it
+                // only as the authenticated session key it resolves to now.
+                let target = recipient.noiseKey != nil ? recipient
+                    : self.noiseSessionPublicKeyData(for: recipient).map { PeerID(hexData: $0) } ?? recipient
+                guard self.canSendWeshPrivate(to: target),
+                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)),
                       pinnedKey == nil || pinnedKey == actualKey else { return nil }
                 return actualKey
             }
@@ -1726,6 +1731,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // single-writer ConversationStore; the derived `messages` view and
         // the legacy mirror empty with it)
         conversations.clearAll()
+        WeshInboundRequests.shared.clear()
         pendingGeohashSystemMessages.removeAll()
 
         // Delete all keychain data (including Noise and Nostr keys)
