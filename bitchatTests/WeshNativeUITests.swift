@@ -638,6 +638,53 @@ struct WeshNativeUITests {
         #expect(fixture.transport.sentMessages.isEmpty)
     }
 
+    @Test @MainActor func internetRouteNeedsOnlineModeAQRBoundNpubAndNoBlock() throws {
+        let previousContacts = WeshQRTrust.shared.contacts
+        let key = Data(repeating: 0x5a, count: 32)
+        let peer = PeerID(hexData: key)
+        let contactNostr = try NostrIdentity.generate()
+        WeshQRTrust.shared.record(sessionKey: key, nickname: "Synthetic Internet peer")
+        defer {
+            WeshQRTrust.shared.clear()
+            for contact in previousContacts {
+                if let restored = Data(hexString: contact.noiseKeyHex) {
+                    WeshQRTrust.shared.record(sessionKey: restored, nickname: contact.nickname, npub: contact.npub,
+                                              npubProven: contact.isNpubProven, npubConflict: contact.hasNpubConflict,
+                                              npubProofWarning: contact.hasNpubProofWarning)
+                }
+            }
+        }
+        let storage = MockKeychain()
+        let identity = MockIdentityManager(storage)
+        let vm = ChatViewModel(keychain: storage, idBridge: NostrIdentityBridge(keychain: MockKeychain()),
+                               identityManager: identity, transport: MockTransport(), weshPrivatePolicyEnabled: true)
+        var online = false
+        vm.weshInternetIsOn = { online }
+
+        // Enrolled but Bluetooth-only (no npub in its QR): never over Internet.
+        online = true
+        #expect(!vm.canSendWeshInternet(to: peer))
+        WeshQRTrust.shared.record(sessionKey: key, nickname: "Synthetic Internet peer", npub: contactNostr.npub, npubProven: true)
+        #expect(vm.canSendWeshInternet(to: peer))
+        #expect(vm.canSendWeshMessage(to: peer))
+        #expect(vm.messageRouter.privateSendPolicy?(peer, nil) == key)
+        #expect(vm.messageRouter.privateSendPolicy?(peer, Data(repeating: 0x01, count: 32)) == nil)
+        #expect(vm.qrContactNoiseKey(forNostrPubkey: contactNostr.publicKeyHex) == key)
+        #expect(vm.qrContactNickname(forNoiseKey: key) == "Synthetic Internet peer")
+        #expect(vm.ignoresFavoriteNotices)
+
+        // Fail closed: Internet not On.
+        online = false
+        #expect(!vm.canSendWeshInternet(to: peer))
+        #expect(vm.messageRouter.privateSendPolicy?(peer, nil) == nil)
+
+        // Blocked: no send, and its Nostr traffic resolves to nobody.
+        online = true
+        identity.setBlocked(key.sha256Fingerprint(), isBlocked: true)
+        #expect(!vm.canSendWeshInternet(to: peer))
+        #expect(vm.qrContactNoiseKey(forNostrPubkey: contactNostr.publicKeyHex) == nil)
+    }
+
     @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)

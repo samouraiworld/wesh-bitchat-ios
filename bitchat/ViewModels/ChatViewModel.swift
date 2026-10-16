@@ -220,6 +220,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         sweepsOnInit: !TestEnvironment.isRunningTests
     )
     let weshPrivatePolicyEnabled: Bool
+    /// Wesh Internet mode is On (Tor ready, a pinned relay connected). Injectable for tests.
+    var weshInternetIsOn: @MainActor () -> Bool = { WeshInternetMode.shared.state == .on }
+    /// Noise key hex + npub pairs already sent `[FAVORITED]:npub` in this process.
+    var weshAnnouncedInternetKeys: Set<String> = []
     lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
     lazy var groupCoordinator = ChatGroupCoordinator(context: self)
     lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
@@ -1256,10 +1260,16 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 // only as the authenticated session key it resolves to now.
                 let target = recipient.noiseKey != nil ? recipient
                     : self.noiseSessionPublicKeyData(for: recipient).map { PeerID(hexData: $0) } ?? recipient
-                guard self.canSendWeshPrivate(to: target),
-                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)),
-                      pinnedKey == nil || pinnedKey == actualKey else { return nil }
-                return actualKey
+                if self.canSendWeshPrivate(to: target),
+                   let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)) {
+                    return pinnedKey == nil || pinnedKey == actualKey ? actualKey : nil
+                }
+                // Internet route: no session to read the key from, so the enrolled key itself.
+                if let enrolledKey = target.noiseKey, self.canSendWeshInternet(to: target),
+                   pinnedKey == nil || pinnedKey == enrolledKey {
+                    return enrolledKey
+                }
+                return nil
             }
         }
 
@@ -1363,7 +1373,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             if selectedPrivateChatPeer != nil {
                 guard let fingerprint = selectedPrivateChatFingerprint,
                       let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex)?.sha256Fingerprint() == fingerprint }),
-                      canSendWeshPrivate(to: contact.peerID) else { return }
+                      canSendWeshMessage(to: contact.peerID) else { return }
                 sendPrivateMessage(content, to: contact.peerID)
             } else {
                 _ = sendWeshText(content, to: nil)
@@ -1381,7 +1391,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
               content.utf8.count <= WeshTextLimits.maximumUTF8Bytes else { return false }
         if let peerID {
-            guard canSendWeshPrivate(to: peerID) else { return false }
+            guard canSendWeshMessage(to: peerID) else { return false }
             startPrivateChat(with: peerID)
             // Route to the checked full Noise-key identity, never mutable global selection.
             sendPrivateMessage(content, to: peerID)

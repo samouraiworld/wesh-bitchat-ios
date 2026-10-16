@@ -921,7 +921,7 @@ private struct WeshConversation: View {
     /// Each read waits on the identity manager queue: evaluate it once per body.
     private var sendAvailable: Bool {
         let _ = peers.renderID
-        return peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic
+        return peerID.map { runtime.chatViewModel.canSendWeshMessage(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic
     }
     private var sharedDestination: SharedContentDestination {
         peerID.map { .privateConversation(peerID: $0, displayName: title) } ?? .mesh

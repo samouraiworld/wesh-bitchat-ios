@@ -395,6 +395,43 @@ extension ChatViewModel {
                                   locallyVerified: peerIdentityStore.isVerified(sessionKey.sha256Fingerprint()), requestedKey: requestedKey)
     }
 
+    /// Spec §3 rule 2: an enrolled, unblocked QR contact whose QR bound a
+    /// usable npub, while Internet mode is On. No Bluetooth session needed.
+    @MainActor
+    func canSendWeshInternet(to peerID: PeerID) -> Bool {
+        guard weshPrivatePolicyEnabled, !panicRecoveryBlocked,
+              let key = peerID.noiseKey, key.count == 32,
+              identityManager.isPersistenceAvailable,
+              !identityManager.hasPendingPersistenceChanges else { return false }
+        let fingerprint = key.sha256Fingerprint()
+        guard !identityManager.isBlocked(fingerprint: fingerprint),
+              WeshQRTrust.shared.fingerprints.contains(fingerprint),
+              let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex) == key }),
+              WeshInternetRoute.deliveryNpub(for: contact) != nil else { return false }
+        return weshInternetIsOn()
+    }
+
+    /// `[FAVORITED]:<my npub>` over the live Noise session with an enrolled
+    /// contact, so an official BitChat peer learns where to reply over
+    /// Internet. Only while Internet mode is enabled and my key exists (never
+    /// created here); once per contact and npub in this process.
+    @MainActor
+    func announceWeshInternetKey(to peerID: PeerID) {
+        guard weshPrivatePolicyEnabled,
+              let sessionKey = noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID)),
+              canSendWeshPrivate(to: PeerID(hexData: sessionKey)),
+              let npub = idBridge.messagingIdentity(weshActive: true)?.npub else { return }
+        let announced = sessionKey.hexEncodedString() + npub
+        guard weshAnnouncedInternetKeys.insert(announced).inserted else { return }
+        meshService.sendFavoriteNotification(to: getShortIDForNoiseKey(peerID), isFavorite: true)
+    }
+
+    /// A live Bluetooth session with the enrolled key, else Internet.
+    @MainActor
+    func canSendWeshMessage(to peerID: PeerID) -> Bool {
+        canSendWeshPrivate(to: peerID) || canSendWeshInternet(to: peerID)
+    }
+
     @MainActor @discardableResult
     func unblockWeshIdentity(_ fingerprint: String) -> Bool {
         unifiedPeerService.unblock(fingerprint: fingerprint)
