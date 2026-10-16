@@ -37,6 +37,11 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        .testTarget(
+            name: "TorTests",
+            dependencies: ["Tor"],
+            path: "Tests/TorTests"
+        ),
         // Binary framework containing the Rust static library.
         // Provenance and rebuild steps: repo-root docs/ARTI-BINARY-PROVENANCE.md
         .binaryTarget(

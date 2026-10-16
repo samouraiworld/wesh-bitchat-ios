@@ -33,6 +33,9 @@ struct GeoRelayDirectoryDependencies {
     var activeNotificationName: Notification.Name?
     var autoStart: Bool
     var validationPolicy: GeoRelayDirectoryValidationPolicy
+    /// False in Wesh: Internet mode talks to its pinned relays only, so the
+    /// directory never fetches its CSV from a third-party host.
+    var remoteFetchAllowed: () -> Bool = { true }
 }
 
 struct GeoRelayDirectoryValidationPolicy: Sendable {
@@ -75,11 +78,11 @@ private extension GeoRelayDirectoryDependencies {
             refreshCheckInterval: TransportConfig.geoRelayRefreshCheckIntervalSeconds,
             retryInitialSeconds: TransportConfig.geoRelayRetryInitialSeconds,
             retryMaxSeconds: TransportConfig.geoRelayRetryMaxSeconds,
-            // Only wait for Tor when Tor is switched on. With it off, the fetch
-            // is meant to go direct through the same unproxied session the relay
-            // sockets already use — and `TorManager` has been shut down, so
-            // awaiting readiness would spend the whole bootstrap timeout on
-            // every refresh and freeze the directory on its cached copy.
+            // Only wait for Tor when Tor is switched on. With it off, waiting
+            // for a `TorManager` that has been shut down would spend the whole
+            // bootstrap timeout on every refresh. The fetch still goes through
+            // `TorURLSession`, which has no direct session, so it fails rather
+            // than leaving through the clearnet.
             //
             // Deliberately keyed on the preference rather than live readiness:
             // if Tor is wanted but not ready, this must keep returning false so
@@ -153,7 +156,8 @@ private extension GeoRelayDirectoryDependencies {
             },
             activeNotificationName: activeNotificationName,
             autoStart: true,
-            validationPolicy: validationPolicy
+            validationPolicy: validationPolicy,
+            remoteFetchAllowed: { !WeshModeFlag.isActive }
         )
     }
 }
@@ -243,6 +247,7 @@ final class GeoRelayDirectory {
 
     // MARK: - Remote Fetch
     func prefetchIfNeeded(force: Bool = false) {
+        guard dependencies.remoteFetchAllowed() else { return }
         guard !isFetching else { return }
 
         let now = dependencies.now()
@@ -261,7 +266,7 @@ final class GeoRelayDirectory {
     }
 
     private func fetchRemote() {
-        guard !isFetching else { return }
+        guard dependencies.remoteFetchAllowed(), !isFetching else { return }
         isFetching = true
 
         let request = URLRequest(

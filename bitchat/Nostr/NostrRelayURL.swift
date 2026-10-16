@@ -39,4 +39,19 @@ enum NostrRelayURL {
 
         return components.string
     }
+
+    /// Whether the relay is addressed by a DNS name rather than an IP
+    /// literal. Through Tor only names are sent, so the SOCKS request carries
+    /// a domain (ATYP 0x03) for the exit to resolve: an address target would
+    /// come from a resolution made elsewhere, and the bundled Arti relay
+    /// forwards it as is. A top-level label always has a letter and is never
+    /// a hex number, which also rules out forms such as `127.1` or `0x7f.1`.
+    static func hasDomainNameHost(_ rawValue: String) -> Bool {
+        guard let host = URLComponents(string: rawValue)?.host?.lowercased(),
+              !host.contains(":"), !host.hasPrefix("[") else { return false }
+        let name = host.hasSuffix(".") ? String(host.dropLast()) : host
+        guard let tld = name.split(separator: ".", omittingEmptySubsequences: false).last,
+              tld.contains(where: \.isLetter) else { return false }
+        return !(tld.hasPrefix("0x") && tld.dropFirst(2).allSatisfy(\.isHexDigit))
+    }
 }
