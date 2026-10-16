@@ -1827,6 +1827,50 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(context.manager.relays.contains { $0.url == "wss://nos.lol" })
     }
 
+    // MARK: Wesh Internet mode
+
+    /// Only the pinned relays, whatever is configured or requested.
+    @MainActor
+    func testWeshPinnedRelaysAreTheOnlyRelaysEverContacted() async {
+        let context = makeContext(
+            permission: .denied,
+            customRelays: MutableRelayList(urls: ["wss://added.example.com"]),
+            weshPinnedRelays: WeshInternetPolicy.pinnedRelays
+        )
+        XCTAssertEqual(Set(context.manager.relays.map(\.url)), Set(WeshInternetPolicy.pinnedRelays))
+        context.manager.ensureConnections(to: ["wss://geo.example.com", "wss://nos.lol", "wss://relay.damus.io"])
+        let connected = await waitUntil { !context.sessionFactory.requestedURLs.isEmpty }
+        XCTAssertTrue(connected)
+        XCTAssertTrue(Set(context.sessionFactory.requestedURLs).isSubset(of: Set(WeshInternetPolicy.pinnedRelays)))
+        XCTAssertEqual(Set(context.manager.relays.map(\.url)), Set(WeshInternetPolicy.pinnedRelays))
+    }
+
+    /// Fail-closed: a stored "Tor off" preference cannot make Wesh connect
+    /// directly; nothing is attempted until Tor is ready.
+    @MainActor
+    func testWeshNeverConnectsBeforeTorIsReadyEvenWithTorPreferenceOff() async throws {
+        let context = makeContext(
+            permission: .denied,
+            userTorEnabled: false,
+            torEnforced: true,
+            torIsReady: false,
+            weshPinnedRelays: WeshInternetPolicy.pinnedRelays
+        )
+        context.manager.connect()
+        context.manager.ensureConnections(to: WeshInternetPolicy.pinnedRelays)
+        let identity = try NostrIdentity.generate()
+        let event = NostrEvent(pubkey: identity.publicKeyHex, createdAt: Date(), kind: .textNote, tags: [], content: "x")
+        context.manager.sendEvent(try event.sign(with: identity.schnorrSigningKey()))
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertTrue(context.sessionFactory.requestedURLs.isEmpty)
+        XCTAssertGreaterThanOrEqual(context.torWaiter.awaitCallCount, 1)
+
+        context.torWaiter.resolve(true)
+        let connected = await waitUntil { context.sessionFactory.requestedURLs.count == WeshInternetPolicy.pinnedRelays.count }
+        XCTAssertTrue(connected)
+        XCTAssertEqual(Set(context.sessionFactory.requestedURLs), Set(WeshInternetPolicy.pinnedRelays))
+    }
+
     private func makeContext(
         permission: LocationChannelManager.PermissionState,
         favorites: Set<Data> = [],
@@ -1837,6 +1881,7 @@ final class NostrRelayManagerTests: XCTestCase {
         torIsForeground: Bool = true,
         notificationCenter: NotificationCenter = NotificationCenter(),
         customRelays: MutableRelayList = MutableRelayList(urls: []),
+        weshPinnedRelays: [String]? = nil,
         jitterUnit: @escaping () -> Double = { 0.5 } // 0.5 -> jitter factor 1.0 (no jitter)
     ) -> RelayManagerTestContext {
         let permissionSubject = CurrentValueSubject<LocationChannelManager.PermissionState, Never>(permission)
@@ -1866,7 +1911,8 @@ final class NostrRelayManagerTests: XCTestCase {
                 now: { clock.now },
                 jitterUnit: jitterUnit,
                 notificationCenter: notificationCenter,
-                customRelays: { customRelays.urls }
+                customRelays: { customRelays.urls },
+                weshPinnedRelays: weshPinnedRelays
             )
         )
         return RelayManagerTestContext(
