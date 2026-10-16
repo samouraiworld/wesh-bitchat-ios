@@ -69,7 +69,7 @@ private final class FakeSocksServer: @unchecked Sendable {
                 host = (readExactly(client, 4) ?? []).map(String.init).joined(separator: ".")
             case 0x03:
                 if let len = readExactly(client, 1), let name = readExactly(client, Int(len[0])) {
-                    host = String(decoding: name, as: UTF8.self)
+                    host = String(bytes: name, encoding: .utf8) ?? ""
                 }
             case 0x04:
                 host = (readExactly(client, 16) ?? []).map { String(format: "%02x", $0) }.joined()

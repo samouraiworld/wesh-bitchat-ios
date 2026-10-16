@@ -20,6 +20,8 @@ public final class TorURLSession {
     public var session: URLSession { torSession }
 
     // Recreate the session so new clients bind to the fresh SOCKS port after a Tor restart.
+    // Called from the iOS scene activation path only, which the macOS dead-code scan does not see.
+    // periphery:ignore
     public func rebuild() {
         torSession = TorURLSession.makeTorSession()
     }
