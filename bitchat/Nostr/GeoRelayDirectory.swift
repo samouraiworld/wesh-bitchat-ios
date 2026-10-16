@@ -33,6 +33,9 @@ struct GeoRelayDirectoryDependencies {
     var activeNotificationName: Notification.Name?
     var autoStart: Bool
     var validationPolicy: GeoRelayDirectoryValidationPolicy
+    /// False in Wesh: Internet mode talks to its pinned relays only, so the
+    /// directory never fetches its CSV from a third-party host.
+    var remoteFetchAllowed: () -> Bool = { true }
 }
 
 struct GeoRelayDirectoryValidationPolicy: Sendable {
@@ -152,7 +155,8 @@ private extension GeoRelayDirectoryDependencies {
             },
             activeNotificationName: activeNotificationName,
             autoStart: true,
-            validationPolicy: validationPolicy
+            validationPolicy: validationPolicy,
+            remoteFetchAllowed: { !WeshModeFlag.isActive }
         )
     }
 }
@@ -242,6 +246,7 @@ final class GeoRelayDirectory {
 
     // MARK: - Remote Fetch
     func prefetchIfNeeded(force: Bool = false) {
+        guard dependencies.remoteFetchAllowed() else { return }
         guard !isFetching else { return }
 
         let now = dependencies.now()
@@ -260,7 +265,7 @@ final class GeoRelayDirectory {
     }
 
     private func fetchRemote() {
-        guard !isFetching else { return }
+        guard dependencies.remoteFetchAllowed(), !isFetching else { return }
         isFetching = true
 
         let request = URLRequest(
