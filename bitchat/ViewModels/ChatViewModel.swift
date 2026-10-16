@@ -1763,9 +1763,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // identity and re-enroll the contact that was just erased.
         verificationCoordinator.cancelAllQRVerifications()
         let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
-        UserDefaults.standard.removeObject(forKey: "wesh.publicDisclosureAccepted.v1")
+        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
         panicPersistentStoreWipes.notifications()
+        panicPersistentStoreWipes.pasteboard()
         locationPresenceStore.reset()
         publicRateLimiter.reset()
 

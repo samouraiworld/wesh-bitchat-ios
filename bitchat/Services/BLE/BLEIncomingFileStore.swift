@@ -41,6 +41,8 @@ struct PanicPersistentStoreWipes {
     var qrContacts: @MainActor () -> Bool = { WeshQRTrust.shared.clear() }
     /// Delivered and pending alerts can still name senders or quote messages.
     var notifications: @MainActor () -> Void = { NotificationService.shared.removeAllNotifications() }
+    /// A message copied from Wesh must not outlive the local data.
+    var pasteboard: @MainActor () -> Void = { WeshClipboard.shared.clearOwnedCopy() }
 }
 
 struct PanicRecoveryIntent {

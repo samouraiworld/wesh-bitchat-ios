@@ -449,6 +449,10 @@ struct WeshPrivateDataAtRestTests {
         )
         wipes.qrContacts = { contactWipes += 1; return !failContacts }
         wipes.notifications = { notificationsCleared += 1 }
+        var pasteboardClears = 0
+        wipes.pasteboard = { pasteboardClears += 1 }
+        UserDefaults.standard.set(true, forKey: "wesh.publicMuted")
+        UserDefaults.standard.set("day", forKey: "wesh.appearance.v1")
         var committed = 0
         let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
@@ -461,6 +465,9 @@ struct WeshPrivateDataAtRestTests {
         #expect(vm.panicClearAllData() == !failContacts)
         #expect(contactWipes == 1)
         #expect(notificationsCleared == 1)
+        #expect(pasteboardClears == 1)
+        #expect(UserDefaults.standard.object(forKey: "wesh.publicMuted") == nil)
+        #expect(UserDefaults.standard.object(forKey: "wesh.appearance.v1") == nil)
         #expect(committed == (failContacts ? 0 : 1))
         #expect(vm.panicRecoveryBlocked == failContacts)
     }
@@ -537,4 +544,35 @@ struct WeshPrivateDataAtRestTests {
         #expect(WeshPrivacyCover.covers(.inactive))
         #expect(WeshPrivacyCover.covers(.background))
     }
+
+    // MARK: Clipboard
+
+    private final class FakePasteboard: WeshPasteboard {
+        var changeCount = 0
+        var text: String?
+        var expiry: Date?
+        func write(_ text: String, expiringAt date: Date) { self.text = text; expiry = date; changeCount += 1 }
+        func clear() { text = nil; expiry = nil; changeCount += 1 }
+    }
+
+    @Test func copiedMessagesExpireAndPanicClearsOnlyWhatWeshCopied() {
+        let pasteboard = FakePasteboard()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let clipboard = WeshClipboard(pasteboard: pasteboard, now: { now })
+        clipboard.copy("Rendez-vous à 18 h")
+        #expect(pasteboard.text == "Rendez-vous à 18 h")
+        #expect(pasteboard.expiry == now.addingTimeInterval(WeshClipboard.lifetime))
+        #expect(WeshClipboard.lifetime <= 120)
+        clipboard.clearOwnedCopy()
+        #expect(pasteboard.text == nil)
+
+        clipboard.copy("Secret")
+        pasteboard.changeCount += 1 // the user copied something else since
+        pasteboard.text = "Autre chose"
+        clipboard.clearOwnedCopy()
+        #expect(pasteboard.text == "Autre chose")
+    }
+
+    // MARK: Contact names
+
 }
