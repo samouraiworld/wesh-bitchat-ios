@@ -27,14 +27,18 @@ final class WeshMeetingNoteStore: ObservableObject {
     private let storage: WeshSealedStore?
     private let legacyDefaults: UserDefaults?
     private let erasePersisted: @MainActor () -> Bool
+    /// Keystrokes are coalesced into one sealed write after this pause.
+    private let saveDelay: TimeInterval
+    private var pendingSave: Task<Void, Never>?
     static let legacyKeys = ["wesh.meeting.title", "wesh.meeting.place", "wesh.meeting.note", "wesh.meeting.date"]
 
     /// Nil storage is a RAM-only instance. Tests inject synthetic storage and
     /// never construct an owner backed by the host's real files.
     init(storage: WeshSealedStore? = nil, legacyDefaults: UserDefaults? = nil,
-         erasePersisted: (@MainActor () -> Bool)? = nil) {
+         erasePersisted: (@MainActor () -> Bool)? = nil, saveDelay: TimeInterval = 0) {
         self.storage = storage
         self.legacyDefaults = legacyDefaults
+        self.saveDelay = saveDelay
         content = Content()
         self.erasePersisted = erasePersisted ?? { Self.erase(storage: storage, legacyDefaults: legacyDefaults) }
         load()
@@ -105,8 +109,29 @@ final class WeshMeetingNoteStore: ObservableObject {
         return true
     }
 
+    /// Writes a delayed edit now, e.g. before the app leaves the foreground.
+    func flushPendingSave() {
+        guard let pending = pendingSave else { return }
+        pending.cancel()
+        pendingSave = nil
+        write()
+    }
+
     private func persist() {
-        guard let storage else { return }
+        guard storage != nil else { return }
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard saveDelay > 0 else { write(); return }
+        let delay = UInt64(saveDelay * 1_000_000_000)
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            self?.flushPendingSave()
+        }
+    }
+
+    private func write() {
+        guard let storage, !isSuspended else { return }
         do {
             try storage.save(JSONEncoder().encode(content))
             isSaveConfirmed = true
@@ -160,6 +185,9 @@ final class WeshMeetingNoteStore: ObservableObject {
     }
 
     func suspendForPanic() {
+        // Nothing typed before the wipe may be written after it.
+        pendingSave?.cancel()
+        pendingSave = nil
         generation &+= 1
         isSuspended = true
         content = Content()
@@ -324,7 +352,10 @@ struct WeshRootView: View {
         .onChange(of: viewModel.weshPanicGeneration) { _ in sharedReview = nil }
         .onChange(of: scenePhase) { phase in
             // Sealed stores stay closed until first unlock; retry once visible.
-            guard phase == .active else { return }
+            guard phase == .active else {
+                viewModel.weshMeetingNote.flushPendingSave()
+                return
+            }
             WeshQRTrust.shared.reloadIfNeeded()
             viewModel.weshMeetingNote.reloadIfNeeded()
         }

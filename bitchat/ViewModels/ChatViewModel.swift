@@ -1209,7 +1209,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.weshMeetingNote = weshMeetingNote
             ?? (TestEnvironment.isRunningTests
                 ? WeshMeetingNoteStore()
-                : WeshMeetingNoteStore(storage: .liveMeetingNote(), legacyDefaults: .standard))
+                : WeshMeetingNoteStore(storage: .liveMeetingNote(), legacyDefaults: .standard, saveDelay: 0.4))
         self.groupStore = groupStore ?? GroupStore(keychain: keychain)
         self.idBridge = idBridge
         self.identityManager = identityManager

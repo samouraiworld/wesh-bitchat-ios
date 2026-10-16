@@ -408,6 +408,35 @@ struct WeshPrivateDataAtRestTests {
         #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note == "Nouvelle")
     }
 
+    @Test func meetingNoteKeystrokesAreCoalescedIntoOneDelayedOrFlushedWrite() async throws {
+        let fixture = Fixture()
+        let note = WeshMeetingNoteStore(storage: fixture.store(), saveDelay: 60)
+        #expect(note.edit(\.note, value: "R", generation: note.generation))
+        #expect(note.edit(\.note, value: "Rendez-vous", generation: note.generation))
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        note.flushPendingSave()
+        #expect(note.isSaveConfirmed)
+        #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note == "Rendez-vous")
+
+        let delayed = WeshMeetingNoteStore(storage: fixture.store(), saveDelay: 0.05)
+        #expect(delayed.edit(\.place, value: "Gare", generation: delayed.generation))
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(WeshMeetingNoteStore(storage: fixture.store()).content.place == "Gare")
+    }
+
+    @Test func panicCancelsAPendingNoteWriteSoNothingIsWrittenAfterTheWipe() async throws {
+        let fixture = Fixture()
+        let note = WeshMeetingNoteStore(storage: fixture.store(), saveDelay: 0.05)
+        #expect(note.edit(\.note, value: "Rendez-vous secret", generation: note.generation))
+        note.suspendForPanic()
+        #expect(note.wipeForPanic())
+        note.completePanic()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        note.flushPendingSave()
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note.isEmpty)
+    }
+
     // MARK: Panic wipe
 
     @Test(arguments: [false, true])
