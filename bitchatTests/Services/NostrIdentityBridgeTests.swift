@@ -30,6 +30,43 @@ struct NostrIdentityBridgeTests {
         }
     }
 
+    @Test("Read-only accessor never creates key material")
+    func storedIdentityIsReadOnly() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        #expect(try bridge.storedNostrIdentity() == nil)
+        #expect(keychain.saveCount == 0)
+        #expect(keychain.backing.load(key: identityKey, service: service) == nil)
+
+        let created = try #require(try bridge.getCurrentNostrIdentity())
+        #expect(try bridge.storedNostrIdentity()?.npub == created.npub)
+
+        keychain.readFailure = .deviceLocked
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.storedNostrIdentity() }
+    }
+
+    @Test("Owned npubs come from durable material and fail closed otherwise")
+    func locallyOwnedNpubsFailClosed() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        #expect(try bridge.locallyOwnedNpubs().isEmpty)
+        #expect(keychain.saveCount == 0)
+
+        let current = try #require(try bridge.getCurrentNostrIdentity())
+        #expect(try bridge.locallyOwnedNpubs() == [current.npub])
+
+        keychain.readFailure = .deviceLocked
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.locallyOwnedNpubs() }
+        keychain.readFailure = nil
+
+        // A device seed means derived identities exist that cannot be listed,
+        // even on a fresh bridge whose in-memory cache is empty.
+        _ = try bridge.deriveIdentity(forGeohash: "u09tu")
+        #expect(throws: NostrIdentityBridge.StorageError.derivedIdentitiesNotEnumerable) {
+            try NostrIdentityBridge(keychain: keychain).locallyOwnedNpubs()
+        }
+    }
+
     @Test("Unreadable seed is preserved and does not cache a replacement")
     func seedReadFailuresPreserveIdentity() throws {
         for failure: KeychainReadResult in [.deviceLocked, .accessDenied, .authenticationFailed, .otherError(-36)] {

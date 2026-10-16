@@ -69,7 +69,9 @@ let package = Package(
                 // Frozen envelopes produced by the released iOS (733098bb)
                 // and Android (b7f0b33d) private-DM implementations; prove
                 // receive compatibility independently of the local generator.
-                .process("Nostr/Fixtures")
+                .process("Nostr/Fixtures"),
+                // Signed QR vectors shared with the Android client.
+                .process("Services/Fixtures")
             ]
         )
     ]
