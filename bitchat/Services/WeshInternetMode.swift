@@ -1,3 +1,4 @@
+import BitLogger
 import Combine
 import Foundation
 import Tor
@@ -118,11 +119,6 @@ struct WeshInternetStateMachine: Equatable {
     }
 }
 
-/// Observable Internet mode for the Wesh UI.
-///
-/// UI contract: read `state`, `isEnabled`, `needsDisclosure`; call
-/// `acceptDisclosure()` once the disclosure is shown, then `setEnabled(_:)`;
-/// call `retry()` from the error pill.
 /// Observable Internet mode for the Wesh UI.
 ///
 /// UI contract: read `state`, `isEnabled`, `needsDisclosure`; once the
@@ -265,8 +261,10 @@ final class WeshInternetMode: ObservableObject {
 
     /// Panic: Internet off (persisted), Tor stopped and awaited, Arti state
     /// deleted and checked. Nostr keys are wiped by the identity bridge in the
-    /// same transaction. Returns false if the directory survived; the next
-    /// launch retries since the toggle is then absent.
+    /// same transaction. Returns false if Arti did not stop (its directory is
+    /// then left alone, never deleted under a live writer) or the directory
+    /// survived; a retried panic or the next launch deletes it once Arti is
+    /// stopped, since the toggle is then absent.
     @discardableResult
     func wipeForPanic() -> Bool {
         defaults.removeObject(forKey: WeshInternetSettings.enabledKey)
@@ -274,7 +272,10 @@ final class WeshInternetMode: ObservableObject {
         disclosureAccepted = false
         apply(.panic)
         dependencies.setNetworkEnabled(false)
-        _ = dependencies.stopTorAndWait()
+        guard dependencies.stopTorAndWait() else {
+            SecureLogger.error("Panic: Arti did not stop in time; its directory is kept for a retry", category: .security)
+            return false
+        }
         return deleteArtiDirectory()
     }
 
