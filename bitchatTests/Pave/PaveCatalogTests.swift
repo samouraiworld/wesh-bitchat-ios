@@ -89,4 +89,29 @@ struct PaveCatalogTests {
             }
         }
     }
+
+    /// App Shortcut phrases use `AppShortcuts.strings`: the catalog form needs iOS 17.
+    @Test func everySiriPhraseIsTranslated() throws {
+        func phrases(_ locale: String) throws -> [String: String] {
+            let url = Self.repoRoot.appendingPathComponent("bitchat/\(locale).lproj/AppShortcuts.strings")
+            let plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil)
+            return try #require(plist as? [String: String])
+        }
+        let english = try phrases("en")
+        let french = try phrases("fr")
+        let source = try #require(try Self.sources().first { $0.name == "PaveEraseShortcut.swift" }?.text)
+        let pattern = try NSRegularExpression(pattern: #""([^"\n]*\\\(\.applicationName\)[^"\n]*)""#)
+        let range = NSRange(source.startIndex..., in: source)
+        let codePhrases = pattern.matches(in: source, range: range).compactMap { match in
+            Range(match.range(at: 1), in: source).map {
+                String(source[$0]).replacingOccurrences(of: #"\(.applicationName)"#, with: "${applicationName}")
+            }
+        }
+        #expect(!codePhrases.isEmpty)
+        for phrase in codePhrases {
+            #expect(english[phrase] == phrase, "missing English phrase for « \(phrase) »")
+            #expect(french[phrase]?.contains("${applicationName}") == true, "missing French phrase for « \(phrase) »")
+        }
+        #expect(Set(english.keys) == Set(codePhrases) && Set(french.keys) == Set(codePhrases))
+    }
 }
