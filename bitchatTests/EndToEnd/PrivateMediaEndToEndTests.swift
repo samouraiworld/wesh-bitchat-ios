@@ -10,11 +10,6 @@ import Testing
 /// the receiver reassembles, decrypts, validates, persists, and delivers it.
 @Suite("Private media end to end", .serialized)
 struct PrivateMediaEndToEndTests {
-    init() {
-        // Upstream media transfer: Wesh refuses inbound media by default.
-        WeshIncomingMediaPolicy.acceptsMedia = true
-    }
-
     @Test
     func unavailableIdentityCacheCannotAuthorizeLegacyMediaFallback() {
         let root = FileManager.default.temporaryDirectory
@@ -1538,7 +1533,7 @@ struct PrivateMediaEndToEndTests {
         engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
     ) -> BLEService {
         let keychain = MockKeychain()
-        return BLEService(
+        let service = BLEService(
             keychain: keychain,
             idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: identityManager ?? MockIdentityManager(keychain),
@@ -1546,6 +1541,8 @@ struct PrivateMediaEndToEndTests {
             incomingFileStore: BLEIncomingFileStore(baseDirectory: baseDirectory),
             engineScheduler: engineScheduler
         )
+        service.acceptsIncomingMedia = { true }
+        return service
     }
 
     private func establishSession(alice: BLEService, bob: BLEService) async throws {

@@ -14,11 +14,6 @@ import BitFoundation
 
 @Suite("Fragmentation Tests", .serialized)
 struct FragmentationTests {
-    init() {
-        // Upstream media transfer: Wesh refuses inbound media by default.
-        WeshIncomingMediaPolicy.acceptsMedia = true
-    }
-
 
     @Test("Reassembly from fragments delivers a public message")
     func reassemblyFromFragmentsDeliversPublicMessage() async throws {
@@ -178,17 +173,27 @@ struct FragmentationTests {
 }
 
 extension FragmentationTests {
+    @Test("A transport refuses inbound media unless it opts in")
+    func transportRefusesInboundMediaByDefault() {
+        let service = BLEService(keychain: MockKeychain(), idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                 identityManager: MockIdentityManager(MockKeychain()), initializeBluetoothManagers: false)
+        #expect(!service.acceptsIncomingMedia())
+        #expect(makeBLEService().acceptsIncomingMedia())
+    }
+
     private func makeBLEService() -> BLEService {
         let mockKeychain = MockKeychain()
         let mockIdentityManager = MockIdentityManager(mockKeychain)
         let idBridge = NostrIdentityBridge(keychain: MockKeychainHelper())
 
-        return BLEService(
+        let service = BLEService(
             keychain: mockKeychain,
             idBridge: idBridge,
             identityManager: mockIdentityManager,
             initializeBluetoothManagers: false
         )
+        service.acceptsIncomingMedia = { true }
+        return service
     }
 
     /// Thread-safe delegate that supports awaiting message delivery
