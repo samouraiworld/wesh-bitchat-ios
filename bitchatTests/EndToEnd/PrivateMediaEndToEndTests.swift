@@ -10,6 +10,11 @@ import Testing
 /// the receiver reassembles, decrypts, validates, persists, and delivers it.
 @Suite("Private media end to end", .serialized)
 struct PrivateMediaEndToEndTests {
+    init() {
+        // Upstream media transfer: Wesh refuses inbound media by default.
+        WeshIncomingMediaPolicy.acceptsMedia = true
+    }
+
     @Test
     func unavailableIdentityCacheCannotAuthorizeLegacyMediaFallback() {
         let root = FileManager.default.temporaryDirectory

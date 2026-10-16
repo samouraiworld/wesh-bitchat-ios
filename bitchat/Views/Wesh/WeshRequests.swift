@@ -10,9 +10,10 @@ enum WeshLinks {
 
 /// Inbound media from BitChat peers is never written to disk in Wesh.
 /// Read from BLE queues, so it is a lock-guarded flag rather than MainActor state.
+/// Fails closed: only tests that exercise upstream media opt in.
 enum WeshIncomingMediaPolicy {
     private static let lock = NSLock()
-    private static var _acceptsMedia = true
+    private static var _acceptsMedia = false
 
     static var acceptsMedia: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _acceptsMedia }

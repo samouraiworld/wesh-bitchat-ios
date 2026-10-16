@@ -14,6 +14,11 @@ import BitFoundation
 
 @Suite("Fragmentation Tests", .serialized)
 struct FragmentationTests {
+    init() {
+        // Upstream media transfer: Wesh refuses inbound media by default.
+        WeshIncomingMediaPolicy.acceptsMedia = true
+    }
+
 
     @Test("Reassembly from fragments delivers a public message")
     func reassemblyFromFragmentsDeliversPublicMessage() async throws {

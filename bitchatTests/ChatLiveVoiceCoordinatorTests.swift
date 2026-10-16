@@ -70,6 +70,11 @@ private final class MockChatLiveVoiceContext: ChatLiveVoiceContext {
 struct ChatLiveVoiceCoordinatorTests {
     private let peer = PeerID(str: "aaaabbbbcccc0001")
 
+    init() {
+        // Upstream live voice: Wesh refuses inbound media by default.
+        WeshIncomingMediaPolicy.acceptsMedia = true
+    }
+
     private func makeBurstID(_ fill: UInt8) -> Data {
         Data(repeating: fill, count: VoiceBurstPacket.burstIDSize)
     }

@@ -24,8 +24,6 @@ struct BitchatApp: App {
 
     init() {
         WeshMode.isActive = true
-        // Hosted unit tests keep upstream media behavior unless they opt in.
-        if !TestEnvironment.isRunningTests { WeshIncomingMediaPolicy.acceptsMedia = false }
         NetworkActivationService.shared.setUserInternetEnabled(false)
         BridgeService.shared.setEnabled(false)
         GatewayService.shared.setEnabled(false)
