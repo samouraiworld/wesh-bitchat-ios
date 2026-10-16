@@ -39,6 +39,13 @@ final class MessageRouter {
     /// retain that key, even if a short BLE address is reused by another verified person.
     var privateSendPolicy: ((PeerID, Data?) -> Data?)?
 
+    /// Read receipts, delivery acks and favorite markers disclose presence and
+    /// reading. Under a policy they need the same admission as a private message.
+    func admitsControlMessage(to peerID: PeerID) -> Bool {
+        guard let privateSendPolicy else { return true }
+        return privateSendPolicy(peerID, nil) != nil
+    }
+
     private func authorized(_ message: QueuedMessage, for recipient: PeerID) -> Bool {
         guard let privateSendPolicy else { return true }
         guard let pinnedKey = message.recipientNoiseKey else { return false }
@@ -582,6 +589,8 @@ final class MessageRouter {
     /// is retried on the next read scan (chat open / foreground / reconnect).
     @discardableResult
     func sendReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) -> Bool {
+        // Denied receipts stay unsent, like an unroutable one.
+        guard admitsControlMessage(to: peerID) else { return false }
         if let transport = reachableTransport(for: peerID) {
             SecureLogger.debug("Routing READ ack via \(type(of: transport)) to \(peerID.id.prefix(8))… id=\(receipt.originalMessageID.prefix(8))…", category: .session)
             transport.sendReadReceipt(receipt, to: peerID)
@@ -593,6 +602,7 @@ final class MessageRouter {
     }
 
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
+        guard admitsControlMessage(to: peerID) else { return }
         if let transport = connectedTransport(for: peerID) {
             transport.sendFavoriteNotification(to: peerID, isFavorite: isFavorite)
         } else if let transport = reachableTransport(for: peerID) {

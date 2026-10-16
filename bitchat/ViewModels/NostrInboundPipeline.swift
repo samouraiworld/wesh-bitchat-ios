@@ -50,6 +50,13 @@ protocol NostrInboundPipelineContext: AnyObject {
     )
     func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID)
     func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID)
+    /// False when this sender may not reach the device privately (Wesh: not a
+    /// QR-verified contact). Checked once, before any payload is dispatched.
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool
+}
+
+extension NostrInboundPipelineContext {
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool { true }
 }
 
 extension ChatViewModel: NostrInboundPipelineContext {
@@ -384,6 +391,8 @@ final class NostrInboundPipeline {
             }
 
             let convKey = PeerID(nostr_: senderPubkey)
+            // One admission check covers every payload type, current and future.
+            guard context.admitsPrivateSender(convKey) else { return }
             context.registerNostrKeyMapping(senderPubkey, for: convKey)
 
             switch payload.type {
@@ -482,6 +491,8 @@ final class NostrInboundPipeline {
                         // Drop pre-wipe plaintext if a panic wipe landed
                         // during the off-main decrypt (see above).
                         guard self.wipeGeneration == wipeGeneration else { return }
+                        // One admission check covers every payload type, current and future.
+                        guard context.admitsPrivateSender(targetPeerID) else { return }
                         context.registerNostrKeyMapping(senderPubkey, for: targetPeerID)
 
                         switch payload.type {

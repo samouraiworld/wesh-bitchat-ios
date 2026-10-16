@@ -46,7 +46,7 @@ public final class TorManager: ObservableObject {
     @Published private(set) public var isReady: Bool = false
     @Published private(set) var isStarting: Bool = false
     @Published private(set) var lastError: Error?
-    @Published private(set) var bootstrapProgress: Int = 0
+    @Published private(set) public var bootstrapProgress: Int = 0
     @Published private(set) var bootstrapSummary: String = ""
     /// True once a bootstrap attempt has spent its whole deadline without
     /// completing.
@@ -399,6 +399,30 @@ public final class TorManager: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Panic: stops Arti and blocks (bounded) until it has exited, so its
+    /// state directory can be deleted with nothing left writing to it.
+    /// Returns false if Arti is still running at the deadline.
+    @discardableResult
+    public func stopSynchronously(timeout: TimeInterval = 3.0) -> Bool {
+        allowAutoStart = false
+        startPendingAfterShutdown = false
+        bootstrapGeneration += 1
+        _ = arti_stop()
+        let deadline = Date().addingTimeInterval(timeout)
+        while arti_is_running() != 0 && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        isReady = false
+        socksReady = false
+        bootstrapProgress = 0
+        bootstrapSummary = ""
+        isStarting = false
+        didStart = false
+        restarting = false
+        bootstrapMonitorStarted = false
+        return arti_is_running() == 0
     }
 
     private func restartArti() async {

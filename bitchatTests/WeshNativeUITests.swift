@@ -797,6 +797,173 @@ struct WeshNativeUITests {
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: verified, locallyVerified: false))
     }
 
+    @Test @MainActor func unverifiedPrivateSenderBecomesASilentRequestUntilQRVerification() async throws {
+        WeshInboundRequests.shared.clear()
+        defer { WeshInboundRequests.shared.clear() }
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            // The chat is open: an enrolled sender would get a READ receipt here.
+            fixture.vm.selectedPrivateChatPeer = fixture.shortID
+            let unverified = BitchatMessage(id: "req-1", sender: "Inconnu", content: "Salut ?", timestamp: Date(),
+                                            isRelay: false, originalSender: nil, isPrivate: true,
+                                            recipientNickname: "Me", senderPeerID: fixture.shortID)
+            fixture.vm.handlePrivateMessage(unverified)
+            fixture.vm.sendMeshDeliveryAck(for: "req-1", to: fixture.shortID)
+
+            let request = try #require(WeshInboundRequests.shared.requests.first)
+            #expect(request.id == fixture.key.sha256Fingerprint())
+            #expect(request.messages.map(\.content) == ["Salut ?"])
+            #expect(fixture.vm.privateMessages(for: fixture.shortID).isEmpty)
+            #expect(fixture.vm.privateMessages(for: fixture.peer).isEmpty)
+            #expect(fixture.transport.sentReadReceipts.isEmpty)
+            #expect(fixture.transport.sentDeliveryAcks.isEmpty)
+            #expect(!fixture.vm.canSendWeshPrivate(to: fixture.peer))
+
+            WeshQRTrust.shared.record(sessionKey: fixture.key, nickname: "Synthetic peer")
+            let verified = BitchatMessage(id: "ok-1", sender: "Synthetic peer", content: "Vérifié", timestamp: Date(),
+                                          isRelay: false, originalSender: nil, isPrivate: true,
+                                          recipientNickname: "Me", senderPeerID: fixture.shortID)
+            fixture.vm.handlePrivateMessage(verified)
+            fixture.vm.sendMeshDeliveryAck(for: "ok-1", to: fixture.shortID)
+            #expect(WeshInboundRequests.shared.requests.first?.messages.count == 1)
+            #expect(fixture.transport.sentDeliveryAcks.count == 1)
+            #expect(fixture.transport.sentReadReceipts.count == 1)
+        }
+    }
+
+    @Test @MainActor func reportingAPublicAuthorBlocksAndHidesOnlyThatIdentityLocally() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let other = PeerID(str: "0102030405060708")
+            for (id, sender) in [("spam-1", fixture.shortID), ("keep-1", other)] {
+                _ = fixture.vm.conversations.append(BitchatMessage(id: id, sender: "Pseudo", content: "Message public " + id,
+                    timestamp: Date(), isRelay: false, originalSender: nil, isPrivate: false,
+                    recipientNickname: nil, senderPeerID: sender), to: .mesh)
+            }
+            let author = try #require(WeshMessageActions.publicAuthor(of: fixture.shortID, knownNoiseKeys: [fixture.key]))
+            #expect(author == fixture.peer)
+            #expect(fixture.vm.reportWeshPublicAuthor(author, displayName: "Pseudo"))
+            #expect(fixture.vm.identityManager.isBlocked(fingerprint: fixture.key.sha256Fingerprint()))
+            let remaining = fixture.vm.conversations.conversationsByID[.mesh]?.messages.map(\.id) ?? []
+            #expect(!remaining.contains("spam-1"))
+            #expect(remaining.contains("keep-1"))
+            #expect(fixture.transport.sentMessages.isEmpty && fixture.transport.sentPrivateMessages.isEmpty)
+        }
+    }
+
+    @Test func publicAuthorRequiresAnExactlyDerivedKnownKey() {
+        let key = Data(repeating: 0x42, count: 32)
+        let derived = PeerID(publicKey: key)
+        #expect(WeshMessageActions.publicAuthor(of: derived, knownNoiseKeys: [key]) == PeerID(hexData: key))
+        #expect(WeshMessageActions.publicAuthor(of: derived, knownNoiseKeys: []) == nil)
+        #expect(WeshMessageActions.publicAuthor(of: PeerID(str: "1122334455667788"), knownNoiseKeys: [key]) == nil)
+        #expect(WeshMessageActions.publicAuthor(of: PeerID(hexData: key), knownNoiseKeys: []) == PeerID(hexData: key))
+        #expect(WeshMessageActions.publicAuthor(of: nil, knownNoiseKeys: [key]) == nil)
+    }
+
+    @Test @MainActor func requestsAreBoundedAndDeduplicated() {
+        let requests = WeshInboundRequests(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let key = Data(repeating: 0x51, count: 32)
+        func message(_ id: String, _ content: String = "texte") -> BitchatMessage {
+            BitchatMessage(id: id, sender: "Inconnu", content: content, timestamp: Date(), isRelay: false,
+                           originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        }
+        #expect(requests.add(message("a", "[image] photo.jpg"), from: key))
+        #expect(!requests.add(message("a"), from: key))
+        #expect(requests.requests.first?.messages.first?.content == "Média non pris en charge")
+        for index in 0..<(WeshInboundRequests.maxMessagesPerRequest + 5) { requests.add(message("m\(index)"), from: key) }
+        #expect(requests.requests.first?.messages.count == WeshInboundRequests.maxMessagesPerRequest)
+        for index in 1..<WeshInboundRequests.maxRequests { requests.add(message("x"), from: Data(repeating: UInt8(index), count: 32)) }
+        #expect(requests.requests.count == WeshInboundRequests.maxRequests)
+        #expect(!requests.add(message("overflow"), from: Data(repeating: 0xEE, count: 32)))
+        requests.remove(key.sha256Fingerprint())
+        #expect(requests.requests.count == WeshInboundRequests.maxRequests - 1)
+        requests.clear()
+        #expect(requests.requests.isEmpty)
+    }
+
+    @Test @MainActor func deletedRequestStaysDeletedWhenTheSenderRetriesTheSameMessage() {
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let requests = WeshInboundRequests(now: { clock })
+        let key = Data(repeating: 0x52, count: 32)
+        func message(_ id: String) -> BitchatMessage {
+            BitchatMessage(id: id, sender: "Inconnu", content: "texte", timestamp: clock, isRelay: false,
+                           originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        }
+        #expect(requests.add(message("a"), from: key))
+        requests.remove(key.sha256Fingerprint())
+        #expect(!requests.add(message("a"), from: key))
+        #expect(requests.requests.isEmpty)
+        // Another sender reusing the ID, or a new message, is not suppressed.
+        #expect(requests.add(message("a"), from: Data(repeating: 0x53, count: 32)))
+        #expect(requests.add(message("b"), from: key))
+        requests.remove(key.sha256Fingerprint())
+        clock = clock.addingTimeInterval(WeshInboundRequests.deletedMemory + 1)
+        #expect(requests.add(message("a"), from: key))
+    }
+
+    @Test @MainActor func fullRequestListEvictsTheOldestRequestOnlyAfterItsMinimumDisplayAge() {
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let requests = WeshInboundRequests(now: { clock })
+        func message(_ id: String) -> BitchatMessage {
+            BitchatMessage(id: id, sender: "Inconnu", content: "texte", timestamp: clock, isRelay: false,
+                           originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        }
+        let first = Data(repeating: 1, count: 32)
+        #expect(requests.add(message("first"), from: first))
+        clock = clock.addingTimeInterval(1)
+        for index in 2...WeshInboundRequests.maxRequests {
+            #expect(requests.add(message("m\(index)"), from: Data(repeating: UInt8(index), count: 32)))
+        }
+        let newcomer = Data(repeating: 0xEE, count: 32)
+        #expect(!requests.add(message("early"), from: newcomer))
+
+        clock = clock.addingTimeInterval(WeshInboundRequests.minimumDisplayAge)
+        #expect(requests.add(message("late"), from: newcomer))
+        #expect(requests.requests.count == WeshInboundRequests.maxRequests)
+        #expect(!requests.requests.contains { $0.id == first.sha256Fingerprint() })
+        #expect(requests.requests.contains { $0.id == newcomer.sha256Fingerprint() })
+    }
+
+    @Test @MainActor func onlyQRVerifiedSendersAreAdmittedForPrivateTraffic() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(fixture.vm.admitsPrivateSender(fixture.peer))
+            #expect(fixture.vm.admitsPrivateSender(fixture.shortID))
+            #expect(!fixture.vm.admitsPrivateSender(PeerID(str: "nostr_abcdef12")))
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            #expect(!fixture.vm.admitsPrivateSender(fixture.peer))
+            #expect(!fixture.vm.admitsPrivateSender(fixture.shortID))
+        }
+    }
+
+    @Test func onlyALocallyGeneratedLineIsAppInformation() {
+        func message(peer: PeerID?) -> BitchatMessage {
+            BitchatMessage(id: UUID().uuidString, sender: "system", content: "Texte", timestamp: Date(), isRelay: false,
+                           originalSender: nil, isPrivate: false, recipientNickname: nil, senderPeerID: peer)
+        }
+        #expect(WeshMessageActions.isLocalSystem(message(peer: nil)))
+        #expect(!WeshMessageActions.isLocalSystem(message(peer: PeerID(str: "1122334455667788"))))
+    }
+
+    /// System text selection copies to the general pasteboard: plain, synced
+    /// through Universal Clipboard and never expiring.
+    @Test func weshViewsNeverEnableSystemTextSelection() throws {
+        let views = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("bitchat/Views/Wesh")
+        let files = try FileManager.default.contentsOfDirectory(at: views, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty)
+        for file in files {
+            #expect(!(try String(contentsOf: file, encoding: .utf8)).contains(".textSelection(.enabled)"), "\(file.lastPathComponent)")
+        }
+    }
+
+    @Test func legacyMediaReferencesRenderAsPlaceholder() {
+        #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
+        #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")
+        #expect(WeshIncomingMediaPolicy.displayText("Bonjour [image] ") == "Bonjour [image] ")
+        #expect(WeshLinks.terms.absoluteString == "https://wesh.samourai.app/conditions")
+    }
+
     @Test func historicalMessageBlockUsesPinnedIdentityAndRejectsShortAlias() {
         let first = PeerID(hexData: Data(repeating: 31, count: 32))
         let second = PeerID(hexData: Data(repeating: 32, count: 32))

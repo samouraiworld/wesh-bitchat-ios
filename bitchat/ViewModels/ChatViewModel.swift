@@ -90,20 +90,23 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct PanicNetworkLifecycle {
-    let stop: @MainActor () -> Void
+    /// Returns false when network state survived (e.g. the Arti directory),
+    /// so the panic transaction does not commit.
+    let stop: @MainActor () -> Bool
     let restart: @MainActor () -> Void
 
-    static let noop = PanicNetworkLifecycle(stop: {}, restart: {})
+    static let noop = PanicNetworkLifecycle(stop: { true }, restart: {})
 
     static var live: PanicNetworkLifecycle {
         PanicNetworkLifecycle(
             stop: {
                 GeohashPresenceService.shared.stopForPanic()
                 NetworkActivationService.shared.stopForPanic()
+                return WeshMode.isActive ? WeshInternetMode.shared.wipeForPanic() : true
             },
             restart: {
                 NetworkActivationService.shared.start()
-                GeohashPresenceService.shared.start()
+                if !WeshMode.isActive { GeohashPresenceService.shared.start() }
             }
         )
     }
@@ -1246,8 +1249,13 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         if weshPrivatePolicyEnabled {
             messageRouter.privateSendPolicy = { [weak self] recipient, pinnedKey in
-                guard let self, self.canSendWeshPrivate(to: recipient),
-                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(recipient)),
+                guard let self else { return nil }
+                // Receipts and acks address the live short mesh ID; admit it
+                // only as the authenticated session key it resolves to now.
+                let target = recipient.noiseKey != nil ? recipient
+                    : self.noiseSessionPublicKeyData(for: recipient).map { PeerID(hexData: $0) } ?? recipient
+                guard self.canSendWeshPrivate(to: target),
+                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)),
                       pinnedKey == nil || pinnedKey == actualKey else { return nil }
                 return actualKey
             }
@@ -1689,7 +1697,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Stop internet and location-presence work before clearing identity or
         // state. These services cancel their subscriptions and delayed tasks,
         // so old callbacks cannot reconnect during the transaction.
-        panicNetworkLifecycle.stop()
+        let networkWipeCompleted = panicNetworkLifecycle.stop()
 
         // Establish both independent durable intents before erasing anything.
         // `wipeMedia` will still attempt deletion if neither write succeeds.
@@ -1723,6 +1731,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // single-writer ConversationStore; the derived `messages` view and
         // the legacy mirror empty with it)
         conversations.clearAll()
+        WeshInboundRequests.shared.clear()
         pendingGeohashSystemMessages.removeAll()
 
         // Delete all keychain data (including Noise and Nostr keys)
@@ -1853,7 +1862,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [keychainWipeCompleted, meetingNoteWipeCompleted, courierWipeCompleted,
+            if [networkWipeCompleted, keychainWipeCompleted, meetingNoteWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
                 groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
                 sharedContentWipeCompleted].allSatisfy({ $0 }) {
