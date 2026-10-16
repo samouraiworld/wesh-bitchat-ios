@@ -345,6 +345,7 @@ struct WeshRootView: View {
         }
         .overlay { if WeshPrivacyCover.covers(scenePhase) { WeshPrivacyCoverView() } }
         .environment(\.weshTheme, theme)
+        .environment(\.paveTheme, PaveTheme(appearance.paveTheme))
         .environment(\.colorScheme, theme.scheme)
         .tint(theme.accent)
         .preferredColorScheme(theme.scheme)
@@ -564,14 +565,13 @@ private struct WeshSharedContentSheet: View {
                             }
                             ForEach(eligibleContacts) { contact in
                                 NavigationLink {
-                                    WeshConversation(runtime: runtime, peerID: contact.peerID, title: contact.nickname, sharedContentID: payloadID,
+                                    WeshConversation(runtime: runtime, peerID: contact.peerID, title: PaveDisplayName.safe(contact.nickname), sharedContentID: payloadID,
                                                      onSharedDraftImported: finishImport)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text(contact.nickname).font(.headline)
+                                        Text(PaveDisplayName.safe(contact.nickname)).font(.headline)
                                         Text("Privé · Contact QR").font(.subheadline).foregroundStyle(theme.secondary)
-                                        Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8)))
-                                            .font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                                        PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
                                     }.padding(.vertical, 8)
                                 }
                                 .accessibilityLabel(WeshSharedContentReview.destinationLabel(.privateConversation(peerID: contact.peerID, displayName: contact.nickname)))
@@ -646,32 +646,35 @@ private struct WeshInbox: View {
                 }.listRowBackground(theme.canvas)
             }
             Section {
+                PaveReachCard(phonesInReach: peers.reachableMeshPeerCount, bluetoothOn: chrome.bluetoothState == .poweredOn)
+                    .listRowInsets(EdgeInsets(top: PaveSpace.s2, leading: PaveSpace.s4, bottom: PaveSpace.s2, trailing: PaveSpace.s4))
+                    .listRowSeparator(.hidden)
+            }
+            .listRowBackground(theme.canvas)
+            Section {
                 NavigationLink {
                     WeshConversation(runtime: runtime, peerID: nil, title: "Salon local")
                 } label: {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Salon local").font(.headline)
-                            Text("Public").font(.subheadline.weight(.semibold)).foregroundStyle(theme.accent)
-                            Text("Une conversation ouverte autour de vous.")
-                                .font(.subheadline).foregroundStyle(theme.secondary)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 14)
-                    } else {
-                        HStack(spacing: 16) {
-                            WeshAvatar(symbol: "antenna.radiowaves.left.and.right")
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Salon local").font(.headline)
-                                Text("Une conversation ouverte autour de vous.")
-                                    .font(.subheadline).foregroundStyle(theme.secondary)
-                            }
+                    // Pavé Fluo: the public room is a full yellow card that says PUBLIC first.
+                    VStack(alignment: .leading, spacing: PaveSpace.s1) {
+                        HStack(spacing: PaveSpace.s2) {
+                            Image(systemName: "megaphone.fill").accessibilityHidden(true)
+                            Text("Salon local")
+                                .font(PaveDisplayStyle.displaySmall.font)
+                                .textCase(.uppercase)
+                                .accessibilityLabel(Text("Salon local"))
                             Spacer(minLength: 0)
-                            Text("Public").font(.caption.weight(.semibold)).foregroundStyle(theme.accent)
-                        }.padding(.vertical, theme.isDark ? 14 : 8)
+                        }
+                        Text("Public · une conversation ouverte autour de vous.")
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .foregroundStyle(theme.onPublic)
+                    .padding(PaveSpace.s4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.publicFill, in: RoundedRectangle(cornerRadius: PaveRadius.control))
                 }
+                .listRowInsets(EdgeInsets(top: PaveSpace.s1, leading: PaveSpace.s4, bottom: PaveSpace.s1, trailing: PaveSpace.s4))
             } header: { WeshSectionLabel(text: "À proximité") } footer: {
                 Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
                     .font(.footnote).foregroundStyle(theme.secondary).padding(.top, 8)
@@ -697,12 +700,13 @@ private struct WeshInbox: View {
                     ForEach(contacts) { row in
                         let hasUnread = inbox.unreadPeerIDs.contains(row.peerID) || inbox.unreadPeerIDs.contains(runtime.chatViewModel.getShortIDForNoiseKey(row.peerID))
                         NavigationLink {
-                            WeshConversation(runtime: runtime, peerID: row.peerID, title: row.nickname)
+                            WeshConversation(runtime: runtime, peerID: row.peerID, title: PaveDisplayName.safe(row.nickname))
                         } label: {
                             HStack(spacing: 16) {
                                 if !dynamicTypeSize.isAccessibilitySize { WeshAvatar(symbol: "person") }
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(row.nickname).font(.headline)
+                                    Text(PaveDisplayName.safe(row.nickname)).font(.headline)
+                                    PaveFingerprintText(fingerprint: PaveFingerprint.short(row.peerID.noiseKey))
                                     Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? "Identité vérifiée sur ce téléphone")
                                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                         .font(.subheadline).foregroundStyle(theme.secondary)
@@ -1008,7 +1012,7 @@ private struct WeshConversation: View {
                 }
             }
         }
-        .weshCanvas(title: title)
+        .weshCanvas(title: title, appCopy: peerID == nil)
         .navigationTitle(title).weshInlineTitle()
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1746,8 +1750,8 @@ private struct WeshContacts: View {
                             HStack(spacing: 16) {
                                 WeshAvatar(symbol: "person")
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(contact.nickname).font(.headline)
-                                    Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8))).font(.caption).foregroundStyle(theme.secondary)
+                                    Text(PaveDisplayName.safe(contact.nickname)).font(.headline)
+                                    PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
                                     Text(isBlocked(contact) ? "Bloqué sur ce téléphone" : "Identité vérifiée ici")
                                         .font(.subheadline).foregroundStyle(theme.secondary)
                                 }
@@ -1801,8 +1805,8 @@ private struct WeshContactDetails: View {
             Section {
                 VStack(alignment: .leading, spacing: 16) {
                     WeshAvatar(symbol: "person")
-                    Text(contact.nickname).font(.title2.weight(.semibold))
-                    Text("Identité · " + String((contact.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                    Text(PaveDisplayName.safe(contact.nickname)).font(.title2.weight(.semibold))
+                    PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
                     Label(blocked ? "Bloqué sur ce téléphone" : "Identité vérifiée ici", systemImage: blocked ? "hand.raised" : "lock")
                         .font(.subheadline).foregroundStyle(theme.secondary)
                     Text("Ce surnom vient du QR. La vérification concerne l’identité de connexion, sur ce téléphone seulement.")
@@ -1884,8 +1888,8 @@ private struct WeshNearbyPeople: View {
                         let name = WeshDisplayName.clean(person.displayName, fallback: "Participant")
                         VStack(alignment: .leading, spacing: 6) {
                             Text(name).font(.headline)
-                            Text("Identité · " + String(person.noisePublicKey.sha256Fingerprint().prefix(8)))
-                                .font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                            // Only a key this peer proved in its Noise session; an announced key can be copied.
+                            PaveFingerprintText(fingerprint: PaveFingerprint.short(runtime.chatViewModel.noiseSessionPublicKeyData(for: person.peerID)))
                             if runtime.chatViewModel.identityManager.isBlocked(fingerprint: person.noisePublicKey.sha256Fingerprint()) {
                                 Text("Bloqué sur ce téléphone").font(.subheadline).foregroundStyle(theme.secondary)
                             } else {
@@ -1915,7 +1919,7 @@ private struct WeshNearbyPeople: View {
                 }
                 .accessibilityLabel("Bloquer " + (selected.map { weshIdentitySummary($0.nickname, fingerprint: $0.peerID.noiseKey?.sha256Fingerprint()) } ?? "cette personne"))
             } message: {
-                Text("\(selected.map { $0.nickname + " · " + String(($0.peerID.noiseKey?.sha256Fingerprint() ?? "").prefix(8)) } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
+                Text("\(selected.map { PaveDisplayName.safe($0.nickname) + " · " + (PaveFingerprint.short($0.peerID.noiseKey) ?? "") } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
             }
     }
 }
@@ -1950,7 +1954,7 @@ private struct WeshBlockedContacts: View {
                     ForEach(fingerprints, id: \.self) { fingerprint in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(name(for: fingerprint)).font(.headline)
-                            Text("Identité · " + String(fingerprint.prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                            PaveFingerprintText(fingerprint: weshShortFingerprint(hex: fingerprint))
                             Button("Débloquer") { selectedFingerprint = fingerprint }.frame(minHeight: 44)
                                 .accessibilityLabel("Débloquer " + weshIdentitySummary(name(for: fingerprint), fingerprint: fingerprint))
                                 .accessibilityHint("Demande confirmation avant d’autoriser ses prochains messages sur ce téléphone")
@@ -1971,7 +1975,7 @@ private struct WeshBlockedContacts: View {
                     selectedFingerprint = nil
                 }
                 .accessibilityLabel("Débloquer " + (selectedFingerprint.map { weshIdentitySummary(name(for: $0), fingerprint: $0) } ?? "cette personne"))
-            } message: { Text("Débloquer \(selectedFingerprint.map { name(for: $0) + " · " + String($0.prefix(8)) } ?? "cette personne") ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone.") }
+            } message: { Text("Débloquer \(selectedFingerprint.map { name(for: $0) + " · " + (weshShortFingerprint(hex: $0) ?? "") } ?? "cette personne") ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone.") }
     }
 }
 
@@ -2206,8 +2210,17 @@ private struct WeshValueRow: View {
 }
 
 private func weshIdentitySummary(_ name: String, fingerprint: String?) -> String {
-    guard let fingerprint, !fingerprint.isEmpty else { return name }
-    return "\(name), identité \(fingerprint.prefix(8))"
+    let safeName = PaveDisplayName.safe(name)
+    guard let short = weshShortFingerprint(hex: fingerprint) else { return safeName }
+    return safeName + ", " + PaveFingerprint.accessibilityText(short)
+}
+
+/// The full short fingerprint ("A1B2 C3D4 E5F6 0718") of a SHA-256 fingerprint in hex; never shortened.
+func weshShortFingerprint(hex: String?) -> String? {
+    guard let hex, hex.count >= 16 else { return nil }
+    let digits = Array(hex.uppercased().prefix(16))
+    guard digits.allSatisfy(\.isHexDigit) else { return nil }
+    return stride(from: 0, to: 16, by: 4).map { String(digits[$0..<$0 + 4]) }.joined(separator: " ")
 }
 
 private func openWeshSystemSettings() {
