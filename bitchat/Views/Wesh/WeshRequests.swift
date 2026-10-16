@@ -35,22 +35,38 @@ final class WeshInboundRequests: ObservableObject {
     static let shared = WeshInboundRequests()
     static let maxRequests = 20
     static let maxMessagesPerRequest = 20
+    /// A full list makes room only by dropping a request shown this long.
+    static let minimumDisplayAge: TimeInterval = 10 * 60
+    /// A deleted message stays deleted when its sender retries it.
+    static let deletedMemory: TimeInterval = 24 * 60 * 60
+    static let maxDeletedMessages = 500
 
     struct Request: Identifiable {
         let noiseKey: Data
         var nickname: String
         var messages: [BitchatMessage]
+        let receivedAt: Date
         var id: String { noiseKey.sha256Fingerprint() }
         var peerID: PeerID { PeerID(hexData: noiseKey) }
     }
 
     @Published private(set) var requests: [Request] = []
+    private let now: () -> Date
+    /// "fingerprint|messageID" of deleted request messages, with the deletion time.
+    private var deleted: [String: Date] = [:]
+
+    init(now: @escaping () -> Date = Date.init) {
+        self.now = now
+    }
 
     /// Returns false when the message was dropped (duplicate or over capacity).
     @discardableResult
     func add(_ message: BitchatMessage, from noiseKey: Data) -> Bool {
         guard noiseKey.count == 32 else { return false }
         let fingerprint = noiseKey.sha256Fingerprint()
+        let date = now()
+        deleted = deleted.filter { date.timeIntervalSince($0.value) < Self.deletedMemory }
+        guard deleted[fingerprint + "|" + message.id] == nil else { return false }
         let shown = BitchatMessage(
             id: message.id, sender: message.sender,
             content: WeshIncomingMediaPolicy.displayText(message.content),
@@ -66,17 +82,33 @@ final class WeshInboundRequests: ObservableObject {
             }
             return true
         }
-        guard requests.count < Self.maxRequests else { return false }
-        requests.append(Request(noiseKey: noiseKey, nickname: message.sender, messages: [shown]))
+        if requests.count >= Self.maxRequests {
+            // New senders are not silently lost: the oldest request goes once it was shown long enough.
+            guard let oldest = requests.indices
+                .filter({ date.timeIntervalSince(requests[$0].receivedAt) >= Self.minimumDisplayAge })
+                .min(by: { requests[$0].receivedAt < requests[$1].receivedAt }) else { return false }
+            requests.remove(at: oldest)
+        }
+        requests.append(Request(noiseKey: noiseKey, nickname: message.sender, messages: [shown], receivedAt: date))
         return true
     }
 
     func remove(_ id: Request.ID) {
+        let date = now()
+        for request in requests where request.id == id {
+            for message in request.messages { deleted[id + "|" + message.id] = date }
+        }
+        if deleted.count > Self.maxDeletedMessages {
+            for entry in deleted.sorted(by: { $0.value < $1.value }).prefix(deleted.count - Self.maxDeletedMessages) {
+                deleted.removeValue(forKey: entry.key)
+            }
+        }
         requests.removeAll { $0.id == id }
     }
 
     func clear() {
         requests = []
+        deleted = [:]
     }
 }
 

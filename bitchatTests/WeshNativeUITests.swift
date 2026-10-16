@@ -861,7 +861,7 @@ struct WeshNativeUITests {
     }
 
     @Test @MainActor func requestsAreBoundedAndDeduplicated() {
-        let requests = WeshInboundRequests()
+        let requests = WeshInboundRequests(now: { Date(timeIntervalSince1970: 1_700_000_000) })
         let key = Data(repeating: 0x51, count: 32)
         func message(_ id: String, _ content: String = "texte") -> BitchatMessage {
             BitchatMessage(id: id, sender: "Inconnu", content: content, timestamp: Date(), isRelay: false,
@@ -879,6 +879,49 @@ struct WeshNativeUITests {
         #expect(requests.requests.count == WeshInboundRequests.maxRequests - 1)
         requests.clear()
         #expect(requests.requests.isEmpty)
+    }
+
+    @Test @MainActor func deletedRequestStaysDeletedWhenTheSenderRetriesTheSameMessage() {
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let requests = WeshInboundRequests(now: { clock })
+        let key = Data(repeating: 0x52, count: 32)
+        func message(_ id: String) -> BitchatMessage {
+            BitchatMessage(id: id, sender: "Inconnu", content: "texte", timestamp: clock, isRelay: false,
+                           originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        }
+        #expect(requests.add(message("a"), from: key))
+        requests.remove(key.sha256Fingerprint())
+        #expect(!requests.add(message("a"), from: key))
+        #expect(requests.requests.isEmpty)
+        // Another sender reusing the ID, or a new message, is not suppressed.
+        #expect(requests.add(message("a"), from: Data(repeating: 0x53, count: 32)))
+        #expect(requests.add(message("b"), from: key))
+        requests.remove(key.sha256Fingerprint())
+        clock = clock.addingTimeInterval(WeshInboundRequests.deletedMemory + 1)
+        #expect(requests.add(message("a"), from: key))
+    }
+
+    @Test @MainActor func fullRequestListEvictsTheOldestRequestOnlyAfterItsMinimumDisplayAge() {
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let requests = WeshInboundRequests(now: { clock })
+        func message(_ id: String) -> BitchatMessage {
+            BitchatMessage(id: id, sender: "Inconnu", content: "texte", timestamp: clock, isRelay: false,
+                           originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
+        }
+        let first = Data(repeating: 1, count: 32)
+        #expect(requests.add(message("first"), from: first))
+        clock = clock.addingTimeInterval(1)
+        for index in 2...WeshInboundRequests.maxRequests {
+            #expect(requests.add(message("m\(index)"), from: Data(repeating: UInt8(index), count: 32)))
+        }
+        let newcomer = Data(repeating: 0xEE, count: 32)
+        #expect(!requests.add(message("early"), from: newcomer))
+
+        clock = clock.addingTimeInterval(WeshInboundRequests.minimumDisplayAge)
+        #expect(requests.add(message("late"), from: newcomer))
+        #expect(requests.requests.count == WeshInboundRequests.maxRequests)
+        #expect(!requests.requests.contains { $0.id == first.sha256Fingerprint() })
+        #expect(requests.requests.contains { $0.id == newcomer.sha256Fingerprint() })
     }
 
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
