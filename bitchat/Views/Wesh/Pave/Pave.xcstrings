@@ -273,6 +273,23 @@
         }
       }
     },
+    "pave.delivery.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réessayer"
+          }
+        }
+      }
+    },
     "pave.delivery.sent" : {
       "extractionState" : "manual",
       "localizations" : {

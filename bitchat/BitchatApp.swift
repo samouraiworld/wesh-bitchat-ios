@@ -24,6 +24,7 @@ struct BitchatApp: App {
 
     init() {
         WeshMode.isActive = true
+        PaveDisplayName.warmUp()
         NetworkActivationService.shared.setUserInternetEnabled(false)
         BridgeService.shared.setEnabled(false)
         GatewayService.shared.setEnabled(false)

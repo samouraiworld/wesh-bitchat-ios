@@ -12,7 +12,8 @@ struct PaveReservedWordsTests {
         "pave.bubble.you",  // « Vous »
         "pave.name",  // « Sans surnom », « Sans surnom (réservé) »
         "pave.inbox.verified", "pave.inbox.unverified",  // badges
-        "pave.delivery", "pave.bubble.failedRetry", "pave.bubble.retryA11y",  // delivery states
+        "pave.delivery", "pave.bubble.failedRetry", "pave.bubble.retryA11y",  // delivery states, « Réessayer »
+        "pave.inbox.noMessage",  // preview shown under a name
         "pave.transport",  // transport
         "pave.inbox.publicTitle", "pave.inbox.publicFootnote",  // public room
         "pave.action.exchange", "pave.exchange.title",  // « Échanger »
@@ -49,7 +50,8 @@ struct PaveReservedWordsTests {
     @Test func theListCarriesTheWordsTheRuleNames() {
         let words = Set(PaveCatalogStrings.reservedWords())
         for word in ["Vous", "You", "Sans surnom", "No nickname", "Sans surnom (réservé)", "No nickname (reserved)",
-                     "Vérifié", "Non vérifié", "En attente", "Envoyé", "Reçu", "Échec", "via Internet", "Bluetooth",
+                     "Vérifié", "Non vérifié", "En attente", "Envoyé", "Reçu", "Échec", "Réessayer", "Retry",
+                     "via Internet", "Bluetooth", "Pas encore de message", "No messages yet",
                      "Salon public", "Public room", "Échanger", "Exchange", "Demandes", "Requests",
                      "Empreinte de la clé", "Key fingerprint", "Empreinte indisponible", "Fingerprint unavailable"] {
             #expect(words.contains(word), "\(word) is not reserved")
@@ -58,6 +60,7 @@ struct PaveReservedWordsTests {
 
     @Test func theAppReadsBothLanguagesWhateverThePhoneLanguage() {
         let words = PaveReservedWords.all
+        #expect(words.isSuperset(of: PaveCatalogStrings.reservedWords()))
         for word in ["Vous", "You", "Sans surnom", "No nickname", "Demandes", "Requests"] {
             #expect(words.contains(word), "\(word) is not reserved at run time")
         }

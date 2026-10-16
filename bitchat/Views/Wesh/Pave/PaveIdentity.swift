@@ -20,6 +20,8 @@ enum PaveReservedWords {
         "pave.delivery.failed",
         "pave.bubble.failedRetry",
         "pave.bubble.retryA11y",
+        "pave.delivery.retry",
+        "pave.inbox.noMessage",
         "pave.transport.bluetooth",
         "pave.transport.internet",
         "pave.inbox.publicTitle",
@@ -36,6 +38,9 @@ enum PaveReservedWords {
 
     /// Every reserved label in the phone language, French and English.
     static let all: Set<String> = words(in: PaveCopy.bundle)
+
+    /// Skeletons of `all`, built once for every name drawn.
+    static let skeletons = PaveReservedSkeletons(all)
 
     /// Read from each language's compiled table; where the catalog ships uncompiled (a SwiftPM
     /// build copies `Pave.xcstrings` as is), from the catalog itself.
@@ -121,7 +126,9 @@ struct PaveFingerprintText: View {
                     .foregroundStyle(theme[.warning])
             }
         }
-        .lineLimit(1)
+        // Two lines at accessibility sizes, so all 16 characters stay visible.
+        .lineLimit(2)
+        .minimumScaleFactor(0.8)
         .accessibilityLabel(PaveFingerprint.accessibilityText(fingerprint))
     }
 }

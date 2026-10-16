@@ -35,13 +35,13 @@ enum PaveDisplayName {
     static let neverMixTogether = ["Latin", "Greek", "Cyrillic", "Armenian"]
     static let alwaysUnnamed = ["Cherokee", "Lisu", "Coptic", "Canadian_Aboriginal", "Old_Italic", "Tifinagh", "Osage"]
 
-    /// Every Unicode script name (PropertyValueAliases, Unicode 16). Swift has no script property,
+    /// Every Unicode script name (PropertyValueAliases, Unicode 17). Swift has no script property,
     /// so letters are placed with ICU `\p{Script=…}` classes; a letter in none of them, such as one
     /// of a script newer than the system's ICU, is refused (see `PaveScriptClassifier`).
     static let unicodeScripts = [
         "Adlam", "Ahom", "Anatolian_Hieroglyphs", "Arabic", "Armenian", "Avestan", "Balinese", "Bamum",
-        "Bassa_Vah", "Batak", "Bengali", "Bhaiksuki", "Bopomofo", "Brahmi", "Braille", "Buginese", "Buhid",
-        "Canadian_Aboriginal", "Carian", "Caucasian_Albanian", "Chakma", "Cham", "Cherokee", "Chorasmian",
+        "Bassa_Vah", "Batak", "Bengali", "Beria_Erfe", "Bhaiksuki", "Bopomofo", "Brahmi", "Braille", "Buginese", "Buhid",
+        "Canadian_Aboriginal", "Carian", "Caucasian_Albanian", "Chakma", "Cham", "Cherokee", "Chisoi", "Chorasmian",
         "Common", "Coptic", "Cuneiform", "Cypriot", "Cypro_Minoan", "Cyrillic", "Deseret", "Devanagari",
         "Dives_Akuru", "Dogra", "Duployan", "Egyptian_Hieroglyphs", "Elbasan", "Elymaic", "Ethiopic", "Garay",
         "Georgian", "Glagolitic", "Gothic", "Grantha", "Greek", "Gujarati", "Gunjala_Gondi", "Gurmukhi",
@@ -56,9 +56,9 @@ enum PaveDisplayName {
         "Old_North_Arabian", "Old_Permic", "Old_Persian", "Old_Sogdian", "Old_South_Arabian", "Old_Turkic",
         "Old_Uyghur", "Oriya", "Osage", "Osmanya", "Pahawh_Hmong", "Palmyrene", "Pau_Cin_Hau", "Phags_Pa",
         "Phoenician", "Psalter_Pahlavi", "Rejang", "Runic", "Samaritan", "Saurashtra", "Sharada", "Shavian",
-        "Siddham", "SignWriting", "Sinhala", "Sogdian", "Sora_Sompeng", "Soyombo", "Sundanese", "Sunuwar",
-        "Syloti_Nagri", "Syriac", "Tagalog", "Tagbanwa", "Tai_Le", "Tai_Tham", "Tai_Viet", "Takri", "Tamil",
-        "Tangsa", "Tangut", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Tirhuta", "Todhri", "Toto",
+        "Siddham", "Sidetic", "SignWriting", "Sinhala", "Sogdian", "Sora_Sompeng", "Soyombo", "Sundanese", "Sunuwar",
+        "Syloti_Nagri", "Syriac", "Tagalog", "Tagbanwa", "Tai_Le", "Tai_Tham", "Tai_Viet", "Tai_Yo", "Takri", "Tamil",
+        "Tangsa", "Tangut", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Tirhuta", "Todhri", "Tolong_Siki", "Toto",
         "Tulu_Tigalari", "Ugaritic", "Vai", "Vithkuqi", "Wancho", "Warang_Citi", "Yezidi", "Yi", "Zanabazar_Square"
     ]
 
@@ -104,16 +104,29 @@ enum PaveDisplayName {
     /// and English, the fallbacks in the phone language.
     static func safe(_ raw: String?) -> String {
         remote(raw, unnamed: PaveCopy.text("pave.name.unnamed"), reserved: PaveCopy.text("pave.name.reserved"),
-               reservedWords: PaveReservedWords.all)
+               skeletons: PaveReservedWords.skeletons)
     }
 
     /// The name to draw, `unnamed` when nothing safe is left, or `reserved` when it reads as one of
     /// `reservedWords` (see `PaveReservedWords`) or as a key fingerprint.
     static func remote<Words: Collection>(_ raw: String?, unnamed: String, reserved: String,
                                           reservedWords: Words) -> String where Words.Element == String {
+        remote(raw, unnamed: unnamed, reserved: reserved, skeletons: PaveReservedSkeletons(reservedWords))
+    }
+
+    static func remote(_ raw: String?, unnamed: String, reserved: String, skeletons: PaveReservedSkeletons) -> String {
         guard let name = clean(raw) else { return unnamed }
         let elided = elideMiddle(name)
-        return readsAsReserved(name, elided: elided, reservedWords: reservedWords) ? reserved : elided
+        return readsAsReserved(name, elided: elided, skeletons: skeletons) ? reserved : elided
+    }
+
+    /// Builds the script classes (about 170 regular expressions) and the reserved skeletons off the
+    /// main thread, so the first name drawn does not pay for them.
+    static func warmUp() {
+        DispatchQueue.global(qos: .utility).async {
+            _ = PaveScriptClassifier.current
+            _ = PaveReservedWords.skeletons
+        }
     }
 
     // MARK: Rules 1 to 4
@@ -282,24 +295,13 @@ enum PaveDisplayName {
 
     // MARK: Rule 6
 
-    private static func readsAsReserved<Words: Collection>(_ name: String, elided: String,
-                                                           reservedWords: Words) -> Bool where Words.Element == String {
-        var whole = Set<String>()
-        var affixes = Set<String>()
-        for word in reservedWords {
-            let skeleton = skeletonWords(word).joined()
-            guard !skeleton.isEmpty else { continue }
-            whole.insert(skeleton)
-            if skeleton.unicodeScalars.count >= minimumAffixLetters { affixes.insert(skeleton) }
-        }
-        let reversedAffixes = Set(affixes.map { String(String.UnicodeScalarView($0.unicodeScalars.reversed())) })
-        let longest = affixes.map(\.unicodeScalars.count).max() ?? 0
-        return Set([name, elided]).contains { candidate in
+    private static func readsAsReserved(_ name: String, elided: String, skeletons: PaveReservedSkeletons) -> Bool {
+        Set([name, elided]).contains { candidate in
             let words = skeletonWords(candidate)
-            return whole.contains(words.joined())
-                || joinsIntoAffix(words, affixes: affixes, longest: longest)
-                || joinsIntoAffix(words.reversed().map { String(String.UnicodeScalarView($0.unicodeScalars.reversed())) },
-                                  affixes: reversedAffixes, longest: longest)
+            return skeletons.whole.contains(words.joined())
+                || joinsIntoAffix(words, affixes: skeletons.affixes, longest: skeletons.longest)
+                || joinsIntoAffix(words.reversed().map(PaveReservedSkeletons.reversed),
+                                  affixes: skeletons.reversedAffixes, longest: skeletons.longest)
                 || imitatesFingerprint(candidate)
         }
     }
@@ -355,6 +357,29 @@ enum PaveDisplayName {
         let lower = (confusables[scalar] ?? scalar).properties.lowercaseMapping.unicodeScalars
         guard applyAfter else { return Array(lower) }
         return lower.map { afterLowercase[$0] ?? $0 }
+    }
+}
+
+/// Skeletons of the reserved words (rule 6), built once per word list.
+struct PaveReservedSkeletons {
+    /// Whole-name skeletons.
+    let whole: Set<String>
+    /// Skeletons of at least `minimumAffixLetters`, matched by leading or trailing words.
+    let affixes: Set<String>
+    /// `affixes` reversed, so trailing words are matched by appending only.
+    let reversedAffixes: Set<String>
+    let longest: Int
+
+    init<Words: Sequence>(_ reservedWords: Words) where Words.Element == String {
+        let skeletons = reservedWords.map { PaveDisplayName.skeletonWords($0).joined() }.filter { !$0.isEmpty }
+        whole = Set(skeletons)
+        affixes = whole.filter { $0.unicodeScalars.count >= PaveDisplayName.minimumAffixLetters }
+        reversedAffixes = Set(affixes.map(Self.reversed))
+        longest = affixes.map(\.unicodeScalars.count).max() ?? 0
+    }
+
+    static func reversed(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.reversed()))
     }
 }
 
