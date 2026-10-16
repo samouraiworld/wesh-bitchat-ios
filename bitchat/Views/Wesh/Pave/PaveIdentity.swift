@@ -3,8 +3,8 @@ import Foundation
 import SwiftUI
 
 /// The single list of app labels a remote nickname may not imitate: every label drawn next to a
-/// nickname (« Vous », « Sans surnom », badges, delivery states, transport, public room, Échanger,
-/// Demandes, fingerprint). Checked in French and English whatever the phone language, so a peer
+/// nickname (« Vous », « Sans surnom », badges, delivery states, transport, public room, Échanger and
+/// its screen, Demandes, fingerprints, « Profil »). Checked in French and English whatever the phone language, so a peer
 /// cannot pick the other language's word. PaveReservedWordsTests fails when a label of these
 /// families is missing.
 enum PaveReservedWords {
@@ -30,7 +30,24 @@ enum PaveReservedWords {
         "pave.exchange.title",
         "pave.inbox.requests",
         "pave.fingerprint.label",
-        "pave.fingerprint.unavailable"
+        "pave.fingerprint.unavailable",
+        "pave.fingerprint.mine",
+        "pave.fingerprint.contact",
+        "pave.exchange.aim",
+        "pave.exchange.autoOpen",
+        "pave.exchange.cameraA11y",
+        "pave.exchange.cameraAllow",
+        "pave.exchange.cameraDenied",
+        "pave.exchange.cameraRationale",
+        "pave.exchange.cameraUnavailable",
+        "pave.exchange.iScanned",
+        "pave.exchange.intro",
+        "pave.exchange.openChat",
+        "pave.exchange.success",
+        "pave.exchange.theirCode",
+        "pave.exchange.theyScanned",
+        "pave.exchange.yourCode",
+        "pave.settings.profile"
     ]
 
     /// Both always ship with the app, so French words stay reserved on a phone set to English.

@@ -172,3 +172,71 @@ struct PaveHoldTracker {
         return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
     }
 }
+
+/// Short fingerprints Échanger shows: yours under your code, the contact's once both checks are done.
+struct PaveExchangeFingerprints: Equatable {
+    let mine: String?
+    let contact: String?
+
+    init(mine: String?, contact: String?, progress: PaveExchangeProgress) {
+        self.mine = mine
+        self.contact = progress.isComplete ? contact : nil
+    }
+}
+
+/// The success card opens the private chat two ways, its button and a timer: the chat opens once.
+struct PaveCompletionLatch {
+    /// Seconds the success card stays up before the chat opens by itself.
+    static let successHold: TimeInterval = 3
+
+    private(set) var fired = false
+
+    mutating func fire(_ action: () -> Void) {
+        guard !fired else { return }
+        fired = true
+        action()
+    }
+}
+
+/// The two checks of Échanger. They never carry the contact's name: it is peer-chosen, and a check
+/// is a trust signal.
+enum PaveExchangeCheck: CaseIterable {
+    /// Your contact scanned your code.
+    case yourCode
+    /// You scanned your contact's code.
+    case theirCode
+
+    func label(done: Bool) -> String {
+        switch self {
+        case .yourCode: return PaveCopy.text(done ? "pave.exchange.theyScanned" : "pave.exchange.yourCode")
+        case .theirCode: return PaveCopy.text(done ? "pave.exchange.iScanned" : "pave.exchange.theirCode")
+        }
+    }
+}
+
+/// Camera authorization as Échanger reads it.
+enum PaveCameraAuthorization {
+    case notDetermined, authorized, denied, restricted
+}
+
+/// What the camera area shows: the rationale with « Autoriser la caméra » (the only place the system
+/// prompt is triggered), the scanner, or the way to Réglages.
+enum PaveCameraCard: Equatable {
+    case rationale, scanner, settings
+
+    /// iOS asks once: a refusal is permanent, so only then does Réglages appear.
+    init(_ authorization: PaveCameraAuthorization) {
+        switch authorization {
+        case .notDetermined: self = .rationale
+        case .authorized: self = .scanner
+        case .denied, .restricted: self = .settings
+        }
+    }
+}
+
+extension PaveFingerprint {
+    /// `short(_:)` computed off the main thread, so a screen never hashes while drawing.
+    static func computed(_ noiseKey: Data?) async -> String? {
+        await Task.detached(priority: .userInitiated) { short(noiseKey) }.value
+    }
+}

@@ -130,6 +130,7 @@ struct PaveOnboardingFlow: View {
             VStack(alignment: .leading, spacing: PaveSpace.s3) {
                 Text(PaveCopy.text("pave.onboarding.bluetoothWhy")).paveText(.body)
                 Text(PaveCopy.text("pave.onboarding.bluetoothPrompt")).paveText(.body)
+                Text(PaveCopy.text("pave.onboarding.noLocation")).paveText(.body)
             }
             Label(PaveCopy.text("pave.connexion.visibility"), systemImage: "exclamationmark.triangle.fill")
                 .paveText(.caption)

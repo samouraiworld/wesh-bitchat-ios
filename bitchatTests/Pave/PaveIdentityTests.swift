@@ -18,7 +18,9 @@ struct PaveReservedWordsTests {
         "pave.inbox.publicTitle", "pave.inbox.publicFootnote",  // public room
         "pave.action.exchange", "pave.exchange.title",  // « Échanger »
         "pave.inbox.requests",  // « Demandes »
-        "pave.fingerprint"  // « Empreinte de la clé », « Empreinte indisponible »
+        "pave.fingerprint",  // « Empreinte de la clé », « Votre empreinte », « Empreinte du contact »…
+        "pave.exchange",  // Échanger screen: title, checks, success card
+        "pave.settings.profile"  // « Profil », next to your own nickname
     ]
 
     private func inFamily(_ key: String) -> Bool {
@@ -53,7 +55,9 @@ struct PaveReservedWordsTests {
                      "Vérifié", "Non vérifié", "En attente", "Envoyé", "Reçu", "Échec", "Réessayer", "Retry",
                      "via Internet", "Bluetooth", "Pas encore de message", "No messages yet",
                      "Salon public", "Public room", "Échanger", "Exchange", "Demandes", "Requests",
-                     "Empreinte de la clé", "Key fingerprint", "Empreinte indisponible", "Fingerprint unavailable"] {
+                     "Empreinte de la clé", "Key fingerprint", "Empreinte indisponible", "Fingerprint unavailable",
+                     "Votre empreinte", "Empreinte du contact", "Échange réussi", "Ouvrir la discussion",
+                     "Votre code est scanné", "Son code est scanné", "Profil", "Profile"] {
             #expect(words.contains(word), "\(word) is not reserved")
         }
     }

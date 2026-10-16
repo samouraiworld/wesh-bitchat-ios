@@ -500,13 +500,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only to your verified contacts, when they are out of range. Always through Tor. Relays cannot read your messages, but see when and to which key they are sent."
+            "value" : "Goes through Tor and public relays. Off by default."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Uniquement vers vos contacts vérifiés, quand ils ne sont pas à portée. Toujours via Tor. Les relais ne lisent pas vos messages, mais voient quand et à quelle clé ils sont adressés."
+            "value" : "Passe par Tor et par des relais publics. Désactivé par défaut."
           }
         }
       }
@@ -1011,6 +1011,23 @@
         }
       }
     },
+    "pave.exchange.cameraAllow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow the camera"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autoriser la caméra"
+          }
+        }
+      }
+    },
     "pave.exchange.cameraDenied" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1024,6 +1041,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Autorisez la caméra dans Réglages."
+          }
+        }
+      }
+    },
+    "pave.exchange.cameraRationale" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The camera is only used to read your contact's code. No image is saved."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La caméra sert uniquement à lire le code de votre contact. Aucune image n'est enregistrée."
           }
         }
       }
@@ -1068,30 +1102,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Their code scanned"
+            "value" : "Their code was scanned"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Son code scanné"
-          }
-        }
-      }
-    },
-    "pave.exchange.iScannedNamed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@'s code scanned"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Code de %@ scanné"
+            "value" : "Son code est scanné"
           }
         }
       }
@@ -1109,6 +1126,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Montrez votre code et scannez le sien, en même temps. Face à face uniquement."
+          }
+        }
+      }
+    },
+    "pave.exchange.openChat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the chat"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrir la discussion"
           }
         }
       }
@@ -1147,6 +1181,23 @@
         }
       }
     },
+    "pave.exchange.success" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exchange done"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échange réussi"
+          }
+        }
+      }
+    },
     "pave.exchange.theirCode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1170,30 +1221,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your code scanned"
+            "value" : "Your code was scanned"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Votre code scanné"
-          }
-        }
-      }
-    },
-    "pave.exchange.theyScannedNamed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ scanned you"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ vous a scanné"
+            "value" : "Votre code est scanné"
           }
         }
       }
@@ -1232,6 +1266,23 @@
         }
       }
     },
+    "pave.fingerprint.contact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact's fingerprint"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte du contact"
+          }
+        }
+      }
+    },
     "pave.fingerprint.label" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1245,6 +1296,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Empreinte de la clé"
+          }
+        }
+      }
+    },
+    "pave.fingerprint.mine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your fingerprint"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre empreinte"
           }
         }
       }
@@ -1542,6 +1610,40 @@
         }
       }
     },
+    "pave.internet.confirmAction" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activer"
+          }
+        }
+      }
+    },
+    "pave.internet.confirmTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on Internet mode?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activer le mode Internet ?"
+          }
+        }
+      }
+    },
     "pave.internet.connected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1617,6 +1719,23 @@
         }
       }
     },
+    "pave.internet.disclosureFull" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Internet mode goes through Tor and public Nostr relays that Wesh does not run. Relays see neither your IP address nor the content, but they see the recipient's Internet key, the time and size of messages, and can link what you send to your key. They may keep the encrypted messages. Anyone with your QR code knows your Internet key. Off by default; emergency erase turns it off."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le mode Internet passe par Tor et par des relais Nostr publics que Wesh n'exploite pas. Les relais ne voient ni votre adresse IP ni le contenu, mais voient la clé Internet du destinataire, l'heure et la taille des messages, et peuvent relier vos envois à votre clé. Ils peuvent conserver les messages chiffrés. Quiconque a votre QR connaît votre clé Internet. Désactivé par défaut ; l'effacement d'urgence le désactive."
+          }
+        }
+      }
+    },
     "pave.internet.failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1664,6 +1783,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En pause · reprend au retour dans l'app"
+          }
+        }
+      }
+    },
+    "pave.internet.refused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Internet mode could not be turned on."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le mode Internet n'a pas pu être activé."
           }
         }
       }
@@ -1834,6 +1970,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sans compte, sans numéro de téléphone."
+          }
+        }
+      }
+    },
+    "pave.onboarding.noLocation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh does not use your location."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh n'utilise pas votre position."
           }
         }
       }

@@ -222,9 +222,11 @@ struct PaveExchangeTests {
         let stub = PaveInternetModeStub()
         #expect(stub.internetStatus == .off)
         #expect(!stub.internetStatus.isEnabled)
-        stub.setInternetModeEnabled(true)
+        #expect(!stub.setInternetModeEnabled(true))  // no disclosure yet
+        stub.acceptDisclosure()
+        #expect(stub.setInternetModeEnabled(true))
         #expect(stub.internetStatus.isEnabled)
-        stub.setInternetModeEnabled(false)
+        #expect(stub.setInternetModeEnabled(false))
         #expect(stub.internetStatus == .off)
     }
 }

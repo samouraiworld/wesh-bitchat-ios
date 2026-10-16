@@ -5,7 +5,9 @@ import UIKit
 #endif
 
 /// Échanger: your code on top and the camera below, active together,
-/// so two people verify each other in one gesture.
+/// so two people verify each other in one gesture. Your fingerprint sits under your code; once both
+/// checks are in, a success card shows the contact's name with its fingerprint, so the nickname is
+/// never the only identity cue. The checks never show a name.
 struct PaveExchangeScreen: View {
     enum Camera {
         /// The live scanner; asks for permission on first use.
@@ -15,14 +17,18 @@ struct PaveExchangeScreen: View {
     }
 
     let nickname: String
+    /// Your Noise static key; its short fingerprint is computed off the main thread.
+    let myNoiseKey: Data?
     /// Builds a fresh `bitchat://verify` payload; called again every five minutes.
     let makePayload: () -> String
     /// The contact's name, once known. Peer-chosen: shown only through `PaveDisplayName.safe(_:)`.
     var contactName: String?
+    /// The contact's verified Noise static key, once known; its fingerprint shows on success.
+    var contactNoiseKey: Data?
     let progress: PaveExchangeProgress
     var camera: Camera = .live
     let onScan: (String) -> Void
-    /// Called once, shortly after both checkmarks are in.
+    /// Called once: on « Ouvrir la discussion », or three seconds after both checkmarks are in.
     let onComplete: () -> Void
     let onClose: () -> Void
 
@@ -31,12 +37,12 @@ struct PaveExchangeScreen: View {
     @State private var payload = ""
     @State private var clock = PaveQRRefreshClock(issuedAt: .distantPast)
     @State private var now = Date()
-    @State private var cameraBlocked: CameraBlock?
-    @State private var completed = false
-
-    enum CameraBlock {
-        case denied, unavailable
-    }
+    @State private var cameraUnavailable = false
+    @State private var authorization = PaveCameraAuthorization.current
+    @State private var celebrated = false
+    @State private var latch = PaveCompletionLatch()
+    @State private var myFingerprint: String?
+    @State private var contactFingerprint: String?
 
     var body: some View {
         ScrollView {
@@ -48,10 +54,15 @@ struct PaveExchangeScreen: View {
                     .foregroundStyle(theme[.inkMuted])
                     .frame(maxWidth: .infinity, alignment: .leading)
                 code
-                Text(PaveCopy.text("pave.exchange.renews", nickname, clock.remainingMinutes(at: now)))
+                Text(PaveCopy.text("pave.exchange.renews", PaveDisplayName.safe(nickname), clock.remainingMinutes(at: now)))
                     .paveText(.label)
                     .multilineTextAlignment(.center)
-                scanner
+                PaveFingerprintBlock(label: PaveCopy.text("pave.fingerprint.mine"), fingerprint: fingerprints.mine)
+                if progress.isComplete {
+                    successCard
+                } else {
+                    scanner
+                }
                 checkmarks
                 Text(PaveCopy.text("pave.exchange.autoOpen"))
                     .paveText(.caption)
@@ -63,15 +74,45 @@ struct PaveExchangeScreen: View {
         }
         .paveScreenBackground()
         .task { await keepCodeFresh() }
+        .task(id: myNoiseKey) { myFingerprint = await PaveFingerprint.computed(myNoiseKey) }
+        .task(id: contactNoiseKey) { contactFingerprint = await PaveFingerprint.computed(contactNoiseKey) }
         .onChange(of: progress) { newValue in
-            guard newValue.isComplete, !completed else { return }
-            completed = true
+            guard newValue.isComplete, !celebrated else { return }
+            celebrated = true
             PaveHaptics.play(.scanSuccess)
-            Task {
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                onComplete()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(PaveCompletionLatch.successHold * 1_000_000_000))
+                openChat()
             }
         }
+    }
+
+    private var fingerprints: PaveExchangeFingerprints {
+        PaveExchangeFingerprints(mine: myFingerprint, contact: contactFingerprint, progress: progress)
+    }
+
+    /// The button and the timer both lead here; the chat opens once.
+    private func openChat() {
+        latch.fire { onComplete() }
+    }
+
+    private var successCard: some View {
+        VStack(alignment: .leading, spacing: PaveSpace.s2) {
+            Label(PaveCopy.text("pave.exchange.success"), systemImage: "checkmark.seal.fill")
+                .paveText(.label)
+                .foregroundStyle(theme[.success])
+            Text(PaveDisplayName.safe(contactName))
+                .paveText(.headline)
+                .lineLimit(1)
+            PaveFingerprintBlock(label: PaveCopy.text("pave.fingerprint.contact"), fingerprint: fingerprints.contact)
+            Button(PaveCopy.text("pave.exchange.openChat")) { openChat() }
+                .buttonStyle(.pavePrimary)
+        }
+        .padding(PaveSpace.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
+        .overlay(RoundedRectangle(cornerRadius: PaveRadius.control)
+            .strokeBorder(theme[.success], lineWidth: PaveStroke.control))
     }
 
     private var header: some View {
@@ -100,26 +141,53 @@ struct PaveExchangeScreen: View {
             .padding(PaveSpace.s4)
             .background(theme[.privateFill], in: RoundedRectangle(cornerRadius: PaveRadius.control))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(PaveCopy.text("pave.exchange.codeA11y", nickname))
+            .accessibilityLabel(PaveCopy.text("pave.exchange.codeA11y", PaveDisplayName.safe(nickname)))
             .padding(.vertical, PaveSpace.s2)
     }
 
     private var scanner: some View {
         ZStack {
             RoundedRectangle(cornerRadius: PaveRadius.control).fill(theme[.surface])
-            if let cameraBlocked {
-                blockedCard(cameraBlocked)
-            } else {
+            if camera == .placeholder {
                 viewfinder
+            } else if cameraUnavailable {
+                blockedCard(text: PaveCopy.text("pave.exchange.cameraUnavailable"), showsSettings: false)
+            } else {
+                switch PaveCameraCard(authorization) {
+                case .scanner: viewfinder
+                case .rationale: rationaleCard
+                case .settings: blockedCard(text: PaveCopy.text("pave.exchange.cameraDenied"), showsSettings: true)
+                }
             }
         }
-        .frame(height: 220)
+        .frame(minHeight: 220)
+    }
+
+    /// Before any system prompt: why the camera, and the only button that asks for it.
+    private var rationaleCard: some View {
+        VStack(spacing: PaveSpace.s3) {
+            Image(systemName: "camera.fill")
+                .font(PaveTextStyle.headline.font)
+                .accessibilityHidden(true)
+            Text(PaveCopy.text("pave.exchange.cameraRationale"))
+                .paveText(.body)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(PaveCopy.text("pave.exchange.cameraAllow")) {
+                AVCaptureDevice.requestAccess(for: .video) { _ in
+                    Task { @MainActor in authorization = .current }
+                }
+            }
+            .buttonStyle(.paveSecondary)
+        }
+        .foregroundStyle(theme[.ink])
+        .padding(PaveSpace.s4)
     }
 
     private var viewfinder: some View {
         ZStack {
             if camera == .live {
-                CameraScannerView(isActive: !completed, onUnavailable: { cameraUnavailable() }) { scanned in
+                CameraScannerView(isActive: !progress.isComplete, onUnavailable: { scannerUnavailable() }) { scanned in
                     onScan(scanned)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: PaveRadius.control))
@@ -142,14 +210,13 @@ struct PaveExchangeScreen: View {
         .accessibilityLabel(PaveCopy.text("pave.exchange.cameraA11y"))
     }
 
-    private func blockedCard(_ block: CameraBlock) -> some View {
+    private func blockedCard(text: String, showsSettings: Bool) -> some View {
         VStack(spacing: PaveSpace.s3) {
-            Label(PaveCopy.text(block == .denied ? "pave.exchange.cameraDenied" : "pave.exchange.cameraUnavailable"),
-                  systemImage: "exclamationmark.triangle.fill")
+            Label(text, systemImage: "exclamationmark.triangle.fill")
                 .paveText(.label)
                 .foregroundStyle(theme[.warning])
                 .multilineTextAlignment(.center)
-            if block == .denied, let settings = PaveSystemSettings.url {
+            if showsSettings, let settings = PaveSystemSettings.url {
                 Button(PaveCopy.text("pave.action.openSettings")) { openURL(settings) }
                     .buttonStyle(.paveSecondary)
             }
@@ -164,19 +231,16 @@ struct PaveExchangeScreen: View {
         }
     }
 
+    /// Never a name here: a check is a trust signal, the name is peer-chosen.
     @ViewBuilder private var checkmarkChips: some View {
-        chip(done: progress.theyScannedMe,
-             doneText: contactName.map { PaveCopy.text("pave.exchange.theyScannedNamed", PaveDisplayName.safe($0)) }
-                ?? PaveCopy.text("pave.exchange.theyScanned"),
-             pendingText: PaveCopy.text("pave.exchange.yourCode"))
-        chip(done: progress.iScannedThem,
-             doneText: contactName.map { PaveCopy.text("pave.exchange.iScannedNamed", PaveDisplayName.safe($0)) }
-                ?? PaveCopy.text("pave.exchange.iScanned"),
-             pendingText: PaveCopy.text("pave.exchange.theirCode"))
+        chip(done: progress.theyScannedMe, check: .yourCode)
+        chip(done: progress.iScannedThem, check: .theirCode)
     }
 
-    private func chip(done: Bool, doneText: String, pendingText: String) -> some View {
-        Label(done ? doneText : pendingText, systemImage: done ? "checkmark.circle.fill" : "circle")
+    private func chip(done: Bool, check: PaveExchangeCheck) -> some View {
+        let doneText = check.label(done: true)
+        let pendingText = check.label(done: false)
+        return Label(done ? doneText : pendingText, systemImage: done ? "checkmark.circle.fill" : "circle")
             .paveText(.label)
             .foregroundStyle(done ? theme[.success] : theme[.ink])
             .padding(.horizontal, PaveSpace.s4)
@@ -187,9 +251,9 @@ struct PaveExchangeScreen: View {
             .accessibilityLabel(done ? doneText : PaveCopy.text("pave.exchange.pendingA11y", pendingText))
     }
 
-    private func cameraUnavailable() {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        cameraBlocked = (status == .denied || status == .restricted) ? .denied : .unavailable
+    private func scannerUnavailable() {
+        authorization = .current
+        if authorization == .authorized { cameraUnavailable = true }
     }
 
     /// Renews the code when it expires and keeps the countdown current.
@@ -201,6 +265,43 @@ struct PaveExchangeScreen: View {
                 clock = PaveQRRefreshClock(issuedAt: now)
             }
             try? await Task.sleep(nanoseconds: 15_000_000_000)
+        }
+    }
+}
+
+/// `label` (whose key it is) above a short fingerprint in monospace; VoiceOver reads it one
+/// character at a time.
+struct PaveFingerprintBlock: View {
+    let label: String
+    let fingerprint: String?
+    @Environment(\.paveTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: PaveSpace.s1) {
+            if let fingerprint {
+                Text(label).paveText(.caption).foregroundStyle(theme[.inkMuted])
+                Text(verbatim: fingerprint)
+                    .paveText(.fingerprint)
+                    .foregroundStyle(theme[.ink])
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text(PaveCopy.text("pave.fingerprint.unavailable")).paveText(.caption).foregroundStyle(theme[.warning])
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(fingerprint.map { label + ", " + PaveFingerprint.spoken($0) }
+            ?? PaveCopy.text("pave.fingerprint.unavailable"))
+    }
+}
+
+extension PaveCameraAuthorization {
+    static var current: PaveCameraAuthorization {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: return .authorized
+        case .denied: return .denied
+        case .restricted: return .restricted
+        default: return .notDetermined
         }
     }
 }
@@ -219,8 +320,16 @@ enum PaveSystemSettings {
 struct PaveExchangeScreen_Previews: PreviewProvider {
     static var previews: some View {
         PavePreview.variants {
-            PaveExchangeScreen(nickname: "Renard 42", makePayload: { "bitchat://verify?preview" },
+            PaveExchangeScreen(nickname: "Renard 42", myNoiseKey: Data(repeating: 7, count: 32),
+                               makePayload: { "bitchat://verify?preview" },
                                contactName: "Nora", progress: PaveExchangeProgress(theyScannedMe: true, iScannedThem: false),
+                               camera: .placeholder, onScan: { _ in }, onComplete: {}, onClose: {})
+        }
+        PavePreview.variants {
+            PaveExchangeScreen(nickname: "Renard 42", myNoiseKey: Data(repeating: 7, count: 32),
+                               makePayload: { "bitchat://verify?preview" },
+                               contactName: "Nora", contactNoiseKey: Data(repeating: 9, count: 32),
+                               progress: PaveExchangeProgress(theyScannedMe: true, iScannedThem: true),
                                camera: .placeholder, onScan: { _ in }, onComplete: {}, onClose: {})
         }
     }

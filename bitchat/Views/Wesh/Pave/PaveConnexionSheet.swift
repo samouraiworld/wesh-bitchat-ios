@@ -22,25 +22,79 @@ enum PaveInternetStatus: Equatable {
     }
 }
 
-/// The Internet mode as the Connexion sheet needs it. The Internet state machine adopts this
-/// when its UI is wired; until then `PaveInternetModeStub` stands in.
+extension PaveInternetStatus {
+    init(_ state: WeshInternetState) {
+        switch state {
+        case .off: self = .off
+        case .connecting: self = .connecting
+        case .on: self = .connected(relayCount: nil)
+        case .paused: self = .paused
+        case .error: self = .failed
+        }
+    }
+}
+
+/// The Internet mode as the Connexion sheet needs it. `WeshInternetMode` (opt-in, Tor only, off by
+/// default) adopts it; `PaveInternetModeStub` stands in for previews and tests.
 @MainActor
 protocol WeshInternetModeProviding: ObservableObject {
     var internetStatus: PaveInternetStatus { get }
-    func setInternetModeEnabled(_ enabled: Bool)
+    /// Whether the full disclosure was accepted; turning Internet on is refused until then.
+    var disclosureAccepted: Bool { get }
+    func acceptDisclosure()
+    /// False when turning on is refused: no disclosure yet, or Tor could not be forced.
+    @discardableResult func setInternetModeEnabled(_ enabled: Bool) -> Bool
+    func retryInternet()
 }
 
-/// Placeholder until the real Internet mode lands: off by default, toggles locally only.
+extension WeshInternetMode: WeshInternetModeProviding {
+    var internetStatus: PaveInternetStatus { PaveInternetStatus(state) }
+
+    @discardableResult func setInternetModeEnabled(_ enabled: Bool) -> Bool { setEnabled(enabled) }
+
+    func retryInternet() { retry() }
+}
+
+/// In-memory stand-in for previews and tests: never touches the network.
 @MainActor
 final class PaveInternetModeStub: WeshInternetModeProviding {
     @Published private(set) var internetStatus: PaveInternetStatus
+    @Published private(set) var disclosureAccepted: Bool
+    private let refusesEnabling: Bool
 
-    init(internetStatus: PaveInternetStatus = .off) {
+    init(internetStatus: PaveInternetStatus = .off, disclosureAccepted: Bool = false, refusesEnabling: Bool = false) {
         self.internetStatus = internetStatus
+        self.disclosureAccepted = disclosureAccepted
+        self.refusesEnabling = refusesEnabling
     }
 
-    func setInternetModeEnabled(_ enabled: Bool) {
+    func acceptDisclosure() { disclosureAccepted = true }
+
+    @discardableResult func setInternetModeEnabled(_ enabled: Bool) -> Bool {
+        if enabled, !disclosureAccepted || refusesEnabling { return false }
         internetStatus = enabled ? .connecting : .off
+        return true
+    }
+
+    func retryInternet() {
+        if internetStatus == .failed { internetStatus = .connecting }
+    }
+}
+
+/// What a touch on the Internet switch did.
+enum PaveInternetToggle: Equatable {
+    case changed, needsDisclosure, refused
+
+    /// The first time on, the full disclosure (spec section 4) comes first; a refusal is reported.
+    @MainActor static func toggle<Mode: WeshInternetModeProviding>(_ internet: Mode, on: Bool) -> PaveInternetToggle {
+        if on && !internet.disclosureAccepted { return .needsDisclosure }
+        return internet.setInternetModeEnabled(on) ? .changed : .refused
+    }
+
+    /// « Activer » under the disclosure: records it, then turns Internet on.
+    @MainActor static func confirmDisclosure<Mode: WeshInternetModeProviding>(_ internet: Mode) -> PaveInternetToggle {
+        internet.acceptDisclosure()
+        return internet.setInternetModeEnabled(true) ? .changed : .refused
     }
 }
 
@@ -57,6 +111,8 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
 
     @Environment(\.paveTheme) private var theme
     @Environment(\.openURL) private var openURL
+    @State private var askDisclosure = false
+    @State private var refused = false
 
     var body: some View {
         ScrollView {
@@ -111,7 +167,7 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
     private var internetCard: some View {
         VStack(alignment: .leading, spacing: PaveSpace.s3) {
             Toggle(isOn: Binding(get: { internet.internetStatus.isEnabled },
-                                 set: { internet.setInternetModeEnabled($0) })) {
+                                 set: { show(PaveInternetToggle.toggle(internet, on: $0)) })) {
                 Label(PaveCopy.text("pave.connexion.internetMode"), systemImage: "globe")
                     .paveText(.body)
                     .fontWeight(.semibold)
@@ -121,15 +177,46 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
             Text(internet.internetStatus.label)
                 .paveText(.label)
                 .fontWeight(.regular)
-            Text(PaveCopy.text("pave.connexion.internetDisclosure"))
-                .paveText(.caption)
-                .foregroundStyle(theme[.inkMuted])
+                .foregroundStyle(internet.internetStatus == .failed ? theme[.danger] : theme[.ink])
+            if internet.internetStatus == .failed {
+                Button(PaveCopy.text("pave.action.retry")) { internet.retryInternet() }
+                    .buttonStyle(.paveSecondary)
+            }
+            if refused {
+                Text(PaveCopy.text("pave.internet.refused"))
+                    .paveText(.label)
+                    .foregroundStyle(theme[.danger])
+            }
+            if askDisclosure {
+                // First activation: the full disclosure, then an explicit choice.
+                Text(PaveCopy.text("pave.internet.confirmTitle"))
+                    .paveText(.label)
+                    .accessibilityAddTraits(.isHeader)
+                Text(PaveCopy.text("pave.internet.disclosureFull"))
+                    .paveText(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(PaveCopy.text("pave.internet.confirmAction")) {
+                    show(PaveInternetToggle.confirmDisclosure(internet))
+                }
+                .buttonStyle(.pavePrimary)
+                Button(PaveCopy.text("pave.action.cancel")) { askDisclosure = false }
+                    .buttonStyle(.paveSecondary)
+            } else {
+                Text(PaveCopy.text("pave.connexion.internetDisclosure"))
+                    .paveText(.caption)
+                    .foregroundStyle(theme[.inkMuted])
+            }
         }
         .padding(PaveSpace.s4)
         .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
         .overlay(RoundedRectangle(cornerRadius: PaveRadius.control)
             .strokeBorder(internet.internetStatus.isEnabled ? theme[.internet] : theme[.line],
                           lineWidth: PaveStroke.control))
+    }
+
+    private func show(_ outcome: PaveInternetToggle) {
+        askDisclosure = outcome == .needsDisclosure
+        refused = outcome == .refused
     }
 
     private var bluetoothRole: PaveColorRole {
