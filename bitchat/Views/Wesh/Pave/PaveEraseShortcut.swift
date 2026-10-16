@@ -54,8 +54,8 @@ struct WeshAppShortcuts: AppShortcutsProvider {
 private struct PaveEraseShortcutPresenter: ViewModifier {
     let erase: () -> Bool
     @ObservedObject private var request = PaveEraseRequest.shared
-    @Environment(\.scenePhase) private var scenePhase
     #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
     @State private var overlay = PaveEraseOverlayWindow()
     #endif
 
