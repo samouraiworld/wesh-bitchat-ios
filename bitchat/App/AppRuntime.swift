@@ -152,6 +152,11 @@ final class AppRuntime: ObservableObject {
             await MainActor.run { _ = self.verificationModel.myQRString() }
         }
 
+        #if os(macOS)
+        // No scene phases and no background relaunch on macOS: a started app
+        // is in the foreground. iOS reports it from `handleScenePhaseChange`.
+        TorManager.shared.setAppForeground(true)
+        #endif
         NetworkActivationService.shared.start()
         if WeshMode.isActive {
             WeshInternetMode.shared.start()
