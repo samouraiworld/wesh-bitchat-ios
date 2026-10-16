@@ -200,7 +200,7 @@ struct LocalPrekeyStoreTests {
     }
 
     @Test func consumingAPrekeyRepublishesANewerBundlePeersAccept() {
-        // Codex P1: consuming a prekey (even above the replenish threshold)
+        // Review P1: consuming a prekey (even above the replenish threshold)
         // must republish a strictly newer bundle so a peer that cached the old
         // one replaces it and stops assigning the consumed ID before its 48h
         // grace lapses.
