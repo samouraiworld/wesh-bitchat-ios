@@ -122,7 +122,16 @@ final class NotificationServiceTests: XCTestCase {
     }
 
     func test_weshSchemeIsRegisteredWithTheSystem() throws {
-        let types = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]])
+        // Read the app's Info.plist from source: under SwiftPM, Bundle.main is the test runner.
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // Services
+            .deletingLastPathComponent()  // bitchatTests
+            .deletingLastPathComponent()  // repo root
+            .appendingPathComponent("bitchat/Info.plist")
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: Data(contentsOf: plistURL), format: nil) as? [String: Any]
+        )
+        let types = try XCTUnwrap(plist["CFBundleURLTypes"] as? [[String: Any]])
         let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
         XCTAssertEqual(schemes, ["wesh"])
     }
