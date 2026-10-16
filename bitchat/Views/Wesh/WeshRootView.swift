@@ -195,10 +195,10 @@ struct WeshRootView: View {
                 TabView(selection: $selectedTab) {
                     NavigationStack { WeshInbox(runtime: runtime) }
                         .tabItem { Label("Discussions", systemImage: "bubble.left.and.bubble.right") }
-                        .tag(0).toolbar(.hidden, for: .tabBar)
+                        .tag(0).weshHiddenTabBar()
                     NavigationStack { WeshSettings(runtime: runtime) }
                         .tabItem { Label("Réglages", systemImage: "gearshape") }
-                        .tag(1).toolbar(.hidden, for: .tabBar)
+                        .tag(1).weshHiddenTabBar()
                 }
                 .id(viewModel.weshPanicGeneration)
                 if !keyboardVisible { VStack(spacing: 0) {

@@ -151,6 +151,14 @@ extension View {
         #endif
     }
 
+    @ViewBuilder func weshHiddenTabBar() -> some View {
+        #if os(iOS)
+        toolbar(.hidden, for: .tabBar)
+        #else
+        self
+        #endif
+    }
+
     @ViewBuilder func weshNavigationBar(_ theme: WeshTheme) -> some View {
         #if os(iOS)
         toolbarBackground(theme.canvas, for: .navigationBar)
