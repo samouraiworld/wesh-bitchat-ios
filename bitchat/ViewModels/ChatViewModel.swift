@@ -1705,6 +1705,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func panicClearAllData(restartServices: Bool = true) -> Bool {
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
+        // A new npub after the wipe must be announced again; nothing from before is reused.
+        weshAnnouncedInternetKeys.removeAll()
         isPanicResetting = true
         defer { isPanicResetting = false }
         weshMeetingNote.suspendForPanic()

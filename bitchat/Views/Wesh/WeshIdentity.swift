@@ -423,7 +423,7 @@ extension ChatViewModel {
         guard weshPrivatePolicyEnabled, !panicRecoveryBlocked, weshInternetIsOn(),
               let sessionKey = noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID)),
               canSendWeshPrivate(to: PeerID(hexData: sessionKey)),
-              let npub = idBridge.messagingIdentity(weshActive: true)?.npub else { return }
+              let npub = idBridge.messagingIdentity(weshActive: true, internetEnabled: true)?.npub else { return }
         let announced = sessionKey.hexEncodedString() + npub
         guard weshAnnouncedInternetKeys.insert(announced).inserted else { return }
         meshService.sendFavoriteNotification(to: getShortIDForNoiseKey(peerID), isFavorite: true)

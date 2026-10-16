@@ -540,6 +540,25 @@ struct NostrTransportTests {
         #expect(await TestHelpers.waitUntil({ !transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
     }
 
+    @Test("Wesh: the flush on On runs after the state really is On (Published emits in willSet)")
+    @MainActor
+    func weshFlushWhenOnSeesTheNewState() async {
+        final class Mode: ObservableObject { @Published var state: WeshInternetState = .connecting(torProgress: 50) }
+        final class Observed { var states: [WeshInternetState] = [] }
+        let mode = Mode()
+        let flushes = Observed()
+        let cancellable = WeshInternetRoute.flushWhenOn(mode.$state) { flushes.states.append(mode.state) }
+        mode.state = .on
+        mode.state = .on
+        #expect(await TestHelpers.waitUntil({ !flushes.states.isEmpty }, timeout: TestConstants.settleTimeout))
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(flushes.states == [.on])
+        mode.state = .connecting(torProgress: 10)
+        mode.state = .on
+        #expect(await TestHelpers.waitUntil({ flushes.states.count == 2 }, timeout: TestConstants.settleTimeout))
+        withExtendedLifetime(cancellable) {}
+    }
+
     @Test("Wesh route: conflicts, proof warnings, blocks and strangers never get an npub")
     func weshInternetRouteBindings() throws {
         let alice = try NostrIdentity.generate()

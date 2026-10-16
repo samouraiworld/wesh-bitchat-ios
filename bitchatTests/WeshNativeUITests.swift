@@ -691,6 +691,25 @@ struct WeshNativeUITests {
         #expect(vm.qrContactNoiseKey(forNostrPubkey: contactNostr.publicKeyHex) == nil)
     }
 
+    @Test @MainActor func myNpubIsAnnouncedOnlyWhileInternetIsOnOncePerContact() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            final class Online { var value = false }
+            let state = Online()
+            fixture.vm.weshInternetIsOn = { state.value }
+            _ = try fixture.vm.idBridge.getCurrentNostrIdentity()
+            fixture.vm.announceWeshInternetKey(to: fixture.shortID)
+            #expect(fixture.transport.sentFavoriteNotifications.isEmpty)
+            state.value = true
+            fixture.vm.announceWeshInternetKey(to: fixture.shortID)
+            fixture.vm.announceWeshInternetKey(to: fixture.shortID)
+            #expect(fixture.transport.sentFavoriteNotifications.count == 1)
+            #expect(fixture.transport.sentFavoriteNotifications.first?.isFavorite == true)
+            // An unknown session gets nothing.
+            fixture.vm.announceWeshInternetKey(to: PeerID(str: "0badc0de0badc0de"))
+            #expect(fixture.transport.sentFavoriteNotifications.count == 1)
+        }
+    }
+
     @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)
@@ -847,6 +866,21 @@ struct WeshNativeUITests {
         #expect(!WeshQRTrust.canSend(sessionKey: nil, qrFingerprints: verified, locallyVerified: true))
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: [], locallyVerified: true))
         #expect(!WeshQRTrust.canSend(sessionKey: old, qrFingerprints: verified, locallyVerified: false))
+    }
+
+    @Test @MainActor func nothingLeavesOverInternetAfterAPanic() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let npub = try NostrIdentity.generate().npub
+            WeshQRTrust.shared.record(sessionKey: fixture.key, nickname: "Synthetic peer", npub: npub, npubProven: true)
+            fixture.vm.weshInternetIsOn = { true }
+            _ = try fixture.vm.idBridge.getCurrentNostrIdentity()
+            try #require(fixture.vm.canSendWeshInternet(to: fixture.peer))
+            fixture.vm.panicClearAllData()
+            #expect(!fixture.vm.canSendWeshInternet(to: fixture.peer))
+            #expect(fixture.vm.messageRouter.privateSendPolicy?(fixture.peer, nil) == nil)
+            fixture.vm.announceWeshInternetKey(to: fixture.shortID)
+            #expect(fixture.transport.sentFavoriteNotifications.isEmpty)
+        }
     }
 
     @Test @MainActor func panicCancelsAQRScanStartedBeforeTheWipe() async throws {

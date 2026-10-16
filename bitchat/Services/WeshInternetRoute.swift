@@ -1,4 +1,5 @@
 import BitFoundation
+import Combine
 import Foundation
 
 /// Internet delivery to QR contacts. The npub comes only from the contact's
@@ -23,6 +24,19 @@ enum WeshInternetRoute {
             result[PeerID(hexData: key)] = npub
         }
         return result
+    }
+
+    /// Flushes once each time the mode turns On. `@Published` emits before the property
+    /// changes, so the flush hops to the next main-queue turn: by then readers (the send
+    /// policy) see `.on`, and messages queued while it was off really leave.
+    @MainActor
+    static func flushWhenOn<P: Publisher>(_ states: P, flush: @escaping @MainActor () -> Void) -> AnyCancellable
+    where P.Output == WeshInternetState, P.Failure == Never {
+        states
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .filter { $0 == .on }
+            .sink { _ in MainActor.assumeIsolated { flush() } }
     }
 
     /// Inbound: the Noise key of the one unblocked contact whose bound npub is
