@@ -65,7 +65,20 @@ final class NostrTransport: Transport, @unchecked Sendable {
         @MainActor
         static func live(idBridge: NostrIdentityBridge,
                          isBlocked: (@MainActor (Data) -> Bool)? = nil) -> Dependencies {
-            Dependencies(
+            var weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)?
+            var weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)?
+            var weshIsBlocked: (@MainActor (Data) -> Bool)?
+            if WeshMode.isActive {
+                weshRecipients = {
+                    WeshQRTrust.shared.$contacts
+                        .map { WeshInternetRoute.recipients(contacts: $0, blockedFingerprints: []) }
+                        .eraseToAnyPublisher()
+                }
+                weshOnline = { WeshInternetMode.shared.$state.map { $0 == .on }.eraseToAnyPublisher() }
+                // Fail closed: without a block check, nothing is resolved in Wesh.
+                weshIsBlocked = isBlocked ?? { _ in true }
+            }
+            return Dependencies(
                 notificationCenter: .default,
                 loadFavorites: { FavoritesPersistenceService.shared.favorites },
                 favoriteStatusForNoiseKey: { FavoritesPersistenceService.shared.getFavoriteStatus(for: $0) },
@@ -78,16 +91,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 },
                 relayConnectivity: { NostrRelayManager.shared.$isDMRelayConnected.eraseToAnyPublisher() },
                 ackPacer: NostrTransport.sharedAckPacer,
-                weshRecipients: WeshMode.isActive ? {
-                    WeshQRTrust.shared.$contacts
-                        .map { WeshInternetRoute.recipients(contacts: $0, blockedFingerprints: []) }
-                        .eraseToAnyPublisher()
-                } : nil,
-                weshOnline: WeshMode.isActive ? {
-                    WeshInternetMode.shared.$state.map { $0 == .on }.eraseToAnyPublisher()
-                } : nil,
-                // Fail closed: without a block check, nothing is resolved in Wesh.
-                weshIsBlocked: WeshMode.isActive ? (isBlocked ?? { _ in true }) : nil
+                weshRecipients: weshRecipients,
+                weshOnline: weshOnline,
+                weshIsBlocked: weshIsBlocked
             )
         }
     }
