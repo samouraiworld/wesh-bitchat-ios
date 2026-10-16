@@ -4,7 +4,19 @@ import Foundation
 
 @MainActor
 enum WeshMode {
-    static var isActive = false
+    static var isActive = false {
+        didSet { WeshModeFlag.isActive = isActive }
+    }
+}
+
+/// `WeshMode.isActive` for code off the main actor (BLE and Nostr queues).
+enum WeshModeFlag {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var value = false
+    static var isActive: Bool {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
+    }
 }
 
 /// Common Wesh text admission bound; draft storage may retain longer text.

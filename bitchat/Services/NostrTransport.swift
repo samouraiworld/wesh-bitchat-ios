@@ -55,7 +55,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 loadFavorites: { FavoritesPersistenceService.shared.favorites },
                 favoriteStatusForNoiseKey: { FavoritesPersistenceService.shared.getFavoriteStatus(for: $0) },
                 favoriteStatusForPeerID: { FavoritesPersistenceService.shared.getFavoriteStatus(forPeerID: $0) },
-                currentIdentity: { try idBridge.getCurrentNostrIdentity() },
+                currentIdentity: { idBridge.messagingIdentity() },
                 registerPendingGiftWrap: { NostrRelayManager.registerPendingGiftWrap(id: $0) },
                 sendEvent: { NostrRelayManager.shared.sendEvent($0) },
                 scheduleAfter: { delay, action in
