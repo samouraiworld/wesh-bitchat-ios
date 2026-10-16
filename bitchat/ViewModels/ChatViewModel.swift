@@ -1440,9 +1440,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         return WeshQRTrust.shared.remove(sessionKey: noiseKey)
     }
 
-    func removeAllWeshContacts() {
+    /// False when the wipe was not confirmed; the list stays empty in RAM and
+    /// the wipe is retried on the next load.
+    @discardableResult
+    func removeAllWeshContacts() -> Bool {
         verificationCoordinator.cancelAllQRVerifications()
-        WeshQRTrust.shared.clear()
+        return WeshQRTrust.shared.clear()
     }
 
     /// Sends a 👋 to the mesh channel regardless of the active channel.

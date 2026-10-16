@@ -36,17 +36,26 @@ final class WeshMeetingNoteStore: ObservableObject {
         self.storage = storage
         self.legacyDefaults = legacyDefaults
         content = Content()
-        self.erasePersisted = erasePersisted ?? {
-            var erased = true
-            if let storage { do { try storage.wipe() } catch { erased = false } }
-            if let legacyDefaults {
-                Self.legacyKeys.forEach { legacyDefaults.removeObject(forKey: $0) }
-                erased = erased && Self.legacyKeys.allSatisfy { legacyDefaults.object(forKey: $0) == nil }
-            }
-            return erased
-        }
+        self.erasePersisted = erasePersisted ?? { Self.erase(storage: storage, legacyDefaults: legacyDefaults) }
         load()
     }
+
+    /// The pending-wipe marker is written first and removed last, so a failed
+    /// erase is retried by the next load instead of the note coming back.
+    private static func erase(storage: WeshSealedStore?, legacyDefaults: UserDefaults?) -> Bool {
+        var erased = true
+        if let storage {
+            _ = storage.writeIntent(pendingWipeMarker)
+            do { try storage.wipe() } catch { erased = false }
+        }
+        if let legacyDefaults {
+            legacyKeys.forEach { legacyDefaults.removeObject(forKey: $0) }
+            erased = erased && legacyKeys.allSatisfy { legacyDefaults.object(forKey: $0) == nil }
+        }
+        if erased, let storage { erased = storage.writeIntent(nil) }
+        return erased
+    }
+    private static let pendingWipeMarker = Data("wipe".utf8)
 
     var isEditable: Bool { !isSuspended && storageState == .available }
 
@@ -89,6 +98,12 @@ final class WeshMeetingNoteStore: ObservableObject {
     private func load() {
         guard let storage else { return }
         do {
+            if try storage.readIntent() != nil {
+                // A note ordered deleted is never shown again; retry the erase.
+                content = Content()
+                storageState = Self.erase(storage: storage, legacyDefaults: legacyDefaults) ? .available : .unavailable
+                return
+            }
             if let data = try storage.load() {
                 guard let value = try? JSONDecoder().decode(Content.self, from: data) else {
                     throw WeshSealedStore.Failure.recoveryRequired
@@ -798,7 +813,8 @@ private struct WeshConversation: View {
     @State private var information = false
     @Environment(\.weshTheme) private var theme
     @State private var contactSheet = false
-    @State private var contactDetails = false
+    /// Captured when presented, so a failed removal keeps the page and its message.
+    @State private var contactDetails: WeshQRTrust.Contact?
     @State private var blockTarget: PeerID?
     @State private var blockName = ""
     @State private var showingParticipants = false
@@ -992,8 +1008,8 @@ private struct WeshConversation: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    if let peerID, trust.contacts.contains(where: { $0.peerID == peerID }) {
-                        Button { contactDetails = true } label: { Label("Voir le contact", systemImage: "person.crop.circle") }
+                    if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
+                        Button { contactDetails = contact } label: { Label("Voir le contact", systemImage: "person.crop.circle") }
                     }
                     Button { information = true } label: { Label("À propos", systemImage: "info.circle") }
                     if !isPrivate {
@@ -1033,10 +1049,8 @@ private struct WeshConversation: View {
             .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
-        .sheet(isPresented: $contactDetails) {
-            if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
-                NavigationStack { WeshContactDetails(runtime: runtime, contact: contact, inSheet: true) }.weshSheetBackground()
-            }
+        .sheet(item: $contactDetails) { contact in
+            NavigationStack { WeshContactDetails(runtime: runtime, contact: contact, inSheet: true) }.weshSheetBackground()
         }
         .sheet(isPresented: $information) {
             WeshInformationSheet(isPrivate: isPrivate)
@@ -1620,7 +1634,8 @@ private struct WeshContacts: View {
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(trust.contacts) { contact in
-                        NavigationLink { WeshContactDetails(runtime: runtime, contact: contact) } label: {
+                        // Value-based, so a failed removal keeps the pushed page and its message.
+                        NavigationLink(value: contact) {
                             HStack(spacing: 16) {
                                 WeshAvatar(symbol: "person")
                                 VStack(alignment: .leading, spacing: 5) {
@@ -1637,6 +1652,7 @@ private struct WeshContacts: View {
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
             .navigationTitle("Contacts").weshCanvas(title: "Contacts")
+            .navigationDestination(for: WeshQRTrust.Contact.self) { WeshContactDetails(runtime: runtime, contact: $0) }
             .toolbar { ToolbarItem(placement: .primaryAction) {
                 Button { addingContact = true } label: { Label("Ajouter un contact", systemImage: "plus").frame(width: 44, height: 44) }
             } }
@@ -1719,8 +1735,13 @@ private struct WeshContactDetails: View {
             .alert("Retirer ce contact ?", isPresented: $removing) {
                 Button("Annuler", role: .cancel) {}
                 Button("Retirer", role: .destructive) {
-                    if let key = contact.peerID.noiseKey { runtime.chatViewModel.removeWeshContact(for: key) }
-                    dismiss()
+                    // The key leaves the sending allowlist either way; only a
+                    // confirmed write closes this page.
+                    if let key = contact.peerID.noiseKey, runtime.chatViewModel.removeWeshContact(for: key) {
+                        dismiss()
+                    } else {
+                        feedback = "La suppression n’a pas pu être enregistrée. Les envois privés à ce contact restent suspendus. Réessayez."
+                    }
                 }
             } message: { Text("Il disparaîtra des discussions. Ce retrait n’efface pas l’historique. Un nouveau scan sera nécessaire pour envoyer. Les envois en attente pourront reprendre après ce scan.") }
     }
@@ -1973,6 +1994,7 @@ private struct WeshPrivacySettings: View {
     @Environment(\.weshTheme) private var theme
     @EnvironmentObject private var chrome: AppChromeModel
     @State private var forgetContacts = false
+    @State private var forgetFeedback = ""
     var body: some View {
         Form {
             Section {
@@ -1981,6 +2003,9 @@ private struct WeshPrivacySettings: View {
             }.listRowBackground(theme.canvas)
             Section {
                 Button("Retirer les vérifications QR", role: .destructive) { forgetContacts = true }.frame(minHeight: 44)
+                if !forgetFeedback.isEmpty {
+                    Text(forgetFeedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently)
+                }
             }.listRowBackground(theme.canvas)
             Section {
                 Button("Effacer les données de Wesh ici", role: .destructive) {
@@ -1993,7 +2018,11 @@ private struct WeshPrivacySettings: View {
         }.scrollContentBackground(.hidden).navigationTitle("Confidentialité").weshCanvas(title: "Confidentialité")
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
                 Button("Annuler", role: .cancel) {}
-                Button("Retirer", role: .destructive) { runtime.chatViewModel.removeAllWeshContacts() }
+                Button("Retirer", role: .destructive) {
+                    forgetFeedback = runtime.chatViewModel.removeAllWeshContacts()
+                        ? "Vérifications QR retirées."
+                        : "La suppression n’a pas pu être enregistrée. Les envois privés restent suspendus. Réessayez."
+                }
             } message: { Text("Pour écrire à ces contacts, vous devrez scanner à nouveau leur QR. Les messages existants restent sur ce téléphone.") }
     }
 }

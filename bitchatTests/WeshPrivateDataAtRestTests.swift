@@ -15,8 +15,20 @@ struct WeshPrivateDataAtRestTests {
         lazy var defaults = UserDefaults(suiteName: suite)!
         var url: URL { root.appendingPathComponent("record.enc") }
 
+        var failWrites = false
+        var failRemovals = false
+
         func store() -> WeshSealedStore {
-            WeshSealedStore(keychain: keychain, fileURL: url, keyName: "record.test", context: "wesh.record.test")
+            let live = ComposerDraftPersistence.FileAccess.live
+            let files = ComposerDraftPersistence.FileAccess(read: live.read, write: { [unowned self] data, url in
+                if self.failWrites { throw CocoaError(.fileWriteNoPermission) }
+                try live.write(data, url)
+            }, remove: { [unowned self] url in
+                if self.failRemovals { throw CocoaError(.fileWriteNoPermission) }
+                try live.remove(url)
+            })
+            return WeshSealedStore(keychain: keychain, fileURL: url, keyName: "record.test",
+                                   context: "wesh.record.test", files: files)
         }
 
         deinit {
@@ -162,6 +174,61 @@ struct WeshPrivateDataAtRestTests {
         #expect(fixture.defaults.object(forKey: WeshQRTrust.legacyContactsKey) == nil)
     }
 
+    @Test func unconfirmedRevocationLeavesTheAllowlistAtOnceAndIsRetriedAfterRelaunch() throws {
+        let fixture = Fixture()
+        let trust = WeshQRTrust(storage: fixture.store())
+        #expect(trust.record(sessionKey: alice, nickname: "Alice"))
+        #expect(trust.record(sessionKey: bob, nickname: "Bob"))
+
+        fixture.failWrites = true
+        #expect(!trust.remove(sessionKey: alice))
+        #expect(!trust.fingerprints.contains(alice.sha256Fingerprint()))
+        #expect(!WeshQRTrust.canSend(sessionKey: alice, qrFingerprints: trust.fingerprints, locallyVerified: true))
+        #expect(trust.contacts.map(\.nickname) == ["Bob"])
+
+        // Relaunch while the file still lists Alice: the Keychain intent wins.
+        fixture.failWrites = false
+        let relaunched = WeshQRTrust(storage: fixture.store())
+        #expect(relaunched.contacts.map(\.nickname) == ["Bob"])
+        #expect(!relaunched.fingerprints.contains(alice.sha256Fingerprint()))
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.map(\.nickname) == ["Bob"])
+    }
+
+    @Test func failedRevocationCanBeRetriedInProcess() throws {
+        let fixture = Fixture()
+        let trust = WeshQRTrust(storage: fixture.store())
+        #expect(trust.record(sessionKey: alice, nickname: "Alice"))
+        fixture.keychain.simulatedReadError = .deviceLocked
+        #expect(!trust.remove(sessionKey: alice))
+        #expect(trust.fingerprints.isEmpty)
+        fixture.keychain.simulatedReadError = nil
+        #expect(trust.remove(sessionKey: alice))
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.isEmpty)
+    }
+
+    @Test func failedWipeIsNeverUndoneByAReloadOrRelaunch() throws {
+        let fixture = Fixture()
+        let trust = WeshQRTrust(storage: fixture.store())
+        #expect(trust.record(sessionKey: alice, nickname: "Alice"))
+
+        fixture.failRemovals = true
+        #expect(!trust.clear())
+        #expect(trust.contacts.isEmpty && trust.fingerprints.isEmpty)
+        #expect(trust.storageState == .unavailable)
+        trust.reloadIfNeeded()
+        #expect(trust.contacts.isEmpty && trust.storageState == .unavailable)
+        #expect(!trust.record(sessionKey: bob, nickname: "Bob"))
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.isEmpty)
+
+        fixture.failRemovals = false
+        trust.reloadIfNeeded()
+        #expect(trust.storageState == .available && trust.contacts.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        // The marker is gone: a new enrollment survives the next relaunch.
+        #expect(trust.record(sessionKey: bob, nickname: "Bob"))
+        #expect(WeshQRTrust(storage: fixture.store()).contacts.map(\.nickname) == ["Bob"])
+    }
+
     // MARK: Meeting note
 
     @Test func meetingNoteMigratesFromPlaintextDefaultsAndDeletesThem() throws {
@@ -191,6 +258,26 @@ struct WeshPrivateDataAtRestTests {
         #expect(note.clear(generation: note.generation))
         #expect(note.storageState == .available)
         #expect(note.edit(\.note, value: "Nouvelle", generation: note.generation))
+    }
+
+    @Test func failedNoteEraseIsRetriedInsteadOfRestored() throws {
+        let fixture = Fixture()
+        let note = WeshMeetingNoteStore(storage: fixture.store())
+        #expect(note.edit(\.note, value: "Rendez-vous synthétique", generation: note.generation))
+
+        fixture.failRemovals = true
+        #expect(!note.clear(generation: note.generation))
+        #expect(note.content.note.isEmpty)
+        let relaunchedWhileBlocked = WeshMeetingNoteStore(storage: fixture.store())
+        #expect(relaunchedWhileBlocked.content.note.isEmpty)
+        #expect(relaunchedWhileBlocked.storageState == .unavailable)
+
+        fixture.failRemovals = false
+        relaunchedWhileBlocked.reloadIfNeeded()
+        #expect(relaunchedWhileBlocked.storageState == .available)
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(relaunchedWhileBlocked.edit(\.note, value: "Nouvelle", generation: relaunchedWhileBlocked.generation))
+        #expect(WeshMeetingNoteStore(storage: fixture.store()).content.note == "Nouvelle")
     }
 
     // MARK: Panic wipe

@@ -20,7 +20,7 @@ final class WeshQRTrust: ObservableObject {
     static let shared = TestEnvironment.isRunningTests
         ? WeshQRTrust()
         : WeshQRTrust(storage: .liveQRContacts(), legacyDefaults: .standard)
-    struct Contact: Codable, Identifiable, Equatable {
+    struct Contact: Codable, Identifiable, Hashable {
         let noiseKeyHex: String
         let nickname: String
         var id: String { noiseKeyHex }
@@ -34,11 +34,21 @@ final class WeshQRTrust: ObservableObject {
     static let legacyContactsKey = "wesh.qrContacts.v1"
     static let legacyFingerprintsKey = "wesh.qrVerifiedFingerprints.v1"
 
+    /// A revocation or wipe the store has not confirmed yet. Mirrored in the
+    /// Keychain so a reload, even after relaunch, retries it instead of
+    /// restoring what the user removed.
+    private struct Intent: Codable, Equatable {
+        var wipe = false
+        var revokedFingerprints: Set<String> = []
+        var isEmpty: Bool { !wipe && revokedFingerprints.isEmpty }
+    }
+
     @Published private(set) var contacts: [Contact] = []
     @Published private(set) var fingerprints: Set<String> = []
     @Published private(set) var storageState: StorageState = .available
     private let storage: WeshSealedStore?
     private let legacyDefaults: UserDefaults?
+    private var intent = Intent()
 
     /// Nil storage is a RAM-only instance (tests, previews).
     init(storage: WeshSealedStore? = nil, legacyDefaults: UserDefaults? = nil) {
@@ -47,7 +57,8 @@ final class WeshQRTrust: ObservableObject {
         load()
     }
 
-    /// Retries a load deferred by a locked device or Keychain failure.
+    /// Retries a load deferred by a locked device, a Keychain failure or an
+    /// unconfirmed wipe.
     func reloadIfNeeded() {
         if storageState != .available { load() }
     }
@@ -62,57 +73,117 @@ final class WeshQRTrust: ObservableObject {
         next.contacts.append(Contact(noiseKeyHex: hex, nickname: nickname))
         let fingerprint = sessionKey.sha256Fingerprint()
         if !next.fingerprints.contains(fingerprint) { next.fingerprints.append(fingerprint) }
-        return commit(next)
+        guard commit(next) else { return false }
+        // A fresh enrollment supersedes an older pending revocation.
+        if intent.revokedFingerprints.remove(fingerprint) != nil { _ = persistIntent() }
+        return true
     }
 
     /// Revokes only this identity's enrollment; history and drafts belong to
     /// their own stores and must not be cleared by a contact-list action.
+    /// Fail closed: the key leaves the sending allowlist at once, even when
+    /// the write is not confirmed (false); the revocation is then retried.
     @discardableResult
     func remove(sessionKey: Data) -> Bool {
         guard sessionKey.count == 32 else { return false }
-        reloadIfNeeded()
         let hex = sessionKey.hexEncodedString()
         let fingerprint = sessionKey.sha256Fingerprint()
-        guard contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint) else { return false }
-        var next = snapshot
-        next.contacts.removeAll { $0.noiseKeyHex == hex }
-        next.fingerprints.removeAll { $0 == fingerprint }
-        return commit(next)
+        guard contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint)
+                || intent.revokedFingerprints.contains(fingerprint) else { return false }
+        intent.revokedFingerprints.insert(fingerprint)
+        apply(Self.removing(intent.revokedFingerprints, from: snapshot))
+        guard let storage else {
+            intent.revokedFingerprints.remove(fingerprint)
+            return true
+        }
+        _ = persistIntent()
+        reloadIfNeeded()
+        guard storageState == .available, save(snapshot, to: storage) else { return false }
+        intent.revokedFingerprints = []
+        _ = persistIntent()
+        return true
     }
 
-    /// Clears RAM first, then confirms the sealed file, its key and any legacy
-    /// plaintext copy are gone.
+    /// Clears RAM first, then confirms the sealed file, its key, any legacy
+    /// plaintext copy and the pending-wipe marker are gone. On failure the
+    /// marker keeps every later load from applying the old list.
     @discardableResult
     func clear() -> Bool {
-        contacts = []
-        fingerprints = []
-        var erased = true
-        if let storage {
-            do { try storage.wipe() } catch { erased = false }
+        apply(Snapshot())
+        guard storage != nil else {
+            intent = Intent()
+            let erased = removeLegacy()
+            storageState = erased ? .available : .unavailable
+            return erased
         }
-        erased = removeLegacy() && erased
-        storageState = erased ? .available : .unavailable
-        return erased
+        intent = Intent(wipe: true)
+        _ = persistIntent()
+        return finishWipe()
     }
 
     private var snapshot: Snapshot {
         Snapshot(contacts: contacts, fingerprints: fingerprints.sorted())
     }
 
+    private static func removing(_ revoked: Set<String>, from value: Snapshot) -> Snapshot {
+        guard !revoked.isEmpty else { return value }
+        var next = value
+        next.contacts.removeAll { contact in
+            Data(hexString: contact.noiseKeyHex).map { revoked.contains($0.sha256Fingerprint()) } ?? true
+        }
+        next.fingerprints.removeAll { revoked.contains($0) }
+        return next
+    }
+
     /// Changes RAM only after a confirmed write, so a failure never shows a
     /// contact that will not survive a restart.
     private func commit(_ next: Snapshot) -> Bool {
-        guard storageState == .available else { return false }
+        guard storageState == .available, !intent.wipe else { return false }
         if let storage {
-            do {
-                try storage.save(JSONEncoder().encode(next))
-            } catch WeshSealedStore.Failure.recoveryRequired {
-                storageState = .recoveryRequired
-                return false
-            } catch { return false }
+            guard save(next, to: storage) else { return false }
+            // The confirmed file now omits every pending revocation.
+            if !intent.revokedFingerprints.isEmpty {
+                intent.revokedFingerprints = []
+                _ = persistIntent()
+            }
         }
         apply(next)
         return true
+    }
+
+    private func save(_ value: Snapshot, to storage: WeshSealedStore) -> Bool {
+        do {
+            try storage.save(JSONEncoder().encode(value))
+            return true
+        } catch WeshSealedStore.Failure.recoveryRequired {
+            storageState = .recoveryRequired
+            return false
+        } catch { return false }
+    }
+
+    private func persistIntent() -> Bool {
+        guard let storage else { return true }
+        guard !intent.isEmpty else { return storage.writeIntent(nil) }
+        guard let data = try? JSONEncoder().encode(intent) else { return false }
+        return storage.writeIntent(data)
+    }
+
+    private func finishWipe() -> Bool {
+        guard let storage else { return false }
+        var erased = true
+        do { try storage.wipe() } catch { erased = false }
+        erased = removeLegacy() && erased
+        if erased {
+            // Leaving the marker would erase contacts enrolled after this wipe.
+            let pending = intent
+            intent = Intent()
+            if !persistIntent() {
+                intent = pending
+                erased = false
+            }
+        }
+        storageState = erased ? .available : .unavailable
+        return erased
     }
 
     private func apply(_ value: Snapshot) {
@@ -126,19 +197,39 @@ final class WeshQRTrust: ObservableObject {
             return
         }
         do {
-            if let data = try storage.load() {
-                guard let value = try? JSONDecoder().decode(Snapshot.self, from: data) else {
+            if let data = try storage.readIntent() {
+                guard let stored = try? JSONDecoder().decode(Intent.self, from: data) else {
                     throw WeshSealedStore.Failure.recoveryRequired
                 }
-                apply(value)
+                intent.wipe = intent.wipe || stored.wipe
+                intent.revokedFingerprints.formUnion(stored.revokedFingerprints)
+            }
+            if intent.wipe {
+                // A list ordered deleted is never applied; retry the wipe.
+                apply(Snapshot())
+                _ = finishWipe()
+                return
+            }
+            let value: Snapshot
+            if let data = try storage.load() {
+                guard let decoded = try? JSONDecoder().decode(Snapshot.self, from: data) else {
+                    throw WeshSealedStore.Failure.recoveryRequired
+                }
+                value = Self.removing(intent.revokedFingerprints, from: decoded)
+                if value != decoded { try storage.save(JSONEncoder().encode(value)) }
                 _ = removeLegacy()
             } else if let legacy = try legacySnapshot() {
                 // One-time migration: delete plaintext only after a confirmed sealed write.
-                try storage.save(JSONEncoder().encode(legacy))
-                apply(legacy)
+                value = Self.removing(intent.revokedFingerprints, from: legacy)
+                try storage.save(JSONEncoder().encode(value))
                 _ = removeLegacy()
             } else {
-                apply(Snapshot())
+                value = Snapshot()
+            }
+            apply(value)
+            if !intent.revokedFingerprints.isEmpty {
+                intent.revokedFingerprints = []
+                _ = persistIntent()
             }
             storageState = .available
         } catch WeshSealedStore.Failure.recoveryRequired {

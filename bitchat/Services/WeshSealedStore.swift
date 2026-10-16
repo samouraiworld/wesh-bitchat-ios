@@ -87,6 +87,35 @@ final class WeshSealedStore {
         }
     }
 
+    // MARK: Pending intent
+
+    /// A wipe or revocation that could not be confirmed is recorded in the
+    /// Keychain beside the file, never inside it, so a later load retries the
+    /// change instead of resurrecting what the user removed. `wipe()` leaves
+    /// this item alone.
+    private var intentKeyName: String { keyName + ".intent" }
+
+    func readIntent() throws -> Data? {
+        switch keychain.getIdentityKeyWithResult(forKey: intentKeyName) {
+        case .success(let data): return data
+        case .itemNotFound: return nil
+        default: throw Failure.storageUnavailable
+        }
+    }
+
+    /// Nil removes the intent. True only after a confirming read.
+    @discardableResult
+    func writeIntent(_ data: Data?) -> Bool {
+        guard let data else {
+            guard keychain.deleteIdentityKey(forKey: intentKeyName),
+                  case .itemNotFound = keychain.getIdentityKeyWithResult(forKey: intentKeyName) else { return false }
+            return true
+        }
+        guard case .success = keychain.saveIdentityKeyWithResult(data, forKey: intentKeyName),
+              case .success(let stored) = keychain.getIdentityKeyWithResult(forKey: intentKeyName) else { return false }
+        return stored == data
+    }
+
     private func readBlob() throws -> Data? {
         do {
             let data = try files.read(fileURL)
