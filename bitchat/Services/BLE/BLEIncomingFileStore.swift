@@ -203,11 +203,7 @@ struct BLEIncomingFileStore: @unchecked Sendable {
     /// as they go (live captures, `AVAudioRecorder`) inherit it, and stated
     /// explicitly at the payload write site like every other store.
     static var mediaProtectionAttributes: [FileAttributeKey: Any]? {
-        #if os(iOS)
-        return [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-        #else
-        return nil
-        #endif
+        LocalFileProtection.directoryAttributes
     }
 
     /// Exposed so callers that write progressively into the store's
@@ -225,7 +221,7 @@ struct BLEIncomingFileStore: @unchecked Sendable {
         baseDirectory: URL? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         panicMarkerWriter: @escaping (Data, URL) throws -> Void = {
-            try $0.write(to: $1, options: .atomic)
+            try LocalFileProtection.write($0, to: $1, options: .atomic)
         },
         quotaBytes: Int64 = Self.defaultQuotaBytes
     ) {
@@ -286,14 +282,14 @@ struct BLEIncomingFileStore: @unchecked Sendable {
             if fileManager.fileExists(atPath: filesDirectory.path) {
                 try fileManager.removeItem(at: filesDirectory)
             }
+            try LocalFileProtection.createDirectory(filesDirectory, fileManager: fileManager)
             for subdirectory in Self.mediaSubdirectories {
-                try fileManager.createDirectory(
-                    at: filesDirectory.appendingPathComponent(
+                try LocalFileProtection.createDirectory(
+                    filesDirectory.appendingPathComponent(
                         subdirectory,
                         isDirectory: true
                     ),
-                    withIntermediateDirectories: true,
-                    attributes: Self.mediaProtectionAttributes
+                    fileManager: fileManager
                 )
             }
         } catch {
@@ -338,8 +334,7 @@ struct BLEIncomingFileStore: @unchecked Sendable {
     /// write progressively instead of via `save` (live voice captures).
     func incomingDirectory(subdirectory: String) throws -> URL {
         let directory = try filesDirectory().appendingPathComponent(subdirectory, isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: Self.mediaProtectionAttributes)
-        return directory
+        return try LocalFileProtection.createDirectory(directory, fileManager: fileManager)
     }
 
     func save(
@@ -353,8 +348,9 @@ struct BLEIncomingFileStore: @unchecked Sendable {
         defer { payloadCoordination.lock.unlock() }
 
         do {
-            let base = try filesDirectory().appendingPathComponent(subdirectory, isDirectory: true)
-            try fileManager.createDirectory(at: base, withIntermediateDirectories: true, attributes: Self.mediaProtectionAttributes)
+            let base = try LocalFileProtection.createDirectory(
+                filesDirectory().appendingPathComponent(subdirectory, isDirectory: true), fileManager: fileManager
+            )
             let sanitized = sanitizedFileName(
                 preferredName,
                 defaultName: "\(defaultPrefix)_\(Self.timestampString(from: dateProvider()))",
@@ -376,11 +372,9 @@ struct BLEIncomingFileStore: @unchecked Sendable {
                 ),
                 forceRandomizedName: reservedPaths == nil
             )
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
-            #endif
-            try data.write(to: destination, options: options)
+            try LocalFileProtection.write(
+                data, to: destination, options: LocalFileProtection.writingOptions(.untilFirstUnlock)
+            )
             payloadCoordination.pendingDeliveryPaths.insert(
                 destination.standardizedFileURL.path
             )
@@ -807,8 +801,7 @@ struct BLEIncomingFileStore: @unchecked Sendable {
 
     private func filesDirectory() throws -> URL {
         let filesDir = try rootDirectory().appendingPathComponent("files", isDirectory: true)
-        try fileManager.createDirectory(at: filesDir, withIntermediateDirectories: true, attributes: Self.mediaProtectionAttributes)
-        return filesDir
+        return try LocalFileProtection.createDirectory(filesDir, fileManager: fileManager)
     }
 
     private func rootDirectory() throws -> URL {

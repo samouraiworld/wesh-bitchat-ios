@@ -117,7 +117,7 @@ private extension GeoRelayDirectoryDependencies {
             },
             readData: { try? Data(contentsOf: $0) },
             writeData: { data, url in
-                try data.write(to: url, options: .atomic)
+                try LocalFileProtection.write(data, to: url, level: .untilFirstUnlock)
             },
             cacheURL: {
                 do {
@@ -128,7 +128,8 @@ private extension GeoRelayDirectoryDependencies {
                         create: true
                     )
                     let dir = base.appendingPathComponent("bitchat", isDirectory: true)
-                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    // Also holds Arti's state and cache (`bitchat/arti`).
+                    try? LocalFileProtection.createDirectory(dir)
                     // v2 ignores caches populated from the old direct-upstream
                     // trust path and subjects every load to strict validation.
                     let legacyCache = dir.appendingPathComponent("georelays_cache.csv")

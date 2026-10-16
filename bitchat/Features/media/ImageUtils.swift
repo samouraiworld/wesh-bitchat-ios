@@ -74,7 +74,7 @@ enum ImageUtils {
             }
 
             let outputURL = try makeOutputURL(outputDirectory: outputDirectory)
-            try jpegData.write(to: outputURL, options: .atomic)
+            try LocalFileProtection.write(jpegData, to: outputURL, level: .untilFirstUnlock)
             return outputURL
         }
     }
@@ -152,7 +152,7 @@ enum ImageUtils {
                 }
             }
             let outputURL = try makeOutputURL(outputDirectory: outputDirectory)
-            try jpegData.write(to: outputURL, options: .atomic)
+            try LocalFileProtection.write(jpegData, to: outputURL, level: .untilFirstUnlock)
             return outputURL
         }
     }
@@ -206,7 +206,7 @@ enum ImageUtils {
         } else {
             directory = try applicationFilesDirectory().appendingPathComponent("images/outgoing", isDirectory: true)
         }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: BLEIncomingFileStore.mediaProtectionAttributes)
+        try LocalFileProtection.createDirectory(directory)
         return directory.appendingPathComponent(fileName)
     }
 
