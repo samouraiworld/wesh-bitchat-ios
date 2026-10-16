@@ -51,7 +51,6 @@ enum WeshQRNpub {
         return others.isEmpty ? .bound(npub: candidate, proven: false, unbinding: []) : .conflict
     }
 
-    // periphery:ignore - consumed by the Internet routing/inbound PR (#7)
     /// Inbound Nostr sender resolution: the one contact bound to this npub.
     static func inboundContact(forNpub npub: String, in contacts: [WeshQRTrust.Contact]) -> WeshQRTrust.Contact? {
         let holders = contacts.filter { $0.npub == npub }
@@ -134,7 +133,6 @@ extension WeshQRTrust.Contact {
     /// UI: proven before, but the last QR did not prove its npub; binding kept.
     var hasNpubProofWarning: Bool { npubProofWarning == true }
 
-    // periphery:ignore - consumed by the Internet UI PR (#9)
     /// UI: « Rescannez son QR pour échanger par Internet ». Legacy contacts
     /// and QRs whose npub failed enrollment checks land here.
     var requiresRescanForInternet: Bool { npub == nil }
