@@ -100,10 +100,11 @@ struct PanicNetworkLifecycle {
             stop: {
                 GeohashPresenceService.shared.stopForPanic()
                 NetworkActivationService.shared.stopForPanic()
+                if WeshMode.isActive { WeshInternetMode.shared.wipeForPanic() }
             },
             restart: {
                 NetworkActivationService.shared.start()
-                GeohashPresenceService.shared.start()
+                if !WeshMode.isActive { GeohashPresenceService.shared.start() }
             }
         )
     }

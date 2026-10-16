@@ -6,6 +6,48 @@ import XCTest
 final class NetworkActivationServiceTests: XCTestCase {
     private let torPreferenceKey = "networkActivationService.userTorEnabled"
 
+    // MARK: Wesh Internet mode: toggle-only policy, Tor mandatory
+
+    func test_wesh_toggleIsTheOnlyPolicyAndOffNeverStartsTorOrRelays() {
+        let context = makeService(permission: .denied, favorites: [], weshInternetPolicy: true)
+        context.service.setUserInternetEnabled(false)
+        context.service.start()
+        XCTAssertFalse(context.service.activationAllowed)
+        XCTAssertEqual(context.torController.startIfNeededCallCount, 0)
+        XCTAssertEqual(context.relayController.connectCallCount, 0)
+
+        // No location permission, no favorites: the toggle alone allows it.
+        context.service.setUserInternetEnabled(true)
+        XCTAssertTrue(context.service.activationAllowed)
+        XCTAssertEqual(context.torController.autoStartAllowedValues.last, true)
+        XCTAssertEqual(context.torController.startIfNeededCallCount, 1)
+        XCTAssertGreaterThanOrEqual(context.relayController.connectCallCount, 1)
+
+        context.service.setUserInternetEnabled(false)
+        XCTAssertFalse(context.service.activationAllowed)
+        XCTAssertEqual(context.torController.autoStartAllowedValues.last, false)
+    }
+
+    func test_wesh_storedDirectPreferenceIsErasedAndProxyNeverGoesDirect() {
+        let context = makeService(permission: .authorized, favorites: [], weshInternetPolicy: true)
+        context.storage.set(false, forKey: torPreferenceKey)
+        context.service.start()
+
+        XCTAssertTrue(context.service.userTorEnabled)
+        XCTAssertNil(context.storage.object(forKey: torPreferenceKey))
+        XCTAssertTrue(NetworkActivationService.persistedTorPreference(in: context.storage))
+
+        context.service.setUserTorEnabled(false)
+        XCTAssertTrue(context.service.userTorEnabled)
+        XCTAssertNil(context.storage.object(forKey: torPreferenceKey))
+
+        context.service.setUserInternetEnabled(false)
+        context.service.stopForPanic()
+        // Even fully off, the shared session stays the Tor proxy one.
+        XCTAssertFalse(context.proxyController.proxyModes.contains(false))
+        XCTAssertFalse(context.torController.autoStartAllowedValues.isEmpty)
+    }
+
     func test_start_leavesNetworkDisabledWithoutPermissionOrFavorites() {
         let context = makeService(permission: .denied, favorites: [])
 
@@ -209,7 +251,8 @@ final class NetworkActivationServiceTests: XCTestCase {
         permission: LocationChannelManager.PermissionState,
         favorites: Set<Data>,
         selectedChannel: ChannelID = .mesh,
-        selectedChannelSubject: CurrentValueSubject<ChannelID, Never>? = nil
+        selectedChannelSubject: CurrentValueSubject<ChannelID, Never>? = nil,
+        weshInternetPolicy: Bool = false
     ) -> NetworkActivationTestContext {
         let suiteName = "NetworkActivationServiceTests-\(UUID().uuidString)"
         let storage = UserDefaults(suiteName: suiteName)!
@@ -239,7 +282,8 @@ final class NetworkActivationServiceTests: XCTestCase {
             torController: torController,
             relayController: relayController,
             proxyController: proxyController,
-            notificationCenter: notificationCenter
+            notificationCenter: notificationCenter,
+            weshInternetPolicy: weshInternetPolicy
         )
         return NetworkActivationTestContext(
             service: service,
