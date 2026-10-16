@@ -114,7 +114,7 @@ struct PavePaletteContrastTests {
         let theme = PaveTheme()
         #expect(theme.id == .nuit)
         #expect(theme.colorScheme == .dark)
-        #expect(theme.rgb(.bg) == PaveRGB(0x0A0A0A))
+        #expect(theme.rgb(.bg) == PaveRGB(0x0B0B0A))
         #expect(PaveTheme(.jour).colorScheme == .light)
     }
 

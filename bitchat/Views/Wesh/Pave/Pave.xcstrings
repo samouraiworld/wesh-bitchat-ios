@@ -1317,6 +1317,108 @@
         }
       }
     },
+    "pave.fluo.bluetooth.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth off"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth coupé"
+          }
+        }
+      }
+    },
+    "pave.fluo.bluetooth.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth on"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth actif"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphones à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphones à portée"
+          }
+        }
+      }
+    },
     "pave.inbox.contactHint" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 
-// Pavé tokens, transposed one to one from docs/plan/design/system/tokens.json.
+// Pavé Fluo tokens (v2), transposed one to one from docs/plan/design/system/tokens.json.
 // No other Pavé file hard-codes a color, size, radius or duration.
 
 /// The two Pavé themes. Nuit is the default (true black for OLED), Jour is for full sun.
@@ -64,24 +64,24 @@ struct PaveTheme {
     func rgb(_ role: PaveColorRole) -> PaveRGB {
         let nuit = id == .nuit
         switch role {
-        case .bg: return PaveRGB(nuit ? 0x0A0A0A : 0xF5F5F0)
-        case .surface: return PaveRGB(nuit ? 0x161616 : 0xFFFFFF)
-        case .surfaceRaised: return PaveRGB(nuit ? 0x232323 : 0xE9E9E2)
-        case .ink: return PaveRGB(nuit ? 0xF5F5F0 : 0x0A0A0A)
-        case .inkMuted: return PaveRGB(nuit ? 0xA3A3A3 : 0x55554F)
-        case .line: return PaveRGB(nuit ? 0x3A3A3A : 0xCFCFC6)
-        case .lineStrong: return PaveRGB(nuit ? 0x8A8A85 : 0x6B6B64)
-        case .publicFill: return PaveRGB(0xE8FF3A)
-        case .onPublic: return PaveRGB(0x0A0A0A)
-        case .privateFill: return PaveRGB(nuit ? 0xF5F5F0 : 0x0A0A0A)
-        case .onPrivate: return PaveRGB(nuit ? 0x0A0A0A : 0xF5F5F0)
-        case .internet: return PaveRGB(nuit ? 0x7FB2FF : 0x1D4ED8)
-        case .onInternet: return PaveRGB(nuit ? 0x0A0A0A : 0xFFFFFF)
-        case .danger: return PaveRGB(nuit ? 0xFF5A4E : 0xC4302B)
-        case .onDanger: return PaveRGB(nuit ? 0x0A0A0A : 0xFFFFFF)
+        case .bg: return PaveRGB(nuit ? 0x0B0B0A : 0xEFEDE4)
+        case .surface: return PaveRGB(nuit ? 0x171716 : 0xFFFFFF)
+        case .surfaceRaised: return PaveRGB(nuit ? 0x242422 : 0xE3E0D5)
+        case .ink: return PaveRGB(nuit ? 0xF4F3EE : 0x0B0B0A)
+        case .inkMuted: return PaveRGB(nuit ? 0xA6A59F : 0x54534D)
+        case .line: return PaveRGB(nuit ? 0x3A3A37 : 0xCAC7BC)
+        case .lineStrong: return PaveRGB(nuit ? 0x8B8A84 : 0x6B6A63)
+        case .publicFill: return PaveRGB(0xE4FF1A)
+        case .onPublic: return PaveRGB(0x0B0B0A)
+        case .privateFill: return PaveRGB(nuit ? 0xF4F3EE : 0x0B0B0A)
+        case .onPrivate: return PaveRGB(nuit ? 0x0B0B0A : 0xF4F3EE)
+        case .internet: return PaveRGB(nuit ? 0x86B6FF : 0x1D4ED8)
+        case .onInternet: return PaveRGB(nuit ? 0x0B0B0A : 0xFFFFFF)
+        case .danger: return PaveRGB(nuit ? 0xFF5640 : 0xC4302B)
+        case .onDanger: return PaveRGB(nuit ? 0x0B0B0A : 0xFFFFFF)
         case .success: return PaveRGB(nuit ? 0x7CE0A3 : 0x1F7A47)
         case .warning: return PaveRGB(nuit ? 0xFFB547 : 0x8A5A00)
-        case .focus: return PaveRGB(nuit ? 0xE8FF3A : 0x0A0A0A)
+        case .focus: return PaveRGB(nuit ? 0xE4FF1A : 0x0B0B0A)
         }
     }
 
@@ -122,18 +122,20 @@ extension View {
     }
 }
 
-/// The WESH word mark: condensed, weight 900, scaled with Dynamic Type from a 40 pt base.
+/// The WESH word mark in the Pavé Fluo poster face, scaled with Dynamic Type from a 56 pt base.
 struct PaveWordmark: View {
     @ScaledMetric private var size: CGFloat
 
-    init(baseSize: CGFloat = 40) {
+    init(baseSize: CGFloat = 56) {
         _size = ScaledMetric(wrappedValue: baseSize, relativeTo: .largeTitle)
     }
 
     var body: some View {
         Text(verbatim: "WESH")
-            .font(.system(size: size, weight: .black).width(.condensed))
-            .tracking(-0.5)
+            .font(PaveDisplayFont.isAvailable
+                ? .custom(PaveDisplayFont.postScriptName, fixedSize: size)
+                : .system(size: size, weight: .black).width(.condensed))
+            .tracking(-1)
             .accessibilityLabel(Text(verbatim: "Wesh"))
             .accessibilityAddTraits(.isHeader)
     }
