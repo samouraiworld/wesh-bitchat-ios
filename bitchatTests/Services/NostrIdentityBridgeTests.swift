@@ -45,6 +45,31 @@ struct NostrIdentityBridgeTests {
         #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.storedNostrIdentity() }
     }
 
+    @Test("Wesh messaging paths read the key only while Internet mode is on and never create one")
+    func weshMessagingIdentityNeverCreatesKey() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        #expect(bridge.messagingIdentity(weshActive: true, internetEnabled: false) == nil)
+        #expect(bridge.messagingIdentity(weshActive: true, internetEnabled: true) == nil)
+        #expect(keychain.saveCount == 0)
+        #expect(keychain.backing.load(key: identityKey, service: service) == nil)
+
+        let stored = try #require(try bridge.getCurrentNostrIdentity())
+        #expect(bridge.messagingIdentity(weshActive: true, internetEnabled: false) == nil)
+        #expect(bridge.messagingIdentity(weshActive: true, internetEnabled: true)?.npub == stored.npub)
+
+        keychain.readFailure = .deviceLocked
+        #expect(bridge.messagingIdentity(weshActive: true, internetEnabled: true) == nil)
+    }
+
+    @Test("Outside Wesh the upstream get-or-create behaviour is kept")
+    func upstreamMessagingIdentityCreatesKey() throws {
+        let keychain = NostrPersistenceKeychain()
+        let bridge = NostrIdentityBridge(keychain: keychain)
+        let created = try #require(bridge.messagingIdentity(weshActive: false, internetEnabled: false))
+        #expect(try bridge.storedNostrIdentity()?.npub == created.npub)
+    }
+
     @Test("Owned npubs come from durable material and fail closed otherwise")
     func locallyOwnedNpubsFailClosed() throws {
         let keychain = NostrPersistenceKeychain()

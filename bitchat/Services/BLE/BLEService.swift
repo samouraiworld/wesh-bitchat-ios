@@ -2833,8 +2833,8 @@ final class BLEService: NSObject {
         var content = isFavorite ? "[FAVORITED]" : "[UNFAVORITED]"
         var includesNostrIdentity = false
         
-        // Add our Nostr public key if available
-        if let myNostrIdentity = try? idBridge.getCurrentNostrIdentity() {
+        // Add our Nostr public key if available (Wesh: never created here, only while Internet mode is on)
+        if let myNostrIdentity = idBridge.messagingIdentity() {
             content += ":" + myNostrIdentity.npub
             includesNostrIdentity = true
             SecureLogger.debug("📝 Favorite notification includes Nostr npub=\(myNostrIdentity.npub.prefix(16))…", category: .session)

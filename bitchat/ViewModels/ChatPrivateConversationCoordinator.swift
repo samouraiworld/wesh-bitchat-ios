@@ -173,8 +173,9 @@ extension ChatViewModel: ChatPrivateConversationContext {
         try idBridge.deriveIdentity(forGeohash: geohash)
     }
 
+    /// Read-only in Wesh: an inbound DM, a read receipt or a view never creates key material.
     func currentNostrIdentity() -> NostrIdentity? {
-        try? idBridge.getCurrentNostrIdentity()
+        idBridge.messagingIdentity(weshActive: weshPrivatePolicyEnabled)
     }
 
     func routePrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
