@@ -50,18 +50,23 @@ final class VerificationService {
             var comps = URLComponents()
             comps.scheme = "bitchat"
             comps.host = "verify"
-            comps.queryItems = [
-                URLQueryItem(name: "v", value: String(v)),
-                URLQueryItem(name: "noise", value: noiseKeyHex),
-                URLQueryItem(name: "sign", value: signKeyHex),
-                URLQueryItem(name: "nick", value: nickname),
-                URLQueryItem(name: "ts", value: String(ts)),
-                URLQueryItem(name: "nonce", value: nonceB64),
-                URLQueryItem(name: "sig", value: sigHex)
-            ] + (npub != nil ? [URLQueryItem(name: "npub", value: npub)] : [])
-              + (npub != nil && npubSigHex != nil ? [URLQueryItem(name: "npubsig", value: npubSigHex)] : [])
+            // Strict RFC 3986 query encoding: URLComponents leaves "+" raw,
+            // and Android's getQueryParameter decodes it as a space, which
+            // breaks the signed nickname across platforms.
+            let items: [(String, String)] = [
+                ("v", String(v)), ("noise", noiseKeyHex), ("sign", signKeyHex), ("nick", nickname),
+                ("ts", String(ts)), ("nonce", nonceB64), ("sig", sigHex)
+            ] + (npub.map { [("npub", $0)] } ?? [])
+              + (npub != nil ? (npubSigHex.map { [("npubsig", $0)] } ?? []) : [])
+            comps.percentEncodedQueryItems = items.map {
+                URLQueryItem(name: $0.0, value: $0.1.addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed))
+            }
             return comps.string ?? ""
         }
+
+        /// RFC 3986 unreserved characters only.
+        static let queryValueAllowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
         static func validHex(_ value: String, bytes: Int) -> Bool {
             value.utf8.count == bytes * 2 && value.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }

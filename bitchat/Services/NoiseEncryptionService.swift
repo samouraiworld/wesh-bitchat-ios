@@ -195,8 +195,25 @@ final class NoiseEncryptionService {
     }
     private static let pendingIdentityKey = "noiseIdentityPending.v1"
     private let identityLock = NSLock()
-    /// Serializes legacy two-item initialization across service instances in this process.
-    private static let persistenceLock = NSLock()
+    /// Serializes legacy two-item initialization per backing store. Every
+    /// `KeychainManager` reaches the same system Keychain and shares one lock;
+    /// any other store (in-memory test or preview keychains) gets its own, so
+    /// a slow call on one store never stalls identity setup on another.
+    private let persistenceLock: NSLock
+    private static let systemKeychainPersistenceLock = NSLock()
+    private static let storeLocksGuard = NSLock()
+    private static let storeLocks = NSMapTable<AnyObject, NSLock>.weakToStrongObjects()
+
+    private static func persistenceLock(for keychain: KeychainManagerProtocol) -> NSLock {
+        if keychain is KeychainManager { return systemKeychainPersistenceLock }
+        let store = keychain as AnyObject
+        storeLocksGuard.lock()
+        defer { storeLocksGuard.unlock() }
+        if let lock = storeLocks.object(forKey: store) { return lock }
+        let lock = NSLock()
+        storeLocks.setObject(lock, forKey: store)
+        return lock
+    }
     private var context: IdentityContext?
     private var pendingIdentity: PendingIdentity?
     private var identityInvalidated = false
@@ -305,6 +322,7 @@ final class NoiseEncryptionService {
             NoiseSecurityConstants.ordinaryReconnectRollbackCooldown
     ) {
         self.keychain = keychain
+        self.persistenceLock = Self.persistenceLock(for: keychain)
         self.localPrekeys = LocalPrekeyStore(keychain: keychain)
 
         self.managerFactory = { staticKey in
@@ -331,8 +349,8 @@ final class NoiseEncryptionService {
         defer { identityLock.unlock() }
         guard !identityInvalidated else { return false }
         if context != nil { return true }
-        Self.persistenceLock.lock()
-        defer { Self.persistenceLock.unlock() }
+        persistenceLock.lock()
+        defer { persistenceLock.unlock() }
 
         var noiseResult = keychain.getIdentityKeyWithResult(forKey: "noiseStaticKey")
         var signingResult = keychain.getIdentityKeyWithResult(forKey: "ed25519SigningKey")
@@ -652,8 +670,8 @@ final class NoiseEncryptionService {
     @discardableResult
     func clearPersistentIdentity() -> Bool {
         identityLock.lock()
-        Self.persistenceLock.lock()
-        defer { Self.persistenceLock.unlock() }
+        persistenceLock.lock()
+        defer { persistenceLock.unlock() }
         let previous = context
         context = nil
         pendingIdentity = nil

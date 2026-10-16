@@ -106,9 +106,9 @@ struct BLEServiceCoreTests {
             if key == "noiseIdentityPending.v1" { gate.block() }
             return nil
         }
-        let startup = Task.detached { ble.startServices() }
+        let startup = TestHelpers.onThread { ble.startServices() }
         #expect(await TestHelpers.waitUntil({ gate.hasBlocked }, timeout: TestConstants.longTimeout))
-        let stopping = Task.detached { ble.stopServices() }
+        let stopping = TestHelpers.onThread { ble.stopServices() }
         #expect(await TestHelpers.waitUntil({ !ble.areServicesRequested }, timeout: TestConstants.longTimeout))
         gate.release()
         await startup.value

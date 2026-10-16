@@ -20,7 +20,11 @@ final class SharedSignedQRInteropTests: XCTestCase {
     }
 
     private func fixture() throws -> Fixture {
+        #if SWIFT_PACKAGE
+        let bundle = Bundle.module
+        #else
         let bundle = Bundle(for: Self.self)
+        #endif
         let url = try XCTUnwrap(
             bundle.url(forResource: "wesh-signed-qr-v1", withExtension: "json")
                 ?? bundle.url(forResource: "wesh-signed-qr-v1", withExtension: "json", subdirectory: "Services/Fixtures")
@@ -77,6 +81,37 @@ final class SharedSignedQRInteropTests: XCTestCase {
             XCTAssertNotNil(VerificationService.VerificationQR.fromURL(try XCTUnwrap(URL(string: url))))
             XCTAssertNil(verifier.verifyScannedQR(url, now: Double(f.timestamp)))
         }
+    }
+
+    func test_builderReproducesTheSharedFixtureURLExactly() throws {
+        let f = try fixture()
+        let qr = VerificationService.VerificationQR(
+            v: 1, noiseKeyHex: f.noiseKeyHex, signKeyHex: f.signKeyHex, npub: nil, nickname: f.nickname,
+            ts: f.timestamp, nonceB64: f.nonceB64, sigHex: f.signatureHex
+        )
+        XCTAssertEqual(qr.toURLString(), f.url)
+    }
+
+    /// Android's `Uri.getQueryParameter` decodes "+" as a space. A raw "+"
+    /// in the signed nickname therefore broke verification across platforms.
+    func test_reservedNicknameCharactersArePercentEncodedForBothDecoders() throws {
+        let f = try fixture()
+        let key = try Curve25519.Signing.PrivateKey(rawRepresentation: try XCTUnwrap(Data(hexString: f.seedHex)))
+        let nickname = "Nora+café & co=1"
+        var qr = VerificationService.VerificationQR(
+            v: 1, noiseKeyHex: f.noiseKeyHex, signKeyHex: f.signKeyHex, npub: nil, nickname: nickname,
+            ts: f.timestamp, nonceB64: f.nonceB64, sigHex: ""
+        )
+        qr.sigHex = try key.signature(for: qr.canonicalBytes()).hexEncodedString()
+        let url = qr.toURLString()
+
+        XCTAssertTrue(url.contains("nick=Nora%2Bcaf%C3%A9%20%26%20co%3D1&"), url)
+        // Form-style decoding, as Android performs it.
+        let rawNick = try XCTUnwrap(URLComponents(string: url)?.percentEncodedQueryItems?.first { $0.name == "nick" }?.value)
+        XCTAssertEqual(rawNick.replacingOccurrences(of: "+", with: " ").removingPercentEncoding, nickname)
+        // iOS decoding plus the real signature check.
+        let parsed = try XCTUnwrap(service().verifyScannedQR(url, now: Double(f.timestamp)))
+        XCTAssertEqual(parsed.nickname, nickname)
     }
 
     func test_sameSignedFixtureHasInclusiveSymmetricFreshnessBoundary() throws {
