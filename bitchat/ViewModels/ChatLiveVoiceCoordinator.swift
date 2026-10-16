@@ -155,6 +155,10 @@ final class ChatLiveVoiceCoordinator {
     /// deinit backstop. Entries remove themselves via `onStopped`.
     private var drainingPlayers: [ObjectIdentifier: PTTBurstPlayer] = [:]
 
+    /// Wesh never writes inbound audio from BitChat peers to disk. Upstream
+    /// live-voice tests opt in on their own instance.
+    var acceptsIncomingMedia: () -> Bool = { WeshIncomingMediaPolicy.acceptsMedia }
+
     /// `sweepsOnInit` exists for tests whose coordinator shares the real
     /// application-support directory: they pass `false` so parallel test
     /// runs never sweep each other's in-flight capture files.
@@ -187,6 +191,8 @@ final class ChatLiveVoiceCoordinator {
         // Live voice off means classic-notes-only in both directions: no live
         // bubble, no partial file, no early notification — the finalized
         // voice note still arrives through the normal pipeline.
+        // Wesh never writes inbound audio from BitChat peers to disk.
+        guard acceptsIncomingMedia() else { return }
         guard PTTSettings.liveVoiceEnabled else {
             SecureLogger.debug("PTT: dropping inbound voice frame — live voice is toggled off", category: .session)
             return

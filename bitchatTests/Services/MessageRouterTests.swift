@@ -53,6 +53,30 @@ struct MessageRouterTests {
     }
 
     @Test @MainActor
+    func weshPolicyDenialAlsoWithholdsReceiptsAndFavoriteMarkers() {
+        let peerID = PeerID(str: "0000000000000001")
+        let transport = MockTransport()
+        transport.connectedPeers.insert(peerID)
+        transport.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [transport])
+        var admitted = false
+        router.privateSendPolicy = { _, _ in admitted ? Data(repeating: 1, count: 32) : nil }
+        let receipt = ReadReceipt(originalMessageID: "m1", readerID: PeerID(str: "0000000000000002"), readerNickname: "Me")
+
+        #expect(!router.admitsControlMessage(to: peerID))
+        #expect(!router.sendReadReceipt(receipt, to: peerID))
+        router.sendFavoriteNotification(to: peerID, isFavorite: true)
+        #expect(transport.sentReadReceipts.isEmpty)
+        #expect(transport.sentFavoriteNotifications.isEmpty)
+
+        admitted = true
+        #expect(router.sendReadReceipt(receipt, to: peerID))
+        router.sendFavoriteNotification(to: peerID, isFavorite: true)
+        #expect(transport.sentReadReceipts.count == 1)
+        #expect(transport.sentFavoriteNotifications.count == 1)
+    }
+
+    @Test @MainActor
     func sendPrivate_usesReachableTransport() async {
         let peerID = PeerID(str: "0000000000000001")
         let transportA = MockTransport()

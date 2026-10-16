@@ -1,0 +1,55 @@
+name: Attribution
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  attribution:
+    name: No published file or PR text carries assistant attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Tracked files (text, binary metadata, base64)
+        run: python3 .github/scripts/check-vendor-attribution.py .
+      - name: Branch name, pull request title and body
+        if: github.event_name == 'pull_request'
+        env:
+          REF: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$REF" | python3 .github/scripts/check-vendor-attribution.py --text "branch name"
+          printf '%s' "$TITLE" | python3 .github/scripts/check-vendor-attribution.py --text "pull request title"
+          printf '%s' "$BODY" | python3 .github/scripts/check-vendor-attribution.py --text "pull request body"
+      - name: Commit messages this pull request adds
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null
+          git rev-parse --verify --quiet "$HEAD_SHA^{commit}" >/dev/null
+          test "$(git rev-list --count "$BASE..$HEAD_SHA")" -gt 0
+          git log --format=%B "$BASE..$HEAD_SHA" | python3 .github/scripts/check-vendor-attribution.py --text "commit messages"
+      - name: Commit messages this push adds
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          BEFORE: ${{ github.event.before }}
+          PUSHED: ${{ github.sha }}
+        run: |
+          git rev-parse --verify --quiet "$BEFORE^{commit}" >/dev/null
+          git rev-parse --verify --quiet "$PUSHED^{commit}" >/dev/null
+          git log --format=%B "$BEFORE..$PUSHED" | python3 .github/scripts/check-vendor-attribution.py --text "commit messages" --allow-empty

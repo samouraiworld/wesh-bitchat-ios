@@ -598,6 +598,22 @@ struct WeshPrivateDataAtRestTests {
         }
     }
 
+    @Test func npubBindingsSurviveTheSealedStoreAndTheLegacyMigration() throws {
+        let fixture = Fixture()
+        let npub = "npub1synthetic"
+        #expect(WeshQRTrust(storage: fixture.store()).record(sessionKey: alice, nickname: "Alice", npub: npub,
+                                                             npubProven: true, npubProofWarning: true))
+        let reloaded = try #require(WeshQRTrust(storage: fixture.store()).contacts.first)
+        #expect(reloaded.npub == npub && reloaded.npubProven == true && reloaded.npubProofWarning == true)
+
+        let legacyFixture = Fixture()
+        let legacy = [WeshQRTrust.Contact(noiseKeyHex: bob.hexEncodedString(), nickname: "Bob", npub: npub, npubConflict: true)]
+        legacyFixture.defaults.set(try JSONEncoder().encode(legacy), forKey: WeshQRTrust.legacyContactsKey)
+        let migrated = try #require(WeshQRTrust(storage: legacyFixture.store(), legacyDefaults: legacyFixture.defaults).contacts.first)
+        #expect(migrated.npub == npub && migrated.npubConflict == true)
+        #expect(legacyFixture.defaults.object(forKey: WeshQRTrust.legacyContactsKey) == nil)
+    }
+
     @Test func contactNicknamesAreSanitizedWhenRecordedAndWhenMigrated() throws {
         #expect(WeshDisplayName.clean("  Nora  ") == "Nora")
         #expect(WeshDisplayName.clean("No\u{202E}ra") == "Contact")

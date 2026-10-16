@@ -42,6 +42,15 @@ final class WeshQRTrust: ObservableObject {
     struct Contact: Codable, Identifiable, Hashable {
         let noiseKeyHex: String
         let nickname: String
+        /// Signed by the contact's QR and validated at enrollment; nil = Bluetooth-only.
+        var npub: String? = nil
+        /// The QR also proved possession of the npub's key (`npubsig`).
+        var npubProven: Bool? = nil
+        /// Another contact holds or claimed the same npub: for user review.
+        var npubConflict: Bool? = nil
+        /// A previously proven peer showed a QR without a valid proof; the
+        /// proven binding was kept.
+        var npubProofWarning: Bool? = nil
         var id: String { noiseKeyHex }
         var peerID: PeerID { PeerID(hexData: Data(hexString: noiseKeyHex) ?? Data()) }
     }
@@ -83,15 +92,35 @@ final class WeshQRTrust: ObservableObject {
     }
 
     @discardableResult
-    func record(sessionKey: Data, nickname: String = "Contact") -> Bool {
+    func record(sessionKey: Data, nickname: String = "Contact", npub: String? = nil,
+                npubProven: Bool = false, npubConflict: Bool = false, npubProofWarning: Bool = false) -> Bool {
         guard sessionKey.count == 32 else { return false }
         reloadIfNeeded()
+        let npub = npub?.isEmpty == false ? npub : nil
         let hex = sessionKey.hexEncodedString()
         var next = snapshot
         next.contacts.removeAll { $0.noiseKeyHex == hex }
-        next.contacts.append(Contact(noiseKeyHex: hex, nickname: WeshDisplayName.clean(nickname)))
+        next.contacts.append(Contact(noiseKeyHex: hex, nickname: WeshDisplayName.clean(nickname), npub: npub,
+                                     npubProven: npub != nil && npubProven ? true : nil,
+                                     npubConflict: npubConflict ? true : nil,
+                                     npubProofWarning: npubProofWarning ? true : nil))
         let fingerprint = sessionKey.sha256Fingerprint()
         if !next.fingerprints.contains(fingerprint) { next.fingerprints.append(fingerprint) }
+        return commit(next)
+    }
+
+    /// A verified proof took these contacts' npub: unbind them and flag them
+    /// for review (WeshQRNpub precedence). False when the sealed write failed.
+    @discardableResult
+    func flagNpubConflict(noiseKeysHex: Set<String>) -> Bool {
+        guard !noiseKeysHex.isEmpty else { return true }
+        reloadIfNeeded()
+        var next = snapshot
+        for index in next.contacts.indices where noiseKeysHex.contains(next.contacts[index].noiseKeyHex.lowercased()) {
+            next.contacts[index].npub = nil
+            next.contacts[index].npubProven = nil
+            next.contacts[index].npubConflict = true
+        }
         return commit(next)
     }
 
@@ -290,7 +319,10 @@ final class WeshQRTrust: ObservableObject {
                   let decoded = try? JSONDecoder().decode([Contact].self, from: data) else {
                 throw WeshSealedStore.Failure.recoveryRequired
             }
-            value.contacts = decoded.map { Contact(noiseKeyHex: $0.noiseKeyHex, nickname: WeshDisplayName.clean($0.nickname)) }
+            value.contacts = decoded.map {
+                Contact(noiseKeyHex: $0.noiseKeyHex, nickname: WeshDisplayName.clean($0.nickname), npub: $0.npub,
+                        npubProven: $0.npubProven, npubConflict: $0.npubConflict, npubProofWarning: $0.npubProofWarning)
+            }
         }
         if let prints {
             guard let prints = prints as? [String] else { throw WeshSealedStore.Failure.recoveryRequired }

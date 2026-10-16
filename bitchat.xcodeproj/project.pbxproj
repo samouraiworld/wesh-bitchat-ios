@@ -468,7 +468,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = "$(SWIFT_VERSION)";
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/bitchat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/bitchat";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wesh.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Wesh";
 			};
 			name = Debug;
 		};
@@ -492,7 +492,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = "$(SWIFT_VERSION)";
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/bitchat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/bitchat";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wesh.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Wesh";
 			};
 			name = Release;
 		};
@@ -532,7 +532,7 @@
 				CODE_SIGN_ENTITLEMENTS = bitchatShareExtension/bitchatShareExtension.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
 				INFOPLIST_FILE = bitchatShareExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -564,7 +564,7 @@
 				DEVELOPMENT_ASSET_PATHS = bitchat/_PreviewHelpers;
 				ENABLE_PREVIEWS = NO;
 				INFOPLIST_FILE = bitchat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -572,7 +572,8 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
-				PRODUCT_NAME = bitchat;
+				PRODUCT_MODULE_NAME = bitchat;
+				PRODUCT_NAME = Wesh;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -622,7 +623,7 @@
 				DEVELOPMENT_ASSET_PATHS = bitchat/_PreviewHelpers;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = bitchat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -630,7 +631,8 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PRODUCT_BUNDLE_IDENTIFIER)";
-				PRODUCT_NAME = bitchat;
+				PRODUCT_MODULE_NAME = bitchat;
+				PRODUCT_NAME = Wesh;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -656,7 +658,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = bitchat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -748,7 +750,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = NO;
 				INFOPLIST_FILE = bitchat/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -843,7 +845,7 @@
 				CODE_SIGN_ENTITLEMENTS = bitchatShareExtension/bitchatShareExtension.entitlements;
 				CODE_SIGN_STYLE = "$(CODE_SIGN_STYLE)";
 				INFOPLIST_FILE = bitchatShareExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = bitchat;
+				INFOPLIST_KEY_CFBundleDisplayName = Wesh;
 				IPHONEOS_DEPLOYMENT_TARGET = "$(IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

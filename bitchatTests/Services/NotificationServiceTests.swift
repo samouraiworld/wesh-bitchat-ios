@@ -71,7 +71,7 @@ final class NotificationServiceTests: XCTestCase {
         service.sendPrivateMessageNotification(from: "Alice", message: "hi", peerID: peerID)
 
         let request = deliverer.requests.singleValue
-        XCTAssertEqual(request?.content.title, "🔒 DM from Alice")
+        XCTAssertEqual(request?.content.title, "🔒 Message from Alice")
         XCTAssertEqual(request?.content.body, "hi")
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
         XCTAssertNil(request?.content.userInfo["senderName"])
@@ -119,6 +119,44 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
     }
 
+    func test_weshDropsLocationChannelAlertsAndTheirDeepLinks() {
+        let deliverer = RecordingNotificationRequestDeliverer()
+        let service = NotificationService(
+            isRunningTestsProvider: { false },
+            authorizer: RecordingNotificationAuthorizer(),
+            requestDeliverer: deliverer,
+            allowsLocationChannelNotifications: false
+        )
+
+        service.sendGeohashActivityNotification(geohash: "87yv", bodyPreview: "Someone is here")
+
+        XCTAssertTrue(deliverer.requests.isEmpty)
+    }
+
+    func test_onlyAllowlistedInAppDeepLinksAreHandled() throws {
+        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "wesh://share"))))
+        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "WESH://share"))))
+        for rejected in ["wesh://geohash/87yv", "bitchat://share", "https://share", "https://example.org",
+                         "wesh://user@share", "wesh://share:443", "tel:123", "wesh:share"] {
+            XCTAssertFalse(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: rejected))), rejected)
+        }
+    }
+
+    func test_weshSchemeIsRegisteredWithTheSystem() throws {
+        // Read the app's Info.plist from source: under SwiftPM, Bundle.main is the test runner.
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // Services
+            .deletingLastPathComponent()  // bitchatTests
+            .deletingLastPathComponent()  // repo root
+            .appendingPathComponent("bitchat/Info.plist")
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: Data(contentsOf: plistURL), format: nil) as? [String: Any]
+        )
+        let types = try XCTUnwrap(plist["CFBundleURLTypes"] as? [[String: Any]])
+        let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        XCTAssertEqual(schemes, ["wesh"])
+    }
+
     func test_wrapperNotifications_setExpectedIdentifiersAndDeepLinks() {
         let deliverer = RecordingNotificationRequestDeliverer()
         let service = NotificationService(
@@ -131,7 +169,7 @@ final class NotificationServiceTests: XCTestCase {
         service.sendNetworkAvailableNotification(peerCount: 2)
 
         XCTAssertEqual(deliverer.requests.count, 2)
-        XCTAssertEqual(deliverer.requests[0].content.userInfo["deeplink"] as? String, "bitchat://geohash/87yv")
+        XCTAssertEqual(deliverer.requests[0].content.userInfo["deeplink"] as? String, "wesh://geohash/87yv")
         XCTAssertTrue(deliverer.requests[0].identifier.hasPrefix("geo-activity-87yv-"))
         XCTAssertEqual(deliverer.requests[1].identifier, "network-available")
         XCTAssertEqual(deliverer.requests[1].content.interruptionLevel, .timeSensitive)
