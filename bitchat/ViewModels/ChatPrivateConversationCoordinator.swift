@@ -593,7 +593,8 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
-        guard let messageID = String(data: payload.data, encoding: .utf8) else { return }
+        guard context.admitsPrivateSender(convKey),
+              let messageID = String(data: payload.data, encoding: .utf8) else { return }
 
         let aliases = accountConversationAliases(for: convKey)
         let clearedRetainedMessage = convKey.noiseKey != nil
@@ -630,7 +631,8 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
-        guard let messageID = String(data: payload.data, encoding: .utf8) else { return }
+        guard context.admitsPrivateSender(convKey),
+              let messageID = String(data: payload.data, encoding: .utf8) else { return }
 
         let aliases = accountConversationAliases(for: convKey)
         let clearedRetainedMessage = convKey.noiseKey != nil

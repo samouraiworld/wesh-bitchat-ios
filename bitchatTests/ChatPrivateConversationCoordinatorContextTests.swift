@@ -397,6 +397,26 @@ struct ChatPrivateConversationCoordinatorContextTests {
     }
 
     @Test @MainActor
+    func deliveredAndReadAcksFromANonEnrolledSenderChangeNothing() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let convKey = PeerID(hexData: Data(repeating: 0xAD, count: 32))
+        let senderPubkey = "feedface00112233"
+        context.admitsSender = { _ in false }
+        context.privateChats[convKey] = [makeIncomingMessage(id: "mine-1", sender: "me")]
+        let before = context.privateChats[convKey]?.first?.deliveryStatus
+
+        coordinator.handleDelivered(NoisePayload(type: .delivered, data: Data("mine-1".utf8)),
+                                    senderPubkey: senderPubkey, convKey: convKey)
+        coordinator.handleReadReceipt(NoisePayload(type: .readReceipt, data: Data("mine-1".utf8)),
+                                      senderPubkey: senderPubkey, convKey: convKey)
+
+        #expect(context.privateChats[convKey]?.first?.deliveryStatus == before)
+        #expect(context.deliveryAckAttempts.isEmpty)
+        #expect(context.notifyUIChangedCount == 0)
+    }
+
+    @Test @MainActor
     func accountDMAcks_findShortIDMessageAndHandConversationToStable() async {
         let context = MockChatPrivateConversationContext()
         let coordinator = ChatPrivateConversationCoordinator(context: context)
