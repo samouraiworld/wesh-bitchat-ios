@@ -349,7 +349,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         LocalNicknameStore(keychain: keychain, defaults: userDefaults)
     }
     private var provisionalNickname: String?
+    #if os(iOS)
     private var nicknameProtectedDataObserver: AnyCancellable?
+    #endif
     // Location channel state (macOS supports manual geohash selection)
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
