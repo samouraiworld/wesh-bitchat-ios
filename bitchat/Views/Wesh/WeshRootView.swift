@@ -914,7 +914,8 @@ private struct WeshConversation: View {
     private var draftStatus: ComposerDraftStatus {
         composerDrafts.status(for: draftKey, displayedText: draft)
     }
-    private var canSend: Bool {
+    /// Each read waits on the identity manager queue: evaluate it once per body.
+    private var sendAvailable: Bool {
         let _ = peers.renderID
         return peerID.map { runtime.chatViewModel.canSendWeshPrivate(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic
     }
@@ -941,6 +942,7 @@ private struct WeshConversation: View {
 
     var body: some View {
         let displayedMessages = messages
+        let canSend = sendAvailable
         VStack(spacing: 0) {
             ScrollViewReader { scroll in
                 ScrollView {
