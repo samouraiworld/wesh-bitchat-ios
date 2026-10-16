@@ -101,7 +101,7 @@ struct WeshQRNpubTests {
     }
 
     @Test func storeAppliesOutcomesAndInboundResolvesOnlyAUniqueHolder() throws {
-        let store = WeshQRTrust(defaults: UserDefaults(suiteName: "wesh.qr.npub.\(UUID().uuidString)")!)
+        let store = WeshQRTrust()
         let theirs = try NostrIdentity.generate()
         let keyA = try #require(Data(hexString: noiseA))
         let keyB = try #require(Data(hexString: noiseB))
@@ -134,7 +134,7 @@ struct WeshQRNpubTests {
     }
 
     @Test func reviewFlagsSurviveLaterScansUntilSettled() throws {
-        let store = WeshQRTrust(defaults: UserDefaults(suiteName: "wesh.qr.flags.\(UUID().uuidString)")!)
+        let store = WeshQRTrust()
         let theirs = try NostrIdentity.generate()
         let keyA = try #require(Data(hexString: noiseA))
         func a() -> Contact? { store.contacts.first { $0.noiseKeyHex == noiseA } }
@@ -158,7 +158,7 @@ struct WeshQRNpubTests {
     }
 
     @Test func anEmptyNpubIsNeverRecorded() throws {
-        let store = WeshQRTrust(defaults: UserDefaults(suiteName: "wesh.qr.empty.\(UUID().uuidString)")!)
+        let store = WeshQRTrust()
         store.record(sessionKey: try #require(Data(hexString: noiseA)), nickname: "A", npub: "", npubProven: true)
         #expect(store.contacts.first?.npub == nil)
         #expect(store.contacts.first?.isNpubProven == false)

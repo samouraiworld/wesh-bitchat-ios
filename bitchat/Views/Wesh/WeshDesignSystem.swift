@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(iOS)
 import UIKit
+import UniformTypeIdentifiers
 #elseif os(macOS)
 import AppKit
 #endif
@@ -112,6 +113,60 @@ struct WeshSectionLabel: View {
     }
 }
 
+protocol WeshPasteboard: AnyObject {
+    var changeCount: Int { get }
+    func write(_ text: String, expiringAt date: Date)
+    func clear()
+}
+
+/// Copied messages stay on this device (no Universal Clipboard), expire
+/// quickly, and a panic wipe removes them unless the user copied something else since.
+@MainActor
+final class WeshClipboard {
+    static let lifetime: TimeInterval = 120
+    static let shared = WeshClipboard(pasteboard: SystemPasteboard())
+    private let pasteboard: WeshPasteboard
+    private let now: () -> Date
+    private var ownedChangeCount: Int?
+
+    init(pasteboard: WeshPasteboard, now: @escaping () -> Date = Date.init) {
+        self.pasteboard = pasteboard
+        self.now = now
+    }
+
+    func copy(_ text: String) {
+        pasteboard.write(text, expiringAt: now().addingTimeInterval(Self.lifetime))
+        ownedChangeCount = pasteboard.changeCount
+    }
+
+    func clearOwnedCopy() {
+        if let owned = ownedChangeCount, pasteboard.changeCount == owned { pasteboard.clear() }
+        ownedChangeCount = nil
+    }
+
+    private final class SystemPasteboard: WeshPasteboard {
+        #if os(iOS)
+        var changeCount: Int { UIPasteboard.general.changeCount }
+        func write(_ text: String, expiringAt date: Date) {
+            UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: text]],
+                                          options: [.localOnly: true, .expirationDate: date])
+        }
+        func clear() { UIPasteboard.general.items = [] }
+        #elseif os(macOS)
+        var changeCount: Int { NSPasteboard.general.changeCount }
+        func write(_ text: String, expiringAt date: Date) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+        func clear() { NSPasteboard.general.clearContents() }
+        #else
+        var changeCount: Int { 0 }
+        func write(_ text: String, expiringAt date: Date) {}
+        func clear() {}
+        #endif
+    }
+}
+
 /// Wesh ships on iPhone only; these shims keep the inherited macOS target building.
 enum WeshPlatform {
     #if os(iOS)
@@ -124,13 +179,8 @@ enum WeshPlatform {
     static let keyboardDidHide = keyboardWillShow
     #endif
 
-    static func copy(_ text: String) {
-        #if os(iOS)
-        UIPasteboard.general.string = text
-        #elseif os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        #endif
+    @MainActor static func copy(_ text: String) {
+        WeshClipboard.shared.copy(text)
     }
 }
 

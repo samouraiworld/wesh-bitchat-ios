@@ -1210,7 +1210,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicNetworkLifecycle = panicNetworkLifecycle
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
-            ?? WeshMeetingNoteStore(defaults: TestEnvironment.isRunningTests ? nil : .standard)
+            ?? (TestEnvironment.isRunningTests
+                ? WeshMeetingNoteStore()
+                : WeshMeetingNoteStore(storage: .liveMeetingNote(), legacyDefaults: .standard, saveDelay: 0.4))
         self.groupStore = groupStore ?? GroupStore(keychain: keychain)
         self.idBridge = idBridge
         self.identityManager = identityManager
@@ -1446,9 +1448,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         return WeshQRTrust.shared.remove(sessionKey: noiseKey)
     }
 
-    func removeAllWeshContacts() {
+    /// False when the wipe was not confirmed; the list stays empty in RAM and
+    /// the wipe is retried on the next load.
+    @discardableResult
+    func removeAllWeshContacts() -> Bool {
         verificationCoordinator.cancelAllQRVerifications()
-        WeshQRTrust.shared.clear()
+        return WeshQRTrust.shared.clear()
     }
 
     /// Sends a 👋 to the mesh channel regardless of the active channel.
@@ -1759,10 +1764,20 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Clear favorites and peer mappings
         // Clear through SecureIdentityStateManager instead of directly
         identityManager.clearAllIdentityData()
+        // The reset path offered for an unreadable cache relies on this: the
+        // wipe commits only once an empty cache is confirmed writable again.
+        let identityCacheWipeCompleted = identityManager.isPersistenceAvailable
         peerIdentityStore.clearAll()
-        WeshQRTrust.shared.clear()
-        UserDefaults.standard.removeObject(forKey: "wesh.publicDisclosureAccepted.v1")
+        // A scan pending from before the wipe must not complete under the new
+        // identity and re-enroll the contact that was just erased.
+        verificationCoordinator.cancelAllQRVerifications()
+        let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
+        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
+        panicPersistentStoreWipes.notifications()
+        panicPersistentStoreWipes.pasteboard()
         locationPresenceStore.reset()
         publicRateLimiter.reset()
 
@@ -1862,7 +1877,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [networkWipeCompleted, keychainWipeCompleted, meetingNoteWipeCompleted, courierWipeCompleted,
+            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, meetingNoteWipeCompleted,
+                qrContactsWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
                 groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
                 sharedContentWipeCompleted].allSatisfy({ $0 }) {
