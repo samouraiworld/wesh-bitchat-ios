@@ -1257,7 +1257,8 @@ private struct WeshMessageBubble: View {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
                 if !own && (!privateChat || message.sender == "system") { Text(message.sender == "system" ? "Information" : WeshDisplayName.clean(message.sender, fallback: "Participant")).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
-                Text(message.content).font(.body).textSelection(.enabled)
+                // No system text selection: it would copy to the synced, non-expiring pasteboard.
+                Text(message.content).font(.body)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) { metadata }
                     VStack(alignment: .leading, spacing: 4) { metadata }

@@ -587,6 +587,17 @@ struct WeshPrivateDataAtRestTests {
     /// System text selection would copy to the general pasteboard: plain,
     /// synced through Universal Clipboard and never expiring. Wesh copies only
     /// through its own local, expiring « Copier le message ».
+    @Test func weshViewsNeverEnableSystemTextSelection() throws {
+        let views = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("bitchat/Views/Wesh")
+        let files = try FileManager.default.contentsOfDirectory(at: views, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty)
+        for file in files {
+            #expect(!(try String(contentsOf: file, encoding: .utf8)).contains(".textSelection(.enabled)"), "\(file.lastPathComponent)")
+        }
+    }
+
     @Test func contactNicknamesAreSanitizedWhenRecordedAndWhenMigrated() throws {
         #expect(WeshDisplayName.clean("  Nora  ") == "Nora")
         #expect(WeshDisplayName.clean("No\u{202E}ra") == "Contact")
