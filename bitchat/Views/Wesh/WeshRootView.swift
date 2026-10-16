@@ -613,6 +613,7 @@ enum WeshDraftStoragePresentation {
 struct WeshComposerFeedbackState: Sendable {
     enum FocusTarget: Equatable, Sendable { case feedback, composer }
     struct FocusRequest: Equatable, Sendable {
+        // periphery:ignore - read only via the synthesized Equatable
         let revision: UInt64
         let target: FocusTarget
     }

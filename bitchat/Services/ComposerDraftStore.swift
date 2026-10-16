@@ -95,6 +95,7 @@ enum ComposerDraftStore {
 final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     struct Change {
         let generation: UInt64
+        // periphery:ignore - part of the published change event
         let keys: Set<ComposerDraftStore.Key>
         let restoredRevisions: [ComposerDraftStore.Key: UInt64]
         let reset: Bool

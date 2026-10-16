@@ -462,6 +462,7 @@ final class BLEService: NSObject {
 
     // MARK: - Gossip Sync
     private var gossipSyncManager: GossipSyncManager?
+    // periphery:ignore - retains the delegate; GossipSyncManager.delegate is weak
     private var gossipDelegate: GossipDelegate?
     private let requestSyncManager = RequestSyncManager()
     
