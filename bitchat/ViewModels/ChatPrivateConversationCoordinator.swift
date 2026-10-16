@@ -117,10 +117,15 @@ protocol ChatPrivateConversationContext: AnyObject {
     /// verified contact: it must not enter the conversation store, notify,
     /// or be acknowledged as read.
     func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool
+    /// False when only QR-verified contacts may reach this device privately
+    /// and this sender is not one. Its traffic is dropped before any side
+    /// effect: no store, no favorite update, no acknowledgement.
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool
 }
 
 extension ChatPrivateConversationContext {
     func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool { false }
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool { true }
 }
 
 extension ChatViewModel: ChatPrivateConversationContext {
@@ -514,6 +519,8 @@ final class ChatPrivateConversationCoordinator {
         if context.isNostrBlocked(pubkeyHexLowercased: senderPubkey) {
             return
         }
+        // Wesh: only an npub bound to a QR-verified contact gets an ack or a store.
+        guard context.admitsPrivateSender(convKey) else { return }
 
         guard markInboundGeoDMSeen(messageId) else { return }
 
@@ -673,6 +680,8 @@ final class ChatPrivateConversationCoordinator {
         }
 
         if message.content.hasPrefix("[FAVORITED]") || message.content.hasPrefix("[UNFAVORITED]") {
+            // A marker can bind an npub and post a line: QR-verified senders only.
+            guard context.admitsPrivateSender(peerID) else { return }
             handleFavoriteNotification(message.content, from: peerID, senderNickname: message.sender)
             return
         }

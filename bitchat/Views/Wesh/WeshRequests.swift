@@ -131,14 +131,32 @@ extension ChatViewModel {
     @MainActor
     func divertUnverifiedPrivateMessage(_ message: BitchatMessage, from peerID: PeerID) -> Bool {
         guard weshPrivatePolicyEnabled else { return false }
-        let key = peerID.noiseKey ?? noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID))
-        guard let key, key.count == 32 else { return true } // unidentifiable: drop
+        guard let key = weshSenderKey(peerID) else { return true } // unidentifiable: drop
         let fingerprint = key.sha256Fingerprint()
-        if WeshQRTrust.shared.fingerprints.contains(fingerprint),
-           peerIdentityStore.isVerified(fingerprint) { return false }
+        if isWeshEnrolled(fingerprint) { return false }
         if identityManager.isBlocked(fingerprint: fingerprint) { return true }
         WeshInboundRequests.shared.add(message, from: key)
         return true
+    }
+
+    /// Private traffic other than a plain message (favorite markers, Nostr
+    /// DMs) is admitted only from a QR-verified contact, else dropped.
+    @MainActor
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool {
+        guard weshPrivatePolicyEnabled else { return true }
+        guard let key = weshSenderKey(peerID) else { return false }
+        return isWeshEnrolled(key.sha256Fingerprint())
+    }
+
+    @MainActor
+    private func weshSenderKey(_ peerID: PeerID) -> Data? {
+        let key = peerID.noiseKey ?? noiseSessionPublicKeyData(for: getShortIDForNoiseKey(peerID))
+        return key?.count == 32 ? key : nil
+    }
+
+    @MainActor
+    private func isWeshEnrolled(_ fingerprint: String) -> Bool {
+        WeshQRTrust.shared.fingerprints.contains(fingerprint) && peerIdentityStore.isVerified(fingerprint)
     }
 
     /// Reporting stays on this phone: it blocks the author and removes their

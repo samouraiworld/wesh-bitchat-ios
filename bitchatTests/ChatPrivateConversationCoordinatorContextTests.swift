@@ -156,6 +156,9 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
 
     // Nostr identity
     var blockedNostrPubkeys: Set<String> = []
+    var admitsSender: (PeerID) -> Bool = { _ in true }
+
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool { admitsSender(peerID) }
     var displayNamesByPubkey: [String: String] = [:]
 
     func isNostrBlocked(pubkeyHexLowercased: String) -> Bool {
@@ -992,5 +995,57 @@ struct ChatPrivateConversationCoordinatorContextTests {
 
         #expect(context.routedPrivateMessages.map(\.content) == ["hello?"])
         #expect(context.privateChats[peerID]?.first?.deliveryStatus == .sending)
+    }
+
+    @Test @MainActor
+    func favoriteMarkerFromANonEnrolledSenderIsDroppedBeforeAnySideEffect() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let peerID = PeerID(hexData: Data(repeating: 0xAB, count: 32))
+        context.admitsSender = { _ in false }
+
+        coordinator.handlePrivateMessage(makeIncomingMessage(id: "fav-1", sender: "Pseudo",
+            content: "[FAVORITED]:npub1synthetic", senderPeerID: peerID))
+
+        #expect(context.peerFavoritedUsUpdates.isEmpty)
+        #expect(context.meshOnlySystemMessages.isEmpty)
+        #expect(context.privateChats.isEmpty)
+
+        context.admitsSender = { _ in true }
+        coordinator.handlePrivateMessage(makeIncomingMessage(id: "fav-2", sender: "Pseudo",
+            content: "[FAVORITED]:npub1synthetic", senderPeerID: peerID))
+        #expect(context.peerFavoritedUsUpdates.map(\.nostrPublicKey) == ["npub1synthetic"])
+    }
+
+    @Test @MainActor
+    func nostrMessageFromANonEnrolledSenderGetsNoAckAndIsNotStored() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let convKey = PeerID(hexData: Data(repeating: 0xAC, count: 32))
+        let senderPubkey = "feedface00112233"
+        context.admitsSender = { _ in false }
+        context.selectedPrivateChatPeer = convKey
+        for (id, content) in [("nostr-1", "Salut ?"), ("nostr-fav", "[FAVORITED]:npub1synthetic")] {
+            let payload = NoisePayload(type: .privateMessage,
+                                       data: PrivateMessagePacket(messageID: id, content: content).encode()!)
+            coordinator.handlePrivateMessage(payload, senderPubkey: senderPubkey, convKey: convKey,
+                                             id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
+        }
+
+        #expect(context.geoDeliveryAcks.isEmpty)
+        #expect(context.geoReadReceipts.isEmpty)
+        #expect(context.sentGeoDeliveryAcks.isEmpty)
+        #expect(context.privateChats.isEmpty)
+        #expect(context.privateMessageNotifications.isEmpty)
+        #expect(context.peerFavoritedUsUpdates.isEmpty)
+
+        // The dropped copy did not consume the dedup slot.
+        context.admitsSender = { _ in true }
+        let payload = NoisePayload(type: .privateMessage,
+                                   data: PrivateMessagePacket(messageID: "nostr-1", content: "Salut ?").encode()!)
+        coordinator.handlePrivateMessage(payload, senderPubkey: senderPubkey, convKey: convKey,
+                                         id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
+        #expect(context.geoDeliveryAcks.map(\.messageID) == ["nostr-1"])
+        #expect(context.privateChats[convKey]?.map(\.id) == ["nostr-1"])
     }
 }

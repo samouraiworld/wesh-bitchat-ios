@@ -924,6 +924,17 @@ struct WeshNativeUITests {
         #expect(requests.requests.contains { $0.id == newcomer.sha256Fingerprint() })
     }
 
+    @Test @MainActor func onlyQRVerifiedSendersAreAdmittedForPrivateTraffic() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(fixture.vm.admitsPrivateSender(fixture.peer))
+            #expect(fixture.vm.admitsPrivateSender(fixture.shortID))
+            #expect(!fixture.vm.admitsPrivateSender(PeerID(str: "nostr_abcdef12")))
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            #expect(!fixture.vm.admitsPrivateSender(fixture.peer))
+            #expect(!fixture.vm.admitsPrivateSender(fixture.shortID))
+        }
+    }
+
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
         #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
         #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")
