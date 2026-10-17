@@ -28,6 +28,10 @@ struct PaveExchangeScreen: View {
     let progress: PaveExchangeProgress
     var camera: Camera = .live
     let onScan: (String) -> Void
+    /// What the last scan came to, when it needs words: invalid, your own code, not saved…
+    var notice: String?
+    /// « Autre méthode »: a link pasted after comparing it in person. Nil hides it.
+    var onPaste: ((String) -> Void)?
     /// Called once, on « Ouvrir la discussion »: never by a timer.
     let onComplete: () -> Void
     let onClose: () -> Void
@@ -42,6 +46,8 @@ struct PaveExchangeScreen: View {
     @State private var latch = PaveCompletionLatch()
     @State private var myFingerprint: String?
     @State private var contactFingerprint: String?
+    @State private var pasted = ""
+    @FocusState private var pasteFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -61,8 +67,21 @@ struct PaveExchangeScreen: View {
                     successCard
                 } else {
                     scanner
+                    if let notice {
+                        Text(notice)
+                            .paveText(.label)
+                            .foregroundStyle(theme[.ink])
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    if let onPaste { otherMethod(onPaste) }
                 }
                 checkmarks
+                // The checks follow what reached this phone; only your own scan proves who is in front of you.
+                Text(PaveCopy.text("pave.exchange.inPerson"))
+                    .paveText(.caption)
+                    .foregroundStyle(theme[.inkMuted])
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, PaveSpace.s4)
             .padding(.bottom, PaveSpace.s8)
@@ -198,6 +217,37 @@ struct PaveExchangeScreen: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PaveCopy.text("pave.exchange.cameraA11y"))
+    }
+
+    private func otherMethod(_ verify: @escaping (String) -> Void) -> some View {
+        DisclosureGroup(PaveCopy.text("pave.exchange.otherMethod")) {
+            VStack(alignment: .leading, spacing: PaveSpace.s3) {
+                Text(PaveCopy.text("pave.exchange.pasteHelp"))
+                    .paveText(.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(theme[.inkMuted])
+                TextField(PaveCopy.text("pave.exchange.pasteLabel"), text: $pasted, axis: .vertical)
+                    .paveText(.body)
+                    .lineLimit(2...5)
+                    .focused($pasteFocused)
+                    .autocorrectionDisabled()
+                    .weshNoAutocapitalization()
+                    .padding(PaveSpace.s3)
+                    .overlay(RoundedRectangle(cornerRadius: PaveRadius.control)
+                        .strokeBorder(theme[.lineStrong], lineWidth: PaveStroke.control))
+                    .accessibilityLabel(PaveCopy.text("pave.exchange.pasteLabel"))
+                Button(PaveCopy.text("pave.exchange.pasteVerify")) {
+                    pasteFocused = false
+                    verify(pasted)
+                }
+                .buttonStyle(.paveSecondary)
+                .disabled(pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.top, PaveSpace.s2)
+        }
+        .paveText(.label)
+        .tint(theme[.ink])
+        .foregroundStyle(theme[.ink])
     }
 
     private func blockedCard(text: String, showsSettings: Bool) -> some View {

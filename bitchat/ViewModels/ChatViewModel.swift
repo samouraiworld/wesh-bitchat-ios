@@ -1502,6 +1502,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         verificationCoordinator.qrAttemptNonce(for: noiseKey)
     }
 
+    func weshScannedMyCode(noiseKey: Data, since: Date) -> Bool {
+        verificationCoordinator.scannedMyCode(noiseKey: noiseKey, since: since)
+    }
+
     @discardableResult
     func removeWeshContact(for noiseKey: Data) -> Bool {
         verificationCoordinator.cancelQRVerification(for: noiseKey)
