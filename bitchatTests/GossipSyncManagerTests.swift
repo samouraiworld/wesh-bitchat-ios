@@ -1065,7 +1065,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 1
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
         let delegate = RecordingDelegate()
@@ -1097,7 +1096,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 1
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         config.fragmentCapacity = 5
         // A tight filter (about 28 IDs) so the flood would overflow it.
