@@ -493,6 +493,26 @@ struct MessageRouterTests {
     }
 
     @Test @MainActor
+    func sendReadReceipt_neverReportsAMediaPlaceholderRead() async {
+        let peerID = PeerID(str: "0000000000000003")
+        let transport = MockTransport()
+        transport.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [transport])
+        let placeholderID = UnsupportedPrivateMedia.messageID(
+            payload: Data([0x01]), senderPeerID: peerID, recipientPeerID: transport.myPeerID
+        )
+
+        let done = router.sendReadReceipt(
+            ReadReceipt(originalMessageID: placeholderID, readerID: transport.myPeerID, readerNickname: "Me"),
+            to: peerID
+        )
+
+        // Settled, so nothing retries it, and nothing reaches a transport.
+        #expect(done)
+        #expect(transport.sentReadReceipts.isEmpty)
+    }
+
+    @Test @MainActor
     func sendFavoriteNotification_usesConnectedOrReachable() async {
         let peerID = PeerID(str: "0000000000000004")
         let transport = MockTransport()

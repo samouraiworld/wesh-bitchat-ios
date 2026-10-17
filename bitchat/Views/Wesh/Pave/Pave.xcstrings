@@ -2008,6 +2008,23 @@
         }
       }
     },
+    "pave.media.unsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsupported media"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Média non pris en charge"
+          }
+        }
+      }
+    },
     "pave.name.reserved" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -649,16 +649,7 @@ struct AppArchitectureTests {
 
         locationManager.select(.mesh)
         let locationChannelsModel = LocationChannelsModel(manager: locationManager)
-        let privateConversationModel = PrivateConversationModel(
-            chatViewModel: viewModel,
-            conversations: viewModel.conversations,
-            locationChannelsModel: locationChannelsModel
-        )
-        let uiModel = ConversationUIModel(
-            chatViewModel: viewModel,
-            privateConversationModel: privateConversationModel,
-            conversations: viewModel.conversations
-        )
+        let uiModel = ConversationUIModel(chatViewModel: viewModel)
         let geohashChannel = ChannelID.location(GeohashChannel(level: .city, geohash: "9q8yy"))
         defer {
             locationManager.select(.mesh)
@@ -672,24 +663,18 @@ struct AppArchitectureTests {
             viewModel.activeChannel == geohashChannel &&
             uiModel.currentNickname == "builder" &&
             uiModel.showAutocomplete &&
-            uiModel.autocompleteSuggestions == ["alice"] &&
-            !uiModel.canSendMediaInCurrentContext
+            uiModel.autocompleteSuggestions == ["alice"]
         }
 
         #expect(viewModel.activeChannel == geohashChannel)
         #expect(uiModel.currentNickname == "builder")
         #expect(uiModel.showAutocomplete)
         #expect(uiModel.autocompleteSuggestions == ["alice"])
-        #expect(!uiModel.canSendMediaInCurrentContext)
 
         locationChannelsModel.select(ChannelID.mesh)
-        await waitUntil {
-            viewModel.activeChannel == ChannelID.mesh &&
-            uiModel.canSendMediaInCurrentContext
-        }
+        await waitUntil { viewModel.activeChannel == ChannelID.mesh }
 
         #expect(viewModel.activeChannel == ChannelID.mesh)
-        #expect(uiModel.canSendMediaInCurrentContext)
 
         uiModel.sendMessage("hello mesh")
 

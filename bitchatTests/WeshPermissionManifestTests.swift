@@ -1,9 +1,10 @@
 import Foundation
 import Testing
 
-/// The V1 has no voice: the app must not declare a microphone purpose
-/// string or the macOS microphone entitlement, or the stores would show a
-/// permission the app never uses.
+/// The V1 has no voice and no media: the app must not declare a microphone
+/// or photo-library purpose string, nor the macOS microphone, file or
+/// picture entitlements, or the stores would show a permission the app
+/// never uses.
 @Suite("Wesh permission manifest")
 struct WeshPermissionManifestTests {
     /// Under SwiftPM, Bundle.main is the test runner, so read from source.
@@ -21,23 +22,33 @@ struct WeshPermissionManifestTests {
         return try #require(object as? [String: Any], "\(relativePath) is not a dictionary")
     }
 
-    @Test func infoPlistDeclaresNoMicrophonePurpose() throws {
+    @Test func infoPlistDeclaresNoMicrophoneOrPhotoPurpose() throws {
         let plist = try propertyList("Info.plist")
         #expect(plist["NSMicrophoneUsageDescription"] == nil)
-        // Guard against a silently empty read passing the check above.
+        #expect(plist["NSPhotoLibraryUsageDescription"] == nil)
+        #expect(plist["NSPhotoLibraryAddUsageDescription"] == nil)
+        // Guard against a silently empty read passing the checks above.
         #expect(plist["NSCameraUsageDescription"] != nil)
     }
 
     @Test(arguments: ["en.lproj/InfoPlist.strings", "fr.lproj/InfoPlist.strings"])
-    func localizedInfoPlistDeclaresNoMicrophonePurpose(_ relativePath: String) throws {
+    func localizedInfoPlistDeclaresNoMicrophoneOrPhotoPurpose(_ relativePath: String) throws {
         let strings = try propertyList(relativePath)
         #expect(strings["NSMicrophoneUsageDescription"] == nil)
+        #expect(strings["NSPhotoLibraryUsageDescription"] == nil)
+        #expect(strings["NSPhotoLibraryAddUsageDescription"] == nil)
         #expect(strings["NSCameraUsageDescription"] != nil)
     }
 
-    @Test func macOSEntitlementsRequestNoMicrophone() throws {
+    @Test func macOSEntitlementsRequestNoMicrophoneFilesOrPictures() throws {
         let entitlements = try propertyList("bitchat-macOS.entitlements")
         #expect(entitlements["com.apple.security.device.microphone"] == nil)
+        #expect(entitlements["com.apple.security.files.user-selected.read-only"] == nil)
+        #expect(entitlements["com.apple.security.files.user-selected.read-write"] == nil)
+        #expect(entitlements["com.apple.security.assets.pictures.read-only"] == nil)
+        #expect(entitlements["com.apple.security.assets.pictures.read-write"] == nil)
+        // The QR scanner keeps the camera.
+        #expect(entitlements["com.apple.security.device.camera"] as? Bool == true)
         #expect(entitlements["com.apple.security.device.bluetooth"] as? Bool == true)
     }
 }

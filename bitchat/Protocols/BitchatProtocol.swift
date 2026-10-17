@@ -84,14 +84,14 @@ enum NoisePayloadType: UInt8 {
     // BitChat live voice. Wesh has no live voice: the value stays reserved
     // so a BitChat peer's frame decodes to a known type and is dropped unread.
     case voiceFrame = 0x08
-    // Finalized private media. `0x20` is the value already deployed by the
-    // Android client. The complete BitchatFilePacket is encrypted inside
-    // Noise before the outer noiseEncrypted packet is fragmented.
+    // BitChat private media (a file TLV inside Noise). Wesh sends none; one
+    // from an admitted contact is shown as a placeholder line and its bytes
+    // are dropped. The value stays reserved for compatibility.
     case privateFile = 0x20
     // Versioned peer state authenticated by the surrounding Noise session.
     // This is intentionally distinct from the public announce: announce
-    // capabilities are discovery hints, while this payload proves possession
-    // of the advertised Noise static key before downgrade state is pinned.
+    // capabilities are discovery hints, while this payload binds the peer's
+    // announcement signing key to its Noise static key.
     case authenticatedPeerState = 0x21
     // Verification (QR-based OOB binding)
     case verifyChallenge = 0x10     // Verification challenge

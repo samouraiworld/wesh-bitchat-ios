@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 import BitFoundation
@@ -307,53 +308,35 @@ struct NoiseEncryptionServiceTests {
         #expect(alice.sessionGeneration(for: bobPeerID) != originalGeneration)
     }
 
-    @Test("Large private-file payloads use the bounded Noise extension")
-    func largePrivateFileNoiseRoundTrip() throws {
-        let alice = NoiseEncryptionService(keychain: MockKeychain())
+    @Test("A BitChat peer's large private file still decrypts, and Wesh cannot send one")
+    func largeInboundPrivateFileDecryptsWithoutSendPath() throws {
+        // A BitChat client sends private media as one Noise message above the
+        // 64 KiB ordinary ceiling. Wesh shows only a placeholder for it, but
+        // decryption must still succeed: a failure would tear the session down.
+        let aliceKey = Curve25519.KeyAgreement.PrivateKey()
+        let alice = NoiseSessionManager(localStaticKey: aliceKey, keychain: MockKeychain())
         let bob = NoiseEncryptionService(keychain: MockKeychain())
-        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let alicePeerID = PeerID(publicKey: aliceKey.publicKey.rawRepresentation)
         let bobPeerID = PeerID(publicKey: bob.getStaticPublicKeyData()!)
-        try establishSessions(alice: alice, bob: bob)
+        let message1 = try alice.initiateHandshake(with: bobPeerID)
+        let message2 = try #require(try bob.processHandshakeMessage(from: alicePeerID, message: message1))
+        let message3 = try #require(try alice.handleIncomingHandshake(from: bobPeerID, message: message2))
+        _ = try bob.processHandshakeMessage(from: alicePeerID, message: message3)
+        #expect(bob.hasEstablishedSession(with: alicePeerID))
 
-        let content = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x51, count: 96 * 1024)
-        let file = BitchatFilePacket(
-            fileName: "large-private.pdf",
-            fileSize: UInt64(content.count),
-            mimeType: "application/pdf",
-            content: content
-        )
-        let typedPayload = try #require(BLENoisePayloadFactory.privateFile(file))
+        let typedPayload = Data([NoisePayloadType.privateFile.rawValue])
+            + Data(repeating: 0x51, count: 96 * 1024)
         #expect(typedPayload.count > NoiseSecurityConstants.maxMessageSize)
-        #expect(typedPayload.first == NoisePayloadType.privateFile.rawValue)
-        #expect(
-            typedPayload.count <= NoiseSecurityConstants.maxPrivateFilePlaintextSize,
-            "typedBytes=\(typedPayload.count) limit=\(NoiseSecurityConstants.maxPrivateFilePlaintextSize)"
-        )
+        #expect(typedPayload.count <= NoiseSecurityConstants.maxPrivateFilePlaintextSize)
 
-        do {
-            _ = try alice.encrypt(typedPayload, for: bobPeerID)
-            Issue.record("Ordinary Noise payload path must retain its 64 KiB ceiling")
-        } catch NoiseSecurityError.messageTooLarge {
-            // Expected: only the purpose-specific private-file API may extend it.
-        }
+        let ciphertext = try alice.encrypt(typedPayload, for: bobPeerID)
+        #expect(try bob.decrypt(ciphertext, from: alicePeerID) == typedPayload)
+        #expect(bob.hasEstablishedSession(with: alicePeerID))
 
-        let ciphertext: Data
-        do {
-            ciphertext = try alice.encryptPrivateFilePayload(typedPayload, for: bobPeerID)
-        } catch {
-            Issue.record("Private-file encryption failed: \(error)")
-            return
+        // The only Wesh send path keeps the ordinary ceiling.
+        #expect(throws: NoiseSecurityError.messageTooLarge) {
+            _ = try bob.encrypt(typedPayload, for: alicePeerID)
         }
-        let decrypted: Data
-        do {
-            decrypted = try bob.decrypt(ciphertext, from: alicePeerID)
-        } catch {
-            Issue.record("Private-file decryption failed: \(error); ciphertextBytes=\(ciphertext.count)")
-            return
-        }
-
-        #expect(ciphertext.range(of: content) == nil)
-        #expect(decrypted == typedPayload)
     }
 
     @Test("Concurrent BLE starts preserve one ordinary attempt")

@@ -192,16 +192,11 @@ private final class MockChatPeerIdentityContext: ChatPeerIdentityContext {
 
     // Favorites
     var favoriteRelationshipsByNoiseKey: [Data: FavoritesPersistenceService.FavoriteRelationship] = [:]
-    var favoriteRelationshipsByPeerID: [PeerID: FavoritesPersistenceService.FavoriteRelationship] = [:]
     private(set) var addedFavorites: [(noiseKey: Data, nostrPublicKey: String?, nickname: String)] = []
     private(set) var removedFavorites: [Data] = []
 
     func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? {
         favoriteRelationshipsByNoiseKey[noiseKey]
-    }
-
-    func favoriteRelationship(forPeerID peerID: PeerID) -> FavoritesPersistenceService.FavoriteRelationship? {
-        favoriteRelationshipsByPeerID[peerID]
     }
 
     func addFavorite(noiseKey: Data, nostrPublicKey: String?, nickname: String) {
