@@ -20,8 +20,13 @@ enum WeshWelcome {
 
     /// Whether Bluetooth may start: never in Wesh before the welcome (first launch, or after a
     /// wipe, including one resumed at launch), always outside Wesh.
-    static func meshMayStart(weshActive: Bool = WeshMode.isActive, in defaults: UserDefaults = .standard) -> Bool {
+    static func meshMayStart(weshActive: Bool, in defaults: UserDefaults = .standard) -> Bool {
         !weshActive || isDone(in: defaults)
+    }
+
+    @MainActor
+    static func meshMayStart() -> Bool {
+        meshMayStart(weshActive: WeshMode.isActive)
     }
 
     /// The welcome keeps a nickname someone chose in an earlier build; the « anon1234 » stand-in
