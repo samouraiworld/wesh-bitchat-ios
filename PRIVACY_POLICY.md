@@ -26,27 +26,61 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 - **Android:** Wesh excludes all of its data from Google backups and from transfers to a new phone.
 - **iPhone:** Wesh's files and keys are excluded from iCloud and computer backups. These backups contain none of your messages, contacts, keys or nickname.
 - They may contain:
-  - the app's settings (appearance, whether Internet mode is on, notices accepted);
-  - a daily count of the phones you passed, as hashes, without nicknames;
+  - the app's settings (appearance, notices accepted<!-- INTERNET:START -->, whether Internet mode is on<!-- INTERNET:END -->);
+  - today's count of the phones you passed: for each one, a hash of its peer ID, stored with the secret value used to compute it, and the time you last met. Because peer IDs are stable, someone who has this backup and a phone's peer ID can check that you passed that phone that day;
   - for at most 24 hours, a text you shared to Wesh and have not used yet.
 - Restoring a backup therefore restores neither your identity, nor your contacts, nor your conversations.
 
 ## 5. What others see over Bluetooth
 - Any Bluetooth device in range can tell that a phone runs Wesh or BitChat.
-- While Wesh is running, your phone regularly announces to phones in range:
+- While Wesh is running, including in the background, your phone regularly announces to phones in range:
   - your **nickname**;
   - your **peer ID** and your **public keys**;
   - the features your app supports;
   - the IDs of the phones it is directly linked to.
-- These announcements are relayed from phone to phone over a few hops.
+- These announcements are relayed from phone to phone, over at most 7 hops.
+- On Android, Wesh runs in the background by default and starts again after the phone restarts, without you opening it. No setting can turn this off today. To stop the announcements, turn Bluetooth off.
 - **Your peer ID and public keys do not change until you use the emergency erase.** A device that records them can recognise your phone from one encounter to the next and see which phones it was linked to.
 - Signal strength lets others estimate how far away your phone is.
 - **Relaying:** your messages may pass through third-party phones (Wesh or BitChat). Each relaying phone sees the sender's and recipient's IDs, the time and the size of the message. It does not see the content of a private message, which is end-to-end encrypted.
 - **The local room is public.** Every Wesh and BitChat user in range can read, keep and relay it.
 - **Private messages:** only with contacts verified by QR code. They are end-to-end encrypted: only your contact can read them.
 
+## 6. Permissions
+- **Bluetooth:** talk to nearby phones.
+- **Camera:** scan QR codes. No image is stored or sent.
+- **Notifications:** alert you to new messages. They are created on the phone, with no remote push service.
+- **Location (Android 11 and earlier only):** Android requires this permission to scan for Bluetooth devices. Wesh reads no location and sends none. On Android 12 and later, and on iPhone, Wesh does not ask for it.
+- Wesh uses neither the microphone, nor the photo library, nor the phone's contacts.
+
+## 7. Reports and support
+- **Reporting someone:** Wesh blocks them on your phone, then prepares an email to `support@samourai.coop` in your mail app. You review it and choose whether to send it.
+- This email holds data about the reported person: their nickname, their short fingerprint and, for a local-room message, its text. It also holds the reason and where you met them (local room, request or contact). It never holds your private messages, your keys or your location.
+- **When you write to us,** we receive your email address and whatever you choose to write. Your email provider also processes that email.
+- Purpose: to reply and handle the report (legitimate interest: service safety).
+- Retention: as long as needed to handle your request, then deletion.
+
+## 8. Emergency erase
+- **Réglages → Tout effacer** (Settings → Erase everything), held for three seconds.
+- It erases from this phone: identity and keys, nickname, contacts, conversations, pending messages, drafts, meeting note, settings and notifications<!-- INTERNET:START -->, as well as the Internet key and Tor's files; Internet mode is turned off<!-- INTERNET:END -->.
+- A new identity is then created, with a new peer ID and new keys.
+- It does not erase what others have received or recorded (local-room messages, Bluetooth announcements<!-- INTERNET:START -->, copies on Nostr relays<!-- INTERNET:END -->), nor iPhone backups already made (§4).
+- Uninstalling the app also deletes its data. On iPhone, keys left in the Keychain are erased at the next install.
+
+## 9. Your rights
+- You have the GDPR rights of access, rectification, erasure, objection and restriction.
+- The app sends nothing to Samouraï Coop. You manage the data on your phone directly in the app (edit nickname, erase).
+- Samouraï Coop only holds the emails sent to it (§7). A report may contain another person's nickname, short fingerprint and a public text. To exercise your rights over these emails, including if you were reported: `support@samourai.coop`.
+- You may complain to the CNIL (www.cnil.fr) or your local data protection authority.
+
+## 10. Minimum age
+Wesh is for people aged **16 and over**.
+
+## 11. Changes
+Any change is posted on this page with its date. Significant changes are flagged in the release notes.
+
 <!-- INTERNET:START -->
-## 6. Internet mode (optional, off by default)
+## 12. Internet mode (optional, off by default)
 - You turn it on in **Connexion**. The emergency erase turns it off.
 - It is used only for private messages to verified contacts whose QR code carries an Internet key.
 - Messages go through the **Tor** network, then through three public **Nostr** relays that Wesh does not run: `relay.damus.io`, `relay.primal.net` and `offchain.pub`. Wesh uses no other relay.
@@ -57,39 +91,6 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 - Samouraï Coop neither controls nor receives this data.
 - On the phone, Wesh keeps your Internet key and Tor's files. The emergency erase deletes them; a new key is created afterwards.
 <!-- INTERNET:END -->
-
-## 7. Permissions
-- **Bluetooth:** talk to nearby phones.
-- **Camera:** scan QR codes. No image is stored or sent.
-- **Notifications:** alert you to new messages. They are created on the phone, with no remote push service.
-- **Location (Android 11 and earlier only):** Android requires this permission to scan for Bluetooth devices. Wesh reads no location and sends none. On Android 12 and later, and on iPhone, Wesh does not ask for it.
-- Wesh uses neither the microphone, nor the photo library, nor the phone's contacts.
-
-## 8. Reports and support
-- **Reporting someone:** Wesh blocks them on your phone, then prepares an email to `support@samourai.coop` in your mail app. You review it and choose whether to send it.
-- This email holds the person's nickname and short fingerprint, the reason, where you met them (local room, request or contact) and, for a local-room message, its text. It never holds your private messages, your keys or your location.
-- **When you write to us,** we receive your email address and whatever you choose to write. Your email provider also processes that email.
-- Purpose: to reply and handle the report (legitimate interest: service safety).
-- Retention: as long as needed to handle your request, then deletion.
-
-## 9. Emergency erase
-- **Réglages → Tout effacer** (Settings → Erase everything), held for three seconds.
-- It erases from this phone: identity and keys, nickname, contacts, conversations, pending messages, drafts, meeting note, settings and notifications<!-- INTERNET:START -->, as well as the Internet key and Tor's files; Internet mode is turned off<!-- INTERNET:END -->.
-- A new identity is then created, with a new peer ID and new keys.
-- It does not erase what others have received or recorded (local-room messages, Bluetooth announcements<!-- INTERNET:START -->, copies on Nostr relays<!-- INTERNET:END -->), nor iPhone backups already made (§4).
-- Uninstalling the app also deletes its data. On iPhone, keys left in the Keychain are erased at the next install.
-
-## 10. Your rights
-- You have the GDPR rights of access, rectification, erasure, objection and restriction.
-- Samouraï Coop holds no data from the app, so you exercise these rights directly in the app (edit nickname, erase).
-- For support correspondence: `support@samourai.coop`.
-- You may complain to the CNIL (www.cnil.fr) or your local data protection authority.
-
-## 11. Minimum age
-Wesh is for people aged **16 and over**.
-
-## 12. Changes
-Any change is posted on this page with its date. Significant changes are flagged in the release notes.
 
 ---
 
