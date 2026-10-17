@@ -80,7 +80,7 @@ struct PaveReportMail: Equatable {
             PaveCopy.text("pave.report.mail.nickname", PaveDisplayName.safe(target.rawNickname)),
             PaveCopy.text("pave.report.mail.fingerprint", target.fingerprint ?? PaveCopy.text("pave.fingerprint.unavailable")),
             PaveCopy.text("pave.report.mail.reason", reason.label),
-            PaveCopy.text("pave.report.mail.where", PaveCopy.text(whereKey)),
+            PaveCopy.text("pave.report.mail.where", PaveCopy.text(whereKey))
         ]
         // Last, after a delimiter, every line quoted: the text cannot pass for a field of the report.
         if let publicText {
