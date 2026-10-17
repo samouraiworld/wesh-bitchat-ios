@@ -1078,13 +1078,12 @@ struct GossipSyncManagerTests {
         let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: .fragment)
         manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
         manager._performMaintenanceSynchronously(now: Date())
-        #expect(delegate.packets.isEmpty)
+        #expect(!delegate.packets.contains { $0.type == MessageType.fragment.rawValue })
 
         // Listed: our own fragment request covers its ID.
         manager.scheduleInitialSyncToPeer(PeerID(str: "FFFFFFFFFFFFFFFF"), delaySeconds: 0.0)
-        try await TestHelpers.waitFor({ delegate.packets.count == 1 }, timeout: TestConstants.settleTimeout)
-        let sent = try #require(delegate.packets.first)
-        let sync = try #require(RequestSyncPacket.decode(from: sent.payload))
+        try await TestHelpers.waitFor({ refusedTestFragmentSyncRequest(in: delegate.packets) != nil }, timeout: TestConstants.settleTimeout)
+        let sync = try #require(refusedTestFragmentSyncRequest(in: delegate.packets))
         let sorted = GCSFilter.decodeToSortedSet(p: sync.p, m: sync.m, data: sync.data)
         let bucket = GCSFilter.bucket(for: PacketIdUtil.computeId(refused), modulus: sync.m)
         #expect(GCSFilter.contains(sortedValues: sorted, candidate: bucket))
@@ -1123,9 +1122,8 @@ struct GossipSyncManagerTests {
         }
 
         manager.scheduleInitialSyncToPeer(PeerID(str: "FFFFFFFFFFFFFFFF"), delaySeconds: 0.0)
-        try await TestHelpers.waitFor({ delegate.packets.count == 1 }, timeout: TestConstants.settleTimeout)
-        let sent = try #require(delegate.packets.first)
-        let sync = try #require(RequestSyncPacket.decode(from: sent.payload))
+        try await TestHelpers.waitFor({ refusedTestFragmentSyncRequest(in: delegate.packets) != nil }, timeout: TestConstants.settleTimeout)
+        let sync = try #require(refusedTestFragmentSyncRequest(in: delegate.packets))
         let sorted = GCSFilter.decodeToSortedSet(p: sync.p, m: sync.m, data: sync.data)
         for packet in real {
             let bucket = GCSFilter.bucket(for: PacketIdUtil.computeId(packet), modulus: sync.m)
@@ -1209,6 +1207,14 @@ struct GossipSyncManagerTests {
         #expect(erased)
     }
 
+}
+
+/// The first sync request we sent that covers fragments.
+private func refusedTestFragmentSyncRequest(in packets: [BitchatPacket]) -> RequestSyncPacket? {
+    packets.lazy
+        .filter { $0.type == MessageType.requestSync.rawValue }
+        .compactMap { RequestSyncPacket.decode(from: $0.payload) }
+        .first { $0.types?.contains(.fragment) == true }
 }
 
 private final class RecordingDelegate: GossipSyncManager.Delegate {
