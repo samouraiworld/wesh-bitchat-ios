@@ -134,6 +134,11 @@ final class AppRuntime: ObservableObject {
         NotificationDelegate.shared.runtime = self
     }
 
+    /// The welcome's Bluetooth step: the system prompt appears now, not at launch.
+    func allowBluetoothPrompt() {
+        (chatViewModel.meshService as? BLEService)?.allowBluetoothPrompt()
+    }
+
     func start() {
         guard chatViewModel.networkActivationAllowed else { return }
         guard !started else {
