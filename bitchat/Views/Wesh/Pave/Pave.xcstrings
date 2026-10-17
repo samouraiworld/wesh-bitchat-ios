@@ -2076,6 +2076,346 @@
         }
       }
     },
+    "pave.report.copyAddress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy the address"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier l’adresse"
+          }
+        }
+      }
+    },
+    "pave.report.localBlock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocking is immediate and stays on this phone: their messages are hidden. You can then send the report to the Wesh team by e-mail, if you wish; the team will see the e-mail address you use."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le blocage est immédiat et reste sur ce téléphone : ses messages sont masqués. Vous pourrez ensuite, si vous le souhaitez, envoyer le signalement à l’équipe Wesh par e-mail ; l’équipe verra l’adresse e-mail utilisée."
+          }
+        }
+      }
+    },
+    "pave.report.mail.fingerprint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fingerprint: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte : %@"
+          }
+        }
+      }
+    },
+    "pave.report.mail.intro" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I am reporting a person I met on Wesh."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Je signale une personne rencontrée sur Wesh."
+          }
+        }
+      }
+    },
+    "pave.report.mail.nickname" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nickname shown: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surnom affiché : %@"
+          }
+        }
+      }
+    },
+    "pave.report.mail.publicMessage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reported public message, quoted as received:"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message public signalé, cité tel quel :"
+          }
+        }
+      }
+    },
+    "pave.report.mail.reason" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reason: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motif : %@"
+          }
+        }
+      }
+    },
+    "pave.report.mail.where" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Où : %@"
+          }
+        }
+      }
+    },
+    "pave.report.noMail.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write to %@ with the nickname shown, the fingerprint and the reason."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écrivez à %@ avec le surnom affiché, l’empreinte et le motif."
+          }
+        }
+      }
+    },
+    "pave.report.noMail.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No mail app"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucune application mail"
+          }
+        }
+      }
+    },
+    "pave.report.reason.harassment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harassment or threats"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harcèlement ou menaces"
+          }
+        }
+      }
+    },
+    "pave.report.reason.illegal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Illegal or violent content"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contenu illégal ou violent"
+          }
+        }
+      }
+    },
+    "pave.report.reason.impersonation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impersonation"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usurpation d’identité"
+          }
+        }
+      }
+    },
+    "pave.report.reason.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autre"
+          }
+        }
+      }
+    },
+    "pave.report.reason.spam" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spam or scam"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spam ou arnaque"
+          }
+        }
+      }
+    },
+    "pave.report.send.action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send the report to the Wesh team"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyer le signalement à l’équipe Wesh"
+          }
+        }
+      }
+    },
+    "pave.report.send.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optional. Pick a reason: your mail app opens a draft with the nickname shown, the fingerprint and the reason, plus the message for a public room message. No private message is added. You can edit it before sending; nothing leaves without you. The team will see your e-mail address."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Facultatif. Choisissez un motif : votre application mail ouvre un brouillon avec le surnom affiché, l’empreinte et le motif, plus le message s’il s’agit du salon public. Aucun message privé n’est ajouté. Vous pouvez le modifier avant l’envoi ; rien ne part sans vous. L’équipe verra votre adresse e-mail."
+          }
+        }
+      }
+    },
+    "pave.report.where.contact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact verified by QR"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact vérifié par QR"
+          }
+        }
+      }
+    },
+    "pave.report.where.public" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public room"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salon public"
+          }
+        }
+      }
+    },
+    "pave.report.where.request" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private message request"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande de message privé"
+          }
+        }
+      }
+    },
     "pave.settings.about" : {
       "extractionState" : "manual",
       "localizations" : {
