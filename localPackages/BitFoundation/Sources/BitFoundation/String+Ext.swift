@@ -15,8 +15,4 @@ public extension StringProtocol {
         let trimmed = self.trimmed
         return trimmed.isEmpty ? nil : trimmed
     }
-
-    var nilIfEmpty: Self? {
-        isEmpty ? nil : self
-    }
 }

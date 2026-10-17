@@ -27,11 +27,9 @@ public struct PeerCapabilities: OptionSet, Equatable, Hashable, Sendable {
     public static let bridge = PeerCapabilities(rawValue: 1 << 7)
     // Finalized direct-message media encrypted as Noise payload `0x20`
     // before outer BLE fragmentation (BitChat). Wesh never advertises it.
-    // periphery:ignore - reserved wire bit, kept so it is never reused
     public static let privateMedia = PeerCapabilities(rawValue: 1 << 8)
     // Durable private-media deduplication and receipts (BitChat). Wesh
     // never advertises it.
-    // periphery:ignore - reserved wire bit, kept so it is never reused
     public static let privateMediaReceipts =
         PeerCapabilities(rawValue: 1 << 9)
     /// Reserved for test builds that briefly advertised non-destructive Noise

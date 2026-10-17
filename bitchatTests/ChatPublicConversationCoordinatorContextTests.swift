@@ -31,14 +31,9 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
     var nickname = "me"
     var myPeerID = PeerID(str: "0011223344556677")
     private(set) var isBatchingPublic = false
-    private(set) var notifyUIChangedCount = 0
 
     func setPublicBatching(_ isBatching: Bool) {
         isBatchingPublic = isBatching
-    }
-
-    func notifyUIChanged() {
-        notifyUIChangedCount += 1
     }
 
     // Public conversation store (single-writer intents)

@@ -85,8 +85,6 @@ protocol ChatPeerIdentityContext: AnyObject {
     // MARK: Favorites
     /// The persisted favorite relationship for the peer's Noise static key, if any.
     func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship?
-    /// The persisted favorite relationship for a short (ephemeral) peer ID, if any.
-    func favoriteRelationship(forPeerID peerID: PeerID) -> FavoritesPersistenceService.FavoriteRelationship?
     /// Adds (or updates) a favorite in the favorites store.
     func addFavorite(noiseKey: Data, nostrPublicKey: String?, nickname: String)
     /// Removes a favorite from the favorites store.
@@ -542,23 +540,6 @@ final class ChatPeerIdentityCoordinator {
         return context.unifiedPeerID(forNickname: nickname)
     }
 
-    @MainActor
-    func nicknameForPeer(_ peerID: PeerID) -> String {
-        if let name = context.peerNickname(for: peerID) {
-            return name
-        }
-        if let favorite = context.favoriteRelationship(forPeerID: peerID),
-           !favorite.peerNickname.isEmpty {
-            return favorite.peerNickname
-        }
-        if let noiseKey = Data(hexString: peerID.id),
-           let favorite = context.favoriteRelationship(forNoiseKey: noiseKey),
-           !favorite.peerNickname.isEmpty {
-            return favorite.peerNickname
-        }
-        // "anon" matches the default-nickname convention; "user" is banned copy.
-        return "anon"
-    }
 }
 
 private extension ChatPeerIdentityCoordinator {
