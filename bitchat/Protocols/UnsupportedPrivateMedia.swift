@@ -20,6 +20,11 @@ enum UnsupportedPrivateMedia {
     private static let fileNameTag: UInt8 = 0x01
     private static let contentTag: UInt8 = 0x04
 
+    /// True for the ID of a placeholder line, which gets no read receipt.
+    static func isPlaceholderID(_ messageID: String) -> Bool {
+        messageID.hasPrefix(idPrefix)
+    }
+
     static func messageID(payload: Data, senderPeerID: PeerID, recipientPeerID: PeerID) -> String {
         let sender = Data(senderPeerID.toShort().bare.utf8)
         let recipient = Data(recipientPeerID.toShort().bare.utf8)

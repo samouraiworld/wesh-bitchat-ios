@@ -1237,6 +1237,8 @@ final class BLEService: NSObject {
     }
 
     func sendReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
+        // A media placeholder stands for a file never received: never reported read.
+        guard !UnsupportedPrivateMedia.isPlaceholderID(receipt.originalMessageID) else { return }
         // Hop like sendMessage: callers are often on the main actor, and the
         // send path sync-waits on bleQueue for link state — the main thread
         // must never block on bleQueue (see captureBluetoothStatus).
@@ -4604,18 +4606,22 @@ extension BLEService {
             handleNoiseEncrypted(packet, from: senderID)
             
         case .fragment:
-            // A BitChat file transfer travels as fragments: Wesh neither
-            // reassembles, stores for sync nor relays them.
+            // A BitChat file transfer travels as fragments: Wesh never
+            // reassembles or stores them. Fragments of a file for another peer
+            // are relayed as before; broadcast ones are not (the V1 never
+            // spreads public files).
             if BLEFragmentHeader(packet: packet)?.originalType == MessageType.fileTransfer.rawValue {
-                return
+                guard isDirectedToAnotherPeer(packet) else { return }
+            } else {
+                handleFragment(packet, from: senderID)
             }
-            handleFragment(packet, from: senderID)
 
         case .fileTransfer:
-            // Wesh has no media: a BitChat file (public or directed) is
-            // neither stored, shown nor relayed. The type stays known so it
-            // never takes the `.none` path, which would relay it.
-            return
+            // Wesh has no media: a BitChat file is never stored or shown. A
+            // file for another peer is relayed as before; a broadcast file or
+            // one for us is not. The type stays known so it never takes the
+            // `.none` path, which would relay it.
+            guard isDirectedToAnotherPeer(packet) else { return }
 
         case .courierEnvelope:
             handleCourierEnvelope(packet, from: peerID)
@@ -4682,6 +4688,13 @@ extension BLEService {
         }
 
         return true
+    }
+
+    /// Directed traffic for some other peer, which this node only relays.
+    private func isDirectedToAnotherPeer(_ packet: BitchatPacket) -> Bool {
+        guard let recipient = packet.recipientID,
+              !BLEPacketFreshnessPolicy.isBroadcastRecipient(recipient) else { return false }
+        return recipient != myPeerIDData
     }
 
     private func scheduleRelayIfNeeded(_ packet: BitchatPacket, senderID: PeerID, messageID: String) {
