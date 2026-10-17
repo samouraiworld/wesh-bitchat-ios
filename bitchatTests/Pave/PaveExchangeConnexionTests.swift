@@ -50,9 +50,9 @@ struct PaveExchangeScreenLogicTests {
     @Test func checksNeverCarryARemoteName() throws {
         let french = try PaveCatalogStrings.strings("fr")
         let english = try PaveCatalogStrings.strings("en")
-        #expect(french["pave.exchange.theyScanned"] == "Votre code est scanné")
+        #expect(french["pave.exchange.theyScanned"] == "Son téléphone a répondu")
         #expect(french["pave.exchange.iScanned"] == "Son code est scanné")
-        #expect(english["pave.exchange.theyScanned"] == "Your code was scanned")
+        #expect(english["pave.exchange.theyScanned"] == "Their phone answered")
         #expect(english["pave.exchange.iScanned"] == "Their code was scanned")
         #expect(french["pave.exchange.theyScannedNamed"] == nil && french["pave.exchange.iScannedNamed"] == nil)
         for check in PaveExchangeCheck.allCases {
