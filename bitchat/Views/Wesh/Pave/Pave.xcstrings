@@ -2025,23 +2025,6 @@
         }
       }
     },
-    "pave.onboarding.later" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not now"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plus tard"
-          }
-        }
-      }
-    },
     "pave.onboarding.nicknameHelp" : {
       "extractionState" : "manual",
       "localizations" : {

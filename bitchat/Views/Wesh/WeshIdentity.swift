@@ -9,6 +9,16 @@ enum WeshMode {
     }
 }
 
+/// The first-launch welcome (nickname, terms, then Bluetooth). Until it ends, the system Bluetooth
+/// prompt is held back, so it appears on the step that explains it.
+enum WeshWelcome {
+    static let key = "wesh.welcomed.v1"
+
+    static func isDone(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: key)
+    }
+}
+
 /// `WeshMode.isActive` for code off the main actor (BLE and Nostr queues).
 enum WeshModeFlag {
     private static let lock = NSLock()

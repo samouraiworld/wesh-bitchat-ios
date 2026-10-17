@@ -145,8 +145,6 @@ struct PaveOnboardingFlow: View {
                     onFinish(trimmedNickname)
                 }
                 .buttonStyle(.pavePrimary)
-                Button(PaveCopy.text("pave.onboarding.later")) { onFinish(trimmedNickname) }
-                    .buttonStyle(.paveSecondary)
             }
         }
     }

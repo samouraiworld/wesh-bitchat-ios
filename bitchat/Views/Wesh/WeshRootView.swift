@@ -285,6 +285,7 @@ struct WeshRootView: View {
     @State private var sharedReview: SharedContentOffer?
     @State private var panicFeedback = ""
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
+    @AppStorage(WeshWelcome.key) private var welcomed = false
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -309,6 +310,13 @@ struct WeshRootView: View {
                             .frame(minHeight: 44)
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
+            } else if !welcomed {
+                // Nickname and terms, then Bluetooth: the system prompt waits for that step.
+                PaveOnboardingFlow(onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
+                    chrome.setNickname(nickname)
+                    chrome.validateAndSaveNickname()
+                    welcomed = true
+                })
             } else {
                 if !panicFeedback.isEmpty {
                     Text(panicFeedback).font(.subheadline).padding(16)

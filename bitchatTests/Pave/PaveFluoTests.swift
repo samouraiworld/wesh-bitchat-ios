@@ -76,3 +76,12 @@ struct PaveSettingsWiringTests {
         #expect(!NotificationPrivacySettings.hideMessagePreviews(in: defaults))
     }
 }
+
+struct WeshWelcomeTests {
+    @Test func theWelcomeShowsUntilItEnds() {
+        let defaults = UserDefaults(suiteName: "wesh.welcome.\(UUID().uuidString)")!
+        #expect(!WeshWelcome.isDone(in: defaults))
+        defaults.set(true, forKey: WeshWelcome.key)
+        #expect(WeshWelcome.isDone(in: defaults))
+    }
+}

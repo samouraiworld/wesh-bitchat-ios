@@ -1157,7 +1157,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             keychain: keychain,
             idBridge: idBridge,
             identityManager: identityManager,
-            startSuspendedForPanicRecovery: startSuspendedForRecovery
+            startSuspendedForPanicRecovery: startSuspendedForRecovery,
+            deferBluetoothPrompt: WeshMode.isActive && !WeshWelcome.isDone()
         )
         meshService.sfMetrics = .shared
         self.init(
