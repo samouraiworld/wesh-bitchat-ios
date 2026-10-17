@@ -526,12 +526,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
     }
 
-    /// Whether a read receipt has already been recorded for `messageID`.
-    @MainActor
-    func hasSentReadReceipt(_ messageID: String) -> Bool {
-        sentReadReceipts.contains(messageID)
-    }
-
     /// Records that a read receipt is being sent for `messageID`.
     /// Returns `false` when one was already recorded — the caller must skip sending.
     @MainActor
