@@ -352,7 +352,9 @@ struct BLEServiceCoreTests {
         ble.delegate = delegate
         let signer = NoiseEncryptionService(keychain: MockKeychain())
         let sender = PeerID(str: "1122334455667788")
-        let content = String(repeating: "manif ", count: 200)
+        // Random letters: a repeated phrase compresses into one fragment.
+        let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789 ")
+        let content = String((0..<1_200).map { _ in alphabet.randomElement()! })
         let unsigned = makePublicPacket(
             content: content,
             sender: sender,
