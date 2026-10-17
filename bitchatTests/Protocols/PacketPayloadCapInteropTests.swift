@@ -56,8 +56,7 @@ struct PacketPayloadCapInteropTests {
                 packet: packet,
                 pad: false,
                 maxChunk: chunkSize,
-                directedPeer: nil,
-                transferId: nil
+                directedPeer: nil
             )
             let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
                 for: request,
@@ -110,12 +109,11 @@ struct PacketPayloadCapInteropTests {
     }
 
     @Test func largeFileTransfersStillDecode() throws {
-        // A 1 MiB image whose bytes compress well: the largest legitimate
-        // inflation a broadcast file can ask for.
-        var content = Data([0xFF, 0xD8, 0xFF, 0xE0])
-        content.append(Data(count: FileTransferLimits.maxPayloadBytes - content.count))
-        let file = BitchatFilePacket(fileName: "photo.jpg", fileSize: nil, mimeType: "image/jpeg", content: content)
-        let payload = try #require(file.encode())
+        // A BitChat peer's 1 MiB file whose bytes compress well: the largest
+        // legitimate inflation 0x22 can ask for. Wesh drops the decoded
+        // packet unread, but decoding must stay bounded by the media cap.
+        var payload = Data([0xFF, 0xD8, 0xFF, 0xE0])
+        payload.append(Data(count: FileTransferLimits.maxPayloadBytes - payload.count))
         let packet = makePacket(type: .fileTransfer, payload: payload, version: 2)
         #expect(try roundTripIsCompressed(packet))
 

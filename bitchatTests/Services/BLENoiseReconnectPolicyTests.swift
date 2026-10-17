@@ -110,9 +110,10 @@ struct BLENoiseReconnectPolicyTests {
                 .nonDestructiveNoiseReplacement
             )
         )
-        #expect(PeerCapabilities.localSupported.contains(.privateMedia))
+        // Wesh has no media: neither private-media bit is advertised.
+        #expect(!PeerCapabilities.localSupported.contains(.privateMedia))
         #expect(
-            PeerCapabilities.localSupported.contains(.privateMediaReceipts)
+            !PeerCapabilities.localSupported.contains(.privateMediaReceipts)
         )
     }
 }

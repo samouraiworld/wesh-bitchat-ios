@@ -1012,42 +1012,6 @@ final class NoiseEncryptionService {
         return try sessionManager.encrypt(data, for: peerID)
     }
 
-    /// Encrypts a finalized private-media packet. Ordinary Noise application
-    /// messages retain the 64 KiB ceiling; this purpose-specific path permits
-    /// the bounded `BitchatFilePacket` envelope and refuses every other typed
-    /// payload so the larger allocation budget cannot become a generic bypass.
-    func encryptPrivateFilePayload(
-        _ data: Data,
-        for peerID: PeerID,
-        sessionGeneration: UUID? = nil
-    ) throws -> Data {
-        let sessionManager = try requireIdentity().sessionManager
-        guard NoisePayloadType.isPrivateFile(rawValue: data.first),
-              NoiseSecurityValidator.validatePrivateFileMessageSize(data) else {
-            throw NoiseSecurityError.messageTooLarge
-        }
-
-        guard rateLimiter.allowMessage(from: peerID) else {
-            throw NoiseSecurityError.rateLimitExceeded
-        }
-
-        guard hasEstablishedSession(with: peerID) else {
-            onHandshakeRequired?(peerID)
-            throw NoiseEncryptionError.handshakeRequired
-        }
-
-        // `maxPrivateFilePlaintextSize` already subtracts the cipher's fixed
-        // nonce/tag overhead, so the result is bounded without a second copy.
-        if let sessionGeneration {
-            return try sessionManager.encrypt(
-                data,
-                for: peerID,
-                expectedSessionGeneration: sessionGeneration
-            )
-        }
-        return try sessionManager.encrypt(data, for: peerID)
-    }
-
     /// Decrypt data from a specific peer
     func decrypt(_ data: Data, from peerID: PeerID) throws -> Data {
         try decryptWithSessionGeneration(data, from: peerID).plaintext
@@ -1062,6 +1026,8 @@ final class NoiseEncryptionService {
         // Standard transport ciphertext has 20 bytes of nonce/tag overhead.
         // A larger ciphertext is admitted only up to the framed-file ceiling;
         // after authenticated decryption it must prove it is `.privateFile`.
+        // Wesh sends no private file, but a BitChat peer may: decrypting it
+        // keeps the session intact, and the app shows only a placeholder.
         let isStandardCiphertext = NoiseSecurityValidator.validateCiphertextSize(data)
         let isAdmittedCiphertext = isStandardCiphertext
             || NoiseSecurityValidator.validatePrivateFileCiphertextSize(data)

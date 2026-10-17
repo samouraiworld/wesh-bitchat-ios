@@ -148,10 +148,6 @@ protocol SecureIdentityStateManagerProtocol {
     // MARK: Noise-authenticated announcement identity
     func bindAuthenticatedSigningPublicKey(_ signingPublicKey: Data, fingerprint: String)
     func authenticatedSigningPublicKey(forFingerprint fingerprint: String) -> Data?
-
-    // MARK: Private-media downgrade protection
-    func markPrivateMediaCapable(fingerprint: String)
-    func hasObservedPrivateMediaCapability(fingerprint: String) -> Bool
 }
 
 extension SecureIdentityStateManagerProtocol {
@@ -426,36 +422,6 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
             // Defensive: ensure hex and correct length
             guard peerID.isShort else { return [] }
             return cache.cryptographicIdentities.values.filter { $0.fingerprint.hasPrefix(peerID.id) }
-        }
-    }
-
-    // MARK: - Private-media downgrade protection
-
-    func markPrivateMediaCapable(fingerprint: String) {
-        guard !fingerprint.isEmpty else { return }
-        let insertAndPersist = {
-            guard self.cacheIsLoaded else { return }
-            var pinned = self.cache.privateMediaCapableFingerprints ?? []
-            guard pinned.insert(fingerprint).inserted else { return }
-            self.cache.privateMediaCapableFingerprints = pinned
-            self.saveIdentityCache()
-        }
-        // Downgrade decisions can run immediately after an authenticated
-        // announce. Make the pin visible before returning; merely enqueueing a
-        // barrier leaves a cross-queue window where a replay can look legacy.
-        // The queue-specific fast path prevents self-deadlock if a future
-        // identity-state mutation records the capability from inside `queue`.
-        if DispatchQueue.getSpecific(key: queueSpecificKey) != nil {
-            insertAndPersist()
-        } else {
-            queue.sync(flags: .barrier, execute: insertAndPersist)
-        }
-    }
-
-    func hasObservedPrivateMediaCapability(fingerprint: String) -> Bool {
-        guard !fingerprint.isEmpty else { return false }
-        return queue.sync {
-            cache.privateMediaCapableFingerprints?.contains(fingerprint) == true
         }
     }
 

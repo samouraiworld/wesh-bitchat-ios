@@ -750,7 +750,6 @@ private final class PerfDeliveryContext: ChatDeliveryContext {
     func notifyUIChanged() {}
     func markMessageDelivered(_ messageID: String) {}
     func markMessageDelivered(_ messageID: String, from peerIDs: Set<PeerID>) {}
-    func confirmPrivateMediaDelivery(_ messageID: String) {}
     func isOutgoingPrivateMessage(_ messageID: String, toAny peerIDs: Set<PeerID>) -> Bool {
         true
     }

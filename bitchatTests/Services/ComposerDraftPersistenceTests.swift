@@ -327,15 +327,20 @@ struct ComposerDraftPersistenceTests {
         var draftAttempts = 0
         let mediaRoot = fixture.root.appendingPathComponent("media")
         try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
-        let operations = PanicRecoveryOperations.live(fileStore: BLEIncomingFileStore(baseDirectory: mediaRoot), defaults: defaults,
+        let operations = PanicRecoveryOperations.live(fileStore: PanicRecoveryFileStore(baseDirectory: mediaRoot), defaults: defaults,
             wipeDrafts: { draftAttempts += 1; throw ComposerDraftFailure.storageUnavailable })
         let intent = operations.begin()
         #expect(throws: (any Error).self) { try operations.wipeMedia(intent) }
         #expect(draftAttempts == 1)
         #expect(try operations.isPending())
-        let invalidRoot = fixture.root.appendingPathComponent("not-directory")
-        try Data([1]).write(to: invalidRoot)
-        let bothFail = PanicRecoveryOperations.live(fileStore: BLEIncomingFileStore(baseDirectory: invalidRoot), defaults: defaults,
+        final class RefusingFileManager: FileManager {
+            override func removeItem(at URL: URL) throws { throw CocoaError(.fileWriteNoPermission) }
+        }
+        let legacyMedia = mediaRoot.appendingPathComponent("files/images/incoming", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyMedia, withIntermediateDirectories: true)
+        let bothFail = PanicRecoveryOperations.live(
+            fileStore: PanicRecoveryFileStore(fileManager: RefusingFileManager(), baseDirectory: mediaRoot),
+            defaults: defaults,
             wipeDrafts: { draftAttempts += 1 })
         #expect(throws: (any Error).self) { try bothFail.wipeMedia(bothFail.begin()) }
         #expect(draftAttempts == 2)

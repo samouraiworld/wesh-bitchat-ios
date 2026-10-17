@@ -7,175 +7,6 @@ import Combine
 import UIKit
 #endif
 
-/// Linearizes app-private-media admission against cancellation before work is
-/// handed to the fragment scheduler. A transfer starts here synchronously,
-/// before its `messageQueue` work item is enqueued; cancel/delete can therefore
-/// leave a tombstone that the deferred work must observe.
-///
-/// Active admissions and cancellation tombstones have independent count
-/// bounds. Tombstones may age out or evict older tombstones; active entries
-/// are never evicted under pressure. A one-hour active timeout is reported as
-/// an explicit transfer failure and removes any handshake-queued payload.
-private final class BLEPrivateMediaTransferAdmissionRegistry {
-    enum BeginResult: Equatable {
-        case admitted
-        case alreadyKnown
-        case capacityExhausted
-    }
-
-    private enum State: Equatable {
-        case active
-        case cancelled
-    }
-
-    private struct Entry {
-        var state: State
-        var updatedAt: Date
-    }
-
-    private let lock = NSLock()
-    private let maxActiveEntries = 512
-    private let maxCancelledTombstones = 512
-    private let lifetime: TimeInterval = 60 * 60
-    private let onActiveExpired: (String) -> Void
-    private var entries: [String: Entry] = [:]
-
-    init(onActiveExpired: @escaping (String) -> Void) {
-        self.onActiveExpired = onActiveExpired
-    }
-
-    func begin(_ transferId: String, now: Date = Date()) -> BeginResult {
-        guard !transferId.isEmpty else { return .alreadyKnown }
-        lock.lock()
-        let expiredActive = pruneLocked(now: now)
-        // Transfer IDs are invocation-unique. Never revive a cancellation or
-        // admit a duplicate invocation that reused an in-flight identifier.
-        let result: BeginResult
-        if entries[transferId] != nil {
-            result = .alreadyKnown
-        } else if activeCountLocked >= maxActiveEntries {
-            // Never evict an admitted transfer: doing so strands its UI
-            // placeholder with no completion event. Reject the newcomer and
-            // let the caller surface the bounded-pressure failure instead.
-            result = .capacityExhausted
-        } else {
-            entries[transferId] = Entry(state: .active, updatedAt: now)
-            result = .admitted
-        }
-        lock.unlock()
-        notifyExpired(expiredActive)
-        return result
-    }
-
-    func cancel(_ transferId: String, now: Date = Date()) {
-        guard !transferId.isEmpty else { return }
-        lock.lock()
-        // Cancel the requested active entry before expiry pruning so a user
-        // cancellation wins over a simultaneous timeout notification.
-        entries[transferId] = Entry(state: .cancelled, updatedAt: now)
-        let expiredActive = pruneLocked(now: now)
-        trimCancelledTombstonesLocked()
-        lock.unlock()
-        notifyExpired(expiredActive)
-    }
-
-    func isActive(_ transferId: String, now: Date = Date()) -> Bool {
-        lock.lock()
-        let expiredActive = pruneLocked(now: now)
-        let active = entries[transferId]?.state == .active
-        if active {
-            entries[transferId]?.updatedAt = now
-        }
-        lock.unlock()
-        notifyExpired(expiredActive)
-        return active
-    }
-
-    /// Runs `body` while holding the admission lock. Callers use this at the
-    /// collections-queue append/submit boundary so cancellation and admission
-    /// have one deterministic order: whichever acquires this lock first wins.
-    func withActive<Result>(
-        _ transferId: String,
-        now: Date = Date(),
-        _ body: () -> Result
-    ) -> Result? {
-        lock.lock()
-        let expiredActive = pruneLocked(now: now)
-        guard entries[transferId]?.state == .active else {
-            lock.unlock()
-            notifyExpired(expiredActive)
-            return nil
-        }
-        entries[transferId]?.updatedAt = now
-        let result = body()
-        lock.unlock()
-        notifyExpired(expiredActive)
-        return result
-    }
-
-    func finish(_ transferId: String) {
-        lock.lock()
-        entries.removeValue(forKey: transferId)
-        lock.unlock()
-    }
-
-    var count: Int {
-        lock.lock()
-        let expiredActive = pruneLocked(now: Date())
-        let result = entries.count
-        lock.unlock()
-        notifyExpired(expiredActive)
-        return result
-    }
-
-    func prune(now: Date = Date()) {
-        lock.lock()
-        let expiredActive = pruneLocked(now: now)
-        lock.unlock()
-        notifyExpired(expiredActive)
-    }
-
-    private var activeCountLocked: Int {
-        entries.values.reduce(into: 0) { count, entry in
-            if entry.state == .active { count += 1 }
-        }
-    }
-
-    /// Removes stale tombstones silently and stale active admissions with a
-    /// caller-visible timeout notification. Must be called with `lock` held;
-    /// notifications are delivered only after the lock is released.
-    private func pruneLocked(now: Date) -> [String] {
-        var expiredActive: [String] = []
-        let expiredEntries = entries.filter {
-            now.timeIntervalSince($0.value.updatedAt) > lifetime
-        }
-        for (transferId, entry) in expiredEntries {
-            if entry.state == .active {
-                expiredActive.append(transferId)
-            }
-            entries.removeValue(forKey: transferId)
-        }
-        trimCancelledTombstonesLocked()
-        return expiredActive
-    }
-
-    private func trimCancelledTombstonesLocked() {
-        let cancelled = entries
-            .filter { $0.value.state == .cancelled }
-            .sorted { $0.value.updatedAt < $1.value.updatedAt }
-        let overflow = max(0, cancelled.count - maxCancelledTombstones)
-        for victim in cancelled.prefix(overflow) {
-            entries.removeValue(forKey: victim.key)
-        }
-    }
-
-    private func notifyExpired(_ transferIds: [String]) {
-        for transferId in transferIds {
-            onActiveExpired(transferId)
-        }
-    }
-}
-
 /// BLEService — Bluetooth Mesh Transport
 /// - Emits events exclusively via `BitchatDelegate` for UI.
 /// - ChatViewModel must consume delegate callbacks (`didReceivePublicMessage`, `didReceiveNoisePayload`).
@@ -296,10 +127,7 @@ final class BLEService: NSObject {
     /// before it hands a packet to `messageQueue`.
     var _test_beforeReceivePacketHandoff: (() -> Void)?
     var _test_onReceivePacketHandoff: (() -> Void)?
-    var _test_onPrivateMediaSessionReconciled: ((PeerID) -> Void)?
-    /// May block in tests to hold the serial message queue immediately before
-    /// the deferred private-media admission check.
-    var _test_beforePrivateMediaDeferredSend: ((String) -> Void)?
+    var _test_onNoiseSessionReconciled: ((PeerID) -> Void)?
     /// May block the convergence-recovery callback on its global-queue thread
     /// before it enqueues onto `messageQueue`. Tests use this boundary to
     /// force the quarantine-restore handler to win the dispatch race.
@@ -315,15 +143,9 @@ final class BLEService: NSObject {
 
     // 5. Fragment Reassembly (necessary for messages > MTU)
     private var fragmentAssemblyBuffer = BLEFragmentAssemblyBuffer()
-    private var outboundFragmentTransfers = BLEOutboundFragmentTransferScheduler()
-    private lazy var privateMediaTransferAdmissions = BLEPrivateMediaTransferAdmissionRegistry { [weak self] transferId in
-        self?.handlePrivateMediaAdmissionExpiry(transferId)
-    }
-    // Generation-bound private-media session state (lock-backed store: the
-    // main actor answers the send policy from it synchronously, and noise
-    // critical sections mutate it without re-entering the engine).
-    private let privateMediaSessions = BLEPrivateMediaSessionStore()
-    private let incomingFileStore: BLEIncomingFileStore
+    // Generation-bound authenticated peer-state exchange (lock-backed:
+    // noise critical sections mutate it without re-entering the engine).
+    private let peerStateSessions = BLEAuthenticatedPeerStateSessions()
     
     // Simple announce throttling
     private let announceThrottle = BLEAnnounceThrottle()
@@ -421,9 +243,9 @@ final class BLEService: NSObject {
     // Queue for notifications that failed due to full queue (bleQueue-owned,
     // like the link state store: every producer and drain runs there).
     var pendingNotifications = BLEOutboundNotificationBuffer<CBCentral>()
-    // Backpressure logging fires per fragment during media transfers
-    // (hundreds of lines per image); sampled via this counter, which is
-    // only touched on bleQueue (no sync needed).
+    // Backpressure logging fires per fragment during long fragment trains;
+    // sampled via this counter, which is only touched on bleQueue (no sync
+    // needed).
     var notificationBackpressureLogCount = 0
 
     // Accumulate long write chunks per central until a full frame decodes
@@ -464,11 +286,6 @@ final class BLEService: NSObject {
     private lazy var noisePacketHandler = BLENoisePacketHandler(environment: makeNoisePacketHandlerEnvironment())
     // Fragment-assembly orchestration (queue hops stay in the environment closures)
     private lazy var fragmentHandler = BLEFragmentHandler(environment: makeFragmentHandlerEnvironment())
-    // File-transfer orchestration (queue hops stay in the environment closures)
-    private lazy var fileTransferHandler = BLEFileTransferHandler(environment: makeFileTransferHandlerEnvironment())
-    /// Wesh refuses inbound media (placeholder only). Upstream media tests
-    /// opt in on their own instance; set it before any traffic.
-    var acceptsIncomingMedia: () -> Bool = { WeshIncomingMediaPolicy.acceptsMedia }
 
     // MARK: - Gossip Sync
     private var gossipSyncManager: GossipSyncManager?
@@ -521,7 +338,6 @@ final class BLEService: NSObject {
         idBridge: NostrIdentityBridge,
         identityManager: SecureIdentityStateManagerProtocol,
         initializeBluetoothManagers: Bool = true,
-        incomingFileStore: BLEIncomingFileStore = BLEIncomingFileStore(),
         startSuspendedForPanicRecovery: Bool = false,
         deferBluetoothPrompt: Bool = false,
         noiseResponderHandshakeTimeout: TimeInterval =
@@ -531,7 +347,6 @@ final class BLEService: NSObject {
         self.engineScheduler = engineScheduler
         self.keychain = keychain
         self.idBridge = idBridge
-        self.incomingFileStore = incomingFileStore
         self.shouldInitializeBluetoothManagers = initializeBluetoothManagers
         self._isPanicSuspended = startSuspendedForPanicRecovery
         self._bluetoothPromptDeferred = deferBluetoothPrompt
@@ -807,9 +622,7 @@ final class BLEService: NSObject {
             stalePeerCleanupIntervalSeconds: TransportConfig.syncStalePeerCleanupIntervalSeconds,
             stalePeerTimeoutSeconds: TransportConfig.syncStalePeerTimeoutSeconds,
             fragmentCapacity: TransportConfig.syncFragmentCapacity,
-            fileTransferCapacity: TransportConfig.syncFileTransferCapacity,
             fragmentSyncIntervalSeconds: TransportConfig.syncFragmentIntervalSeconds,
-            fileTransferSyncIntervalSeconds: TransportConfig.syncFileTransferIntervalSeconds,
             messageSyncIntervalSeconds: TransportConfig.syncMessageIntervalSeconds,
             responseRateLimitMaxResponses: TransportConfig.syncResponseRateLimitMaxResponses,
             responseRateLimitWindowSeconds: TransportConfig.syncResponseRateLimitWindowSeconds,
@@ -920,12 +733,6 @@ final class BLEService: NSObject {
 
     /// Reopen the radio only after media deletion and recovery-marker commit.
     func completePanicReset(restartServices: Bool) {
-        // The media wipe ran on the recovery operations' own file store; this
-        // service's store still caches pre-panic receipt decisions (and a
-        // callback drained during suspension may have re-read the pre-wipe
-        // ledger). Drop the cache before admission reopens so the next lookup
-        // rebuilds from the wiped directory.
-        incomingFileStore.resetPrivateMediaReceiptsForPanic()
         // Preserve the caller's startup choice before callbacks see panic reopen.
         setServicesRequested(restartServices)
         setPanicSuspended(false)
@@ -949,8 +756,7 @@ final class BLEService: NSObject {
             pendingNoiseSessionQueues.removeAll()
         }
 
-        let panicReset = onEngine {
-            let transfers = outboundFragmentTransfers.removeAll()
+        onEngine {
             fragmentAssemblyBuffer.removeAll()
             pendingDirectedRelays.removeAll()
             ingressLinks.removeAll()
@@ -965,17 +771,10 @@ final class BLEService: NSObject {
             // announce swallows the rotation announce and the new identity
             // stays invisible until the next maintenance cycle.
             announceThrottle.reset()
-            // These callbacks belong to pre-panic transfer state. Invoking
-            // them would let queued UI work recreate or resend wiped media.
-            privateMediaSessions.panicReset()
+            // Peer-state records belong to the pre-panic sessions.
+            peerStateSessions.panicReset()
             // Let the post-panic identity publish its fresh bundle promptly.
             lastPrekeyBundleSentAt = nil
-            return transfers
-        }
-
-        for entry in panicReset {
-            entry.workItems.forEach { $0.cancel() }
-            TransferProgressManager.shared.cancel(id: entry.id)
         }
 
         bleQueue.sync {
@@ -1272,10 +1071,7 @@ final class BLEService: NSObject {
 
     private func clearEmergencySessionState() {
         // Clear all sessions and peers
-        let cancelled = onEngine {
-            let entries = outboundFragmentTransfers.removeAll().map {
-                (id: $0.id, items: $0.workItems)
-            }
+        let pingTimeouts = onEngine {
             let pingTimeouts = meshPings.reset()
             peerRegistry.mutate { $0.removeAll() }
             fragmentAssemblyBuffer.removeAll()
@@ -1287,14 +1083,9 @@ final class BLEService: NSObject {
             // clear here, physical link state clears on bleQueue below.
             linkBindings.removeAll()
             linkAuth.removeAll()
-            return (transfers: entries, pingTimeouts: pingTimeouts)
+            return pingTimeouts
         }
-
-        for entry in cancelled.transfers {
-            entry.items.forEach { $0.cancel() }
-            TransferProgressManager.shared.cancel(id: entry.id)
-        }
-        cancelled.pingTimeouts.forEach { $0.cancel() }
+        pingTimeouts.forEach { $0.cancel() }
 
         // Clear processed messages
         messageDeduplicator.reset()
@@ -1342,209 +1133,6 @@ final class BLEService: NSObject {
     /// Empty for peers that predate the capabilities TLV.
     func peerCapabilities(_ peerID: PeerID) -> PeerCapabilities {
         peerRegistry.capabilities(for: peerID)
-    }
-
-    func authenticatedPrivateMediaReceiptSessionGeneration(
-        to peerID: PeerID
-    ) -> UUID? {
-        let normalizedPeerID = peerID.toShort()
-        let currentNoiseGeneration =
-            noiseService.sessionGeneration(for: normalizedPeerID)
-        return privateMediaSessions.receiptSessionGeneration(
-            for: normalizedPeerID,
-            currentNoiseGeneration: currentNoiseGeneration
-        )
-    }
-
-    private func privateMediaPolicyFingerprint(
-        for peerID: PeerID,
-        expectedSessionGeneration: UUID?
-    ) -> String? {
-        let normalizedPeerID = peerID.toShort()
-        if let expectedSessionGeneration,
-           noiseService.sessionGeneration(for: normalizedPeerID)
-                == expectedSessionGeneration,
-           let fingerprint = noiseService.getPeerFingerprint(normalizedPeerID),
-           noiseService.sessionGeneration(for: normalizedPeerID)
-                == expectedSessionGeneration {
-            // The exact authenticated Noise static key is stronger than a
-            // registry entry populated by a public announce.
-            return fingerprint
-        }
-        return peerRegistry.info(for: normalizedPeerID)?
-            .noisePublicKey?
-            .sha256Fingerprint()
-    }
-
-    func privateMediaSendPolicy(to peerID: PeerID) -> PrivateMediaSendPolicy {
-        // Unknown durable pins cannot authorize the legacy raw-media fallback.
-        guard identityManager.isPersistenceAvailable,
-              !identityManager.hasPendingPersistenceChanges else { return .blockedDowngrade }
-        let normalizedPeerID = peerID.toShort()
-        let state: (
-            capabilities: PeerCapabilities,
-            fingerprint: String?,
-            sessionGeneration: UUID?,
-            authenticatedState: BLEAuthenticatedPeerStateObservation?,
-            timedOut: BLEPrivateMediaProofTimeoutMarker?
-        ) = {
-            let info = peerRegistry.info(for: normalizedPeerID)
-            let session = privateMediaSessions.policyInputs(for: normalizedPeerID)
-            return (
-                info?.capabilities ?? [],
-                info?.noisePublicKey?.sha256Fingerprint(),
-                session.sessionGeneration,
-                session.authenticatedState,
-                session.timedOut
-            )
-        }()
-        let currentNoiseGeneration = noiseService.sessionGeneration(for: normalizedPeerID)
-
-        // A session replacement can happen before its authentication callback
-        // reaches messageQueue. Never reuse an observation from the previous
-        // transport generation during that window.
-        if state.sessionGeneration != currentNoiseGeneration {
-            return .awaitingCapabilityProof
-        }
-
-        guard let fingerprint = privateMediaPolicyFingerprint(
-            for: normalizedPeerID,
-            expectedSessionGeneration: state.sessionGeneration
-        ) ?? state.fingerprint else {
-            // A raw fallback must be bound to the stable Noise key from a
-            // verified registry entry; a routing ID alone can rotate or be
-            // spoofed. Without that key neither proof nor safe migration state
-            // can be attributed.
-            return .blockedDowngrade
-        }
-
-        let wasPreviouslyCapable = identityManager.hasObservedPrivateMediaCapability(
-            fingerprint: fingerprint
-        )
-
-        if let authenticated = state.authenticatedState,
-           authenticated.fingerprint.caseInsensitiveCompare(fingerprint) == .orderedSame,
-           authenticated.sessionGeneration == state.sessionGeneration {
-            if authenticated.capabilities.contains(.privateMedia) {
-                return .encrypted
-            }
-            return wasPreviouslyCapable ? .blockedDowngrade : .legacyRequiresConsent
-        }
-
-        if let timedOut = state.timedOut,
-           timedOut.fingerprint.caseInsensitiveCompare(fingerprint) == .orderedSame,
-           timedOut.sessionGeneration == state.sessionGeneration {
-            return wasPreviouslyCapable ? .blockedDowngrade : .legacyRequiresConsent
-        }
-
-        // The announce bit is a discovery hint only. It can trigger a Noise
-        // handshake, but it cannot select encrypted media or create a durable
-        // pin because anyone can copy a public Noise key into a self-signed
-        // announce. A prior pin also re-confirms on each replacement session
-        // so an authenticated no-bit response becomes a visible downgrade.
-        if state.capabilities.contains(.privateMedia) || wasPreviouslyCapable {
-            return .awaitingCapabilityProof
-        }
-
-        // Old clients that never advertised the bit remain eligible only for
-        // the explicit, invocation-scoped legacy consent path.
-        return .legacyRequiresConsent
-    }
-
-    func resolvePrivateMediaSendPolicy(
-        to peerID: PeerID,
-        completion: @escaping @MainActor (PrivateMediaSendPolicy) -> Void
-    ) {
-        let normalizedPeerID = peerID.toShort()
-        messageQueue.async { [weak self] in
-            guard let self else { return }
-            let immediate = self.privateMediaSendPolicy(to: normalizedPeerID)
-            guard immediate == .awaitingCapabilityProof else {
-                self.completePrivateMediaPolicyResolution([completion], with: immediate)
-                return
-            }
-
-            let generation = self.privateMediaSessions.currentGeneration(for: normalizedPeerID)
-            let fingerprint = self.privateMediaPolicyFingerprint(
-                for: normalizedPeerID,
-                expectedSessionGeneration: generation
-            )
-            guard let fingerprint else {
-                self.completePrivateMediaPolicyResolution([completion], with: .blockedDowngrade)
-                return
-            }
-
-            let requestID = UUID()
-            let registration = self.privateMediaSessions.registerPolicyResolution(
-                for: normalizedPeerID,
-                fingerprint: fingerprint,
-                requestID: requestID,
-                completion: completion
-            )
-
-            guard registration.registered else {
-                self.completePrivateMediaPolicyResolution([completion], with: .blockedDowngrade)
-                return
-            }
-            if registration.shouldSchedule {
-                self.schedulePrivateMediaProofTimeout(
-                    for: normalizedPeerID,
-                    fingerprint: fingerprint,
-                    sessionGeneration: registration.generation,
-                    nonce: registration.nonce
-                )
-            }
-
-            if !self.noiseService.hasEstablishedSession(with: normalizedPeerID) {
-                self.initiateNoiseHandshake(with: normalizedPeerID)
-            }
-        }
-    }
-
-    private func completePrivateMediaPolicyResolution(
-        _ completions: [@MainActor (PrivateMediaSendPolicy) -> Void],
-        with policy: PrivateMediaSendPolicy
-    ) {
-        guard !completions.isEmpty else { return }
-        notifyUI {
-            completions.forEach { $0(policy) }
-        }
-    }
-
-    private func schedulePrivateMediaProofTimeout(
-        for peerID: PeerID,
-        fingerprint: String,
-        sessionGeneration: UUID?,
-        nonce: UUID
-    ) {
-        engineScheduler.schedule(after: TransportConfig.privateMediaCapabilityProofTimeoutSeconds) { [weak self] in
-            self?.handlePrivateMediaProofTimeout(
-                for: peerID,
-                fingerprint: fingerprint,
-                sessionGeneration: sessionGeneration,
-                nonce: nonce
-            )
-        }
-    }
-
-    private func handlePrivateMediaProofTimeout(
-        for peerID: PeerID,
-        fingerprint: String,
-        sessionGeneration: UUID?,
-        nonce: UUID
-    ) {
-        let expiration = privateMediaSessions.expireProofDeadline(
-            for: peerID,
-            fingerprint: fingerprint,
-            sessionGeneration: sessionGeneration,
-            nonce: nonce
-        )
-        guard expiration.expired else { return }
-        let policy = privateMediaSendPolicy(to: peerID)
-        if !expiration.deferredOutbound {
-            sendPendingNoisePayloadsAfterHandshake(for: peerID)
-        }
-        completePrivateMediaPolicyResolution(expiration.completions, with: policy)
     }
 
     /// Enables or disables a runtime-advertised capability bit (e.g. the
@@ -1654,52 +1242,6 @@ final class BLEService: NSObject {
 
     // MARK: Messaging
 
-    private func handlePrivateMediaAdmissionExpiry(_ transferId: String) {
-        // Expiry can be discovered from the BLE maintenance queue or from an
-        // engine slot. Cleanup is therefore fire-and-forget; never
-        // synchronously re-enter the engine.
-        messageQueue.async { [weak self] in
-            _ = self?.pendingNoiseSessionQueues.removeTypedPayload(transferId: transferId)
-        }
-        TransferProgressManager.shared.rejectBeforeStart(
-            id: transferId,
-            reason: String(
-                localized: "content.delivery.reason.private_media_admission_expired",
-                defaultValue: "Media transfer timed out before it could start",
-                comment: "Failure reason when private-media admission expires before fragment scheduling"
-            )
-        )
-    }
-
-    func cancelTransfer(_ transferId: String) {
-        // Cancellation must become visible synchronously. Scheduler/pending-
-        // Noise cleanup remains asynchronous, but deferred private-media work
-        // cannot pass another admission boundary after this returns.
-        privateMediaTransferAdmissions.cancel(transferId)
-        messageQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            switch self.outboundFragmentTransfers.cancelTransfer(transferId) {
-            case let .active(id, workItems):
-                workItems.forEach { $0.cancel() }
-                TransferProgressManager.shared.cancel(id: transferId)
-                SecureLogger.debug("🛑 Cancelled transfer \(id.prefix(8))…", category: .session)
-                self.messageQueue.async { [weak self] in
-                    self?.startNextPendingTransferIfNeeded()
-                }
-
-            case let .pending(id):
-                TransferProgressManager.shared.cancel(id: transferId)
-                SecureLogger.debug("🛑 Removed pending transfer \(id.prefix(8))… before start", category: .session)
-
-            case .missing:
-                if self.pendingNoiseSessionQueues.removeTypedPayload(transferId: transferId) {
-                    SecureLogger.debug("🛑 Removed handshake-queued transfer \(transferId.prefix(8))…", category: .session)
-                }
-            }
-        }
-    }
-    
     // Transport protocol conformance helper: simplified public message send
     func sendMessage(_ content: String, mentions: [String]) {
         // Delegate to the full API with default routing
@@ -1714,354 +1256,6 @@ final class BLEService: NSObject {
         sendPrivateMessage(content, to: peerID, messageID: messageID)
     }
 
-    func sendFileBroadcast(_ filePacket: BitchatFilePacket, transferId: String) {
-        messageQueue.async { [weak self] in
-            guard let self = self else { return }
-            guard self.isTransportTrafficAllowed else { return }
-            guard let payload = filePacket.encode() else {
-                SecureLogger.error("❌ Failed to encode file packet for broadcast", category: .session)
-                return
-            }
-
-            var packet = BitchatPacket(
-                type: MessageType.fileTransfer.rawValue,
-                senderID: self.myPeerIDData,
-                recipientID: nil,
-                timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-                payload: payload,
-                signature: nil,
-                ttl: self.messageTTL,
-                version: 2
-            )
-
-            if let signed = self.noiseService.signPacket(packet) {
-                packet = signed
-            } else {
-                SecureLogger.error("❌ Failed to sign file broadcast packet", category: .security)
-                return
-            }
-
-            let senderHex = packet.senderID.hexEncodedString()
-            let dedupID = "\(senderHex)-\(packet.timestamp)-\(packet.type)"
-            self.messageDeduplicator.markProcessed(dedupID)
-
-            SecureLogger.debug("📁 Broadcasting file transfer payload bytes=\(payload.count)", category: .session)
-            self.broadcastPacket(packet, transferId: transferId)
-            self.gossipSyncManager?.onPublicPacketSeen(packet)
-        }
-    }
-
-    func sendFilePrivate(
-        _ filePacket: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String,
-        allowLegacyFallback: Bool
-    ) {
-        sendFilePrivate(
-            filePacket,
-            to: peerID,
-            transferId: transferId,
-            allowLegacyFallback: allowLegacyFallback,
-            requiresAuthenticatedPrivateMediaReceipts: false
-        )
-    }
-
-    func sendFilePrivateReceiptRetry(
-        _ filePacket: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String
-    ) {
-        sendFilePrivate(
-            filePacket,
-            to: peerID,
-            transferId: transferId,
-            allowLegacyFallback: false,
-            requiresAuthenticatedPrivateMediaReceipts: true
-        )
-    }
-
-    private func sendFilePrivate(
-        _ filePacket: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String,
-        allowLegacyFallback: Bool,
-        requiresAuthenticatedPrivateMediaReceipts: Bool
-    ) {
-        // Register before enqueueing onto messageQueue. This closes the window
-        // where cancel/delete could run first, observe no scheduler state, and
-        // then be followed by a deferred clear-media send.
-        switch privateMediaTransferAdmissions.begin(transferId) {
-        case .admitted:
-            break
-
-        case .alreadyKnown:
-            SecureLogger.debug(
-                "Private media admission already cancelled or duplicated for \(transferId.prefix(8))…",
-                category: .security
-            )
-            return
-
-        case .capacityExhausted:
-            SecureLogger.warning(
-                "Private media admission capacity exhausted for \(transferId.prefix(8))…",
-                category: .security
-            )
-            TransferProgressManager.shared.rejectBeforeStart(
-                id: transferId,
-                reason: String(
-                    localized: "content.delivery.reason.private_media_admission_full",
-                    defaultValue: "Too many media transfers are waiting; try again shortly",
-                    comment: "Failure reason when too many private-media transfers are awaiting admission"
-                )
-            )
-            return
-        }
-        messageQueue.async { [weak self] in
-            guard let self = self else { return }
-            #if DEBUG
-            self._test_beforePrivateMediaDeferredSend?(transferId)
-            #endif
-            guard self.isTransportTrafficAllowed else {
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-            }
-            guard self.privateMediaTransferAdmissions.isActive(transferId) else {
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-            }
-            let targetID = peerID.toShort()
-            switch self.privateMediaSendPolicy(to: targetID) {
-            case .encrypted:
-                break
-
-            case .awaitingCapabilityProof:
-                // The UI coordinator resolves this state before calling the
-                // transport. Keep the transport guard fail-closed for direct
-                // callers and for a session replacement that races the call.
-                SecureLogger.warning(
-                    "Private media held pending authenticated capability proof for \(targetID.id.prefix(8))…",
-                    category: .security
-                )
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(
-                        localized: "content.delivery.reason.private_media_capability_unresolved",
-                        defaultValue: "Could not confirm encrypted media support",
-                        comment: "Failure reason when private-media capability negotiation did not resolve"
-                    )
-                )
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-
-            case .legacyRequiresConsent:
-                guard allowLegacyFallback else {
-                    SecureLogger.warning(
-                        "Private media blocked pending explicit legacy-clear consent for \(targetID.id.prefix(8))…",
-                        category: .security
-                    )
-                    TransferProgressManager.shared.rejectBeforeStart(
-                        id: transferId,
-                        reason: String(
-                            localized: "content.delivery.reason.legacy_media_consent_required",
-                            defaultValue: "Confirmation required before sending without end-to-end encryption",
-                            comment: "Failure reason when a legacy private-media send lacks per-send consent"
-                        )
-                    )
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                // Migration path accepted by current Android and used by older
-                // iOS releases: preserve the directed raw file-transfer wire
-                // shape, but require the signature the receive path verifies.
-                // The allow flag belongs to this invocation only and is
-                // consumed here; a retry must obtain fresh user consent.
-                self.sendSignedLegacyPrivateFile(
-                    filePacket,
-                    to: targetID,
-                    transferId: transferId
-                )
-                return
-
-            case .blockedDowngrade:
-                SecureLogger.warning(
-                    "Private media downgrade blocked for \(targetID.id.prefix(8))…",
-                    category: .security
-                )
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(
-                        localized: "content.delivery.reason.private_media_downgrade_blocked",
-                        defaultValue: "Encrypted media required; ask this contact to upgrade",
-                        comment: "Failure reason when a peer that previously supported encrypted media appears to downgrade"
-                    )
-                )
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-            }
-            if requiresAuthenticatedPrivateMediaReceipts,
-               self.authenticatedPrivateMediaReceiptSessionGeneration(
-                    to: targetID
-               ) == nil {
-                SecureLogger.warning(
-                    "Private media retry blocked without current authenticated receipt support for \(targetID.id.prefix(8))…",
-                    category: .security
-                )
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(
-                        localized: "content.delivery.reason.private_media_capability_unresolved",
-                        defaultValue: "Could not confirm encrypted media support",
-                        comment: "Failure reason when private-media capability negotiation did not resolve"
-                    )
-                )
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-            }
-            guard let typedPayload = BLENoisePayloadFactory.privateFile(filePacket) else {
-                SecureLogger.error("❌ Failed to encode file packet for private send", category: .session)
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(localized: "content.delivery.reason.media_encoding_failed", defaultValue: "Failed to prepare media", comment: "Failure reason when private media cannot be encoded")
-                )
-                self.privateMediaTransferAdmissions.finish(transferId)
-                return
-            }
-            guard self.noiseService.hasEstablishedSession(with: targetID) else {
-                if requiresAuthenticatedPrivateMediaReceipts {
-                    // A retry belongs to one exact authenticated generation.
-                    // Never let it enter the ordinary pending queue where a
-                    // bit-8-only replacement session could later flush it.
-                    TransferProgressManager.shared.rejectBeforeStart(
-                        id: transferId,
-                        reason: String(
-                            localized: "content.delivery.reason.private_media_capability_unresolved",
-                            defaultValue: "Could not confirm encrypted media support",
-                            comment: "Failure reason when private-media capability negotiation did not resolve"
-                        )
-                    )
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                let queued = onEngine {
-                    self.privateMediaTransferAdmissions.withActive(transferId) {
-                        self.pendingNoiseSessionQueues.appendTypedPayload(
-                            typedPayload,
-                            transferId: transferId,
-                            for: targetID
-                        )
-                        return true
-                    } ?? false
-                }
-                guard queued else {
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                SecureLogger.debug("📥 Queued private file for \(targetID.id.prefix(8))… pending handshake", category: .session)
-                guard self.privateMediaTransferAdmissions.isActive(transferId) else {
-                    onEngine {
-                        _ = self.pendingNoiseSessionQueues.removeTypedPayload(transferId: transferId)
-                    }
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                self.initiateNoiseHandshake(with: targetID)
-                return
-            }
-
-            do {
-                guard self.privateMediaTransferAdmissions.isActive(transferId) else {
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                let packet = try self.makeEncryptedNoisePacket(
-                    typedPayload,
-                    to: targetID,
-                    requiresAuthenticatedPrivateMediaReceipts:
-                        requiresAuthenticatedPrivateMediaReceipts
-                )
-                guard self.privateMediaTransferAdmissions.isActive(transferId) else {
-                    self.privateMediaTransferAdmissions.finish(transferId)
-                    return
-                }
-                SecureLogger.debug("📁 Sending encrypted private file to \(targetID.id.prefix(8))… plaintextBytes=\(typedPayload.count)", category: .session)
-                self.broadcastPacket(
-                    packet,
-                    transferId: transferId,
-                    requiresPrivateMediaAdmission: true
-                )
-            } catch {
-                SecureLogger.error("❌ Failed to encrypt private file for \(targetID.id.prefix(8))…: \(error)", category: .security)
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(localized: "content.delivery.reason.encryption_failed", comment: "Failure reason shown when a message could not be encrypted for the peer")
-                )
-                self.privateMediaTransferAdmissions.finish(transferId)
-            }
-        }
-    }
-
-    /// Compatibility-only fallback for peers that have not advertised
-    /// encrypted private media. The payload is authenticated but visible to
-    /// relays, matching the pre-migration behavior until those clients upgrade.
-    private func sendSignedLegacyPrivateFile(
-        _ filePacket: BitchatFilePacket,
-        to targetID: PeerID,
-        transferId: String
-    ) {
-        guard privateMediaTransferAdmissions.isActive(transferId) else {
-            privateMediaTransferAdmissions.finish(transferId)
-            return
-        }
-        guard let payload = filePacket.encode(),
-              let recipientData = Data(hexString: targetID.id) else {
-            SecureLogger.error("❌ Failed to encode legacy private file transfer", category: .session)
-            TransferProgressManager.shared.rejectBeforeStart(
-                id: transferId,
-                reason: String(localized: "content.delivery.reason.media_encoding_failed", defaultValue: "Failed to prepare media", comment: "Failure reason when private media cannot be encoded")
-            )
-            privateMediaTransferAdmissions.finish(transferId)
-            return
-        }
-
-        let unsigned = BitchatPacket(
-            type: MessageType.fileTransfer.rawValue,
-            senderID: myPeerIDData,
-            recipientID: recipientData,
-            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-            payload: payload,
-            signature: nil,
-            ttl: messageTTL,
-            version: 2
-        )
-        guard let signed = noiseService.signPacket(unsigned) else {
-            SecureLogger.error("❌ Failed to sign legacy private file transfer", category: .security)
-            TransferProgressManager.shared.rejectBeforeStart(
-                id: transferId,
-                reason: String(localized: "content.delivery.reason.media_signing_failed", defaultValue: "Failed to authenticate media", comment: "Failure reason when a legacy private-media packet cannot be signed")
-            )
-            privateMediaTransferAdmissions.finish(transferId)
-            return
-        }
-
-        // Signing can be non-trivial; cancellation that won while it ran must
-        // still prevent the clear payload from reaching the broadcast path.
-        guard privateMediaTransferAdmissions.isActive(transferId) else {
-            privateMediaTransferAdmissions.finish(transferId)
-            return
-        }
-
-        SecureLogger.warning(
-            "📁 Sending signed legacy private file to \(targetID.id.prefix(8))…; peer has not advertised E2E media",
-            category: .security
-        )
-        broadcastPacket(
-            signed,
-            transferId: transferId,
-            requiresPrivateMediaAdmission: true
-        )
-    }
-
-    
     func sendReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
         // Hop like sendMessage: callers are often on the main actor, and the
         // send path sync-waits on bleQueue for link state — the main thread
@@ -2179,26 +1373,8 @@ final class BLEService: NSObject {
 
     // MARK: - Packet Broadcasting
     
-    private func broadcastPacket(
-        _ packet: BitchatPacket,
-        transferId: String? = nil,
-        requiresPrivateMediaAdmission: Bool = false
-    ) {
-        guard isTransportTrafficAllowed else {
-            if requiresPrivateMediaAdmission, let transferId {
-                privateMediaTransferAdmissions.finish(transferId)
-            }
-            return
-        }
-        if requiresPrivateMediaAdmission {
-            guard let transferId,
-                  privateMediaTransferAdmissions.isActive(transferId) else {
-                if let transferId {
-                    privateMediaTransferAdmissions.finish(transferId)
-                }
-                return
-            }
-        }
+    private func broadcastPacket(_ packet: BitchatPacket) {
+        guard isTransportTrafficAllowed else { return }
         // Apply route if recipient exists (centralized route application)
         let packetToSend: BitchatPacket
         if let recipientPeerID = PeerID(hexData: packet.recipientID) {
@@ -2210,102 +1386,10 @@ final class BLEService: NSObject {
         // Encode once using a small per-type padding policy, then delegate by type
         let padForBLE = BLEOutboundPacketPolicy.padsBLEFrame(for: packetToSend.type)
 
-        // Current Android peers advertise encrypted private media and still
-        // reject fragment sets above 256. The capability bit does not promise
-        // a larger reassembly limit, so both private-media wire shapes use
-        // that ceiling until an explicit per-peer limit is negotiated.
-        // Plan the final ciphertext/signed packet after route application:
-        // plaintext size alone misses encryption, signature and route costs.
-        // Public media and ordinary Noise traffic retain their existing policy.
-        if let transferId,
-           let recipientPeerID = PeerID(hexData: packetToSend.recipientID),
-           packetToSend.type == MessageType.fileTransfer.rawValue
-                || packetToSend.type == MessageType.noiseEncrypted.rawValue {
-            let compatibilityRequest = BLEOutboundFragmentTransferRequest(
-                packet: packetToSend,
-                pad: padForBLE,
-                maxChunk: nil,
-                directedPeer: recipientPeerID,
-                transferId: transferId
-            )
-            guard let plan = BLEOutboundFragmentPlanner.makePlan(
-                for: compatibilityRequest,
-                defaultChunkSize: defaultFragmentSize,
-                bleMaxMTU: bleMaxMTU
-            ), BLEOutboundFragmentPlanner.isPrivateMediaV1Compatible(plan) else {
-                SecureLogger.warning(
-                    "Private media rejected: exceeds cross-platform 256-fragment limit",
-                    category: .security
-                )
-                TransferProgressManager.shared.rejectBeforeStart(
-                    id: transferId,
-                    reason: String(
-                        localized: "content.delivery.reason.private_media_too_many_fragments",
-                        defaultValue: "File is too large for this contact's client (more than 256 mesh fragments)",
-                        comment: "Failure reason when private media exceeds the Android-compatible fragment limit"
-                    )
-                )
-                if requiresPrivateMediaAdmission {
-                    privateMediaTransferAdmissions.finish(transferId)
-                }
-                return
-            }
-        }
-
-        // Route planning and fragment preflight can take enough time for a
-        // user cancellation to win. Recheck before exposing even the test tap,
-        // then check atomically with scheduler admission below.
-        if requiresPrivateMediaAdmission {
-            guard let transferId,
-                  privateMediaTransferAdmissions.isActive(transferId) else {
-                if let transferId {
-                    privateMediaTransferAdmissions.finish(transferId)
-                }
-                return
-            }
-        }
-
         #if DEBUG
         _test_onOutboundPacket?(packetToSend)
         #endif
 
-        if packetToSend.type == MessageType.fileTransfer.rawValue {
-            sendFragmentedPacket(
-                packetToSend,
-                pad: padForBLE,
-                maxChunk: nil,
-                directedOnlyPeer: nil,
-                transferId: transferId,
-                requiresPrivateMediaAdmission: requiresPrivateMediaAdmission
-            )
-            return
-        }
-        // App-initiated private media is already one opaque Noise ciphertext.
-        // Always fragment that outer packet so the existing transfer scheduler
-        // retains progress/cancel behavior without exposing the file TLVs.
-        if packetToSend.type == MessageType.noiseEncrypted.rawValue,
-           let transferId,
-           let recipientPeerID = PeerID(hexData: packetToSend.recipientID) {
-            sendFragmentedPacket(
-                packetToSend,
-                pad: padForBLE,
-                maxChunk: nil,
-                directedOnlyPeer: recipientPeerID,
-                transferId: transferId,
-                requiresPrivateMediaAdmission: requiresPrivateMediaAdmission
-            )
-            return
-        }
-        if requiresPrivateMediaAdmission {
-            if let transferId {
-                privateMediaTransferAdmissions.finish(transferId)
-            }
-            SecureLogger.error(
-                "Private media admission reached an unsupported non-directed packet shape",
-                category: .security
-            )
-            return
-        }
         guard let data = packetToSend.toBinaryData(padding: padForBLE) else {
             SecureLogger.error("❌ Failed to convert packet to binary data", category: .session)
             return
@@ -2741,111 +1825,6 @@ final class BLEService: NSObject {
         )
     }
 
-    private func handleFileTransfer(_ packet: BitchatPacket, from peerID: PeerID) -> Bool {
-        fileTransferHandler.handle(packet, from: peerID)
-    }
-
-    /// Builds the file-transfer handler environment. All queue hops stay here
-    /// so `BLEFileTransferHandler` remains queue-agnostic and synchronously
-    /// testable.
-    private func makeFileTransferHandlerEnvironment() -> BLEFileTransferHandlerEnvironment {
-        BLEFileTransferHandlerEnvironment(
-            localPeerID: { [weak self] in
-                self?.myPeerID ?? PeerID(str: "")
-            },
-            localNickname: { [weak self] in
-                self?.myNickname ?? ""
-            },
-            peersSnapshot: { [weak self] in
-                guard let self = self else { return [:] }
-                return self.peerRegistry.snapshotByID
-            },
-            verifyPacketSignature: { [weak self] packet, signingPublicKey in
-                self?.noiseService.verifyPacketSignature(packet, publicKey: signingPublicKey) ?? false
-            },
-            localSigningPublicKey: { [weak self] in
-                self?.noiseService.getSigningPublicKeyData() ?? Data()
-            },
-            signedSenderDisplayName: { [weak self] packet, peerID in
-                self?.signedSenderDisplayName(for: packet, from: peerID)
-            },
-            trackPacketSeen: { [weak self] packet in
-                self?.gossipSyncManager?.onPublicPacketSeen(packet)
-            },
-            enforceStorageQuota: { [weak self] reservingBytes in
-                self?.incomingFileStore.enforceQuota(reservingBytes: reservingBytes)
-            },
-            saveIncomingFile: { [weak self] data, preferredName, subdirectory, fallbackExtension, defaultPrefix in
-                self?.incomingFileStore.save(
-                    data: data,
-                    preferredName: preferredName,
-                    subdirectory: subdirectory,
-                    fallbackExtension: fallbackExtension,
-                    defaultPrefix: defaultPrefix
-                )
-            },
-            privateMediaReceiptState: { [weak self] messageID in
-                self?.incomingFileStore.privateMediaReceiptState(
-                    messageID: messageID
-                ) ?? .unavailable
-            },
-            commitPrivateMediaFile: { [weak self] messageID, storedURL in
-                self?.incomingFileStore.commitPrivateMediaFile(
-                    messageID: messageID,
-                    storedURL: storedURL
-                ) ?? false
-            },
-            removeIncomingFile: { [weak self] storedURL in
-                self?.incomingFileStore.removeIncomingFile(at: storedURL)
-            },
-            finishIncomingFileDelivery: { [weak self] storedURL in
-                // Serialize pending-owner release behind deletion barriers.
-                // If /clear snapshots before this UI insertion, its already
-                // queued barrier must still observe the path as pending. If
-                // insertion wins first, the next MainActor snapshot sees the
-                // new bubble and protects the path explicitly.
-                self?.messageQueue.async {
-                    self?.incomingFileStore.finishIncomingFileDelivery(
-                        at: storedURL
-                    )
-                }
-            },
-            isPrivateMediaSenderBlocked: { [weak self] peerID in
-                guard let self else { return false }
-                let senderStaticKey = self.noiseService.getPeerPublicKeyData(peerID)
-                    ?? onEngine {
-                        self.peerRegistry.info(for: peerID)?.noisePublicKey
-                    }
-                guard let senderStaticKey else { return false }
-                return self.identityManager.isBlocked(
-                    fingerprint: senderStaticKey.sha256Fingerprint()
-                )
-            },
-            updatePeerLastSeen: { [weak self] peerID in
-                self?.updatePeerLastSeen(peerID)
-            },
-            acknowledgePrivateMedia: { [weak self] messageID, peerID in
-                guard let self,
-                      let senderStaticKey = self.noiseService.getPeerPublicKeyData(peerID),
-                      !self.identityManager.isBlocked(
-                        fingerprint: senderStaticKey.sha256Fingerprint()
-                      ) else {
-                    return
-                }
-                self.sendDeliveryAck(for: messageID, to: peerID)
-            },
-            deliverMessage: { [weak self] message, shouldDeliver, completion, finalization in
-                self?.emitTransportEvent(
-                    .messageReceived(message),
-                    shouldDeliver: shouldDeliver,
-                    completion: completion,
-                    finalization: finalization
-                )
-            },
-            rejectsIncomingMedia: { [weak self] in !(self?.acceptsIncomingMedia() ?? false) }
-        )
-    }
-    
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
         SecureLogger.debug("🔔 sendFavoriteNotification peer=\(peerID.id.prefix(8))… isFavorite=\(isFavorite)", category: .session)
         
@@ -3179,15 +2158,6 @@ extension BLEService {
         capturePanicLifecycleGeneration() != nil
     }
 
-    /// Queries the receipt store of the service's OWN incoming-file store —
-    /// the instance production lookups run against — so panic tests exercise
-    /// the real wiring instead of a same-instance shortcut.
-    func _test_privateMediaReceiptState(
-        messageID: String
-    ) -> BLEPrivateMediaReceiptState {
-        incomingFileStore.privateMediaReceiptState(messageID: messageID)
-    }
-
     /// Models a CoreBluetooth delegate callback without requiring a physical
     /// peripheral. The callback itself runs on `bleQueue`, exactly where the
     /// panic radio-stop barrier must linearize it.
@@ -3229,18 +2199,6 @@ extension BLEService {
     /// deterministic settling fence for simulated-mesh pumping.
     func _test_fenceEngine() {
         onEngine {}
-    }
-
-    func _test_emitTransportEvent(
-        _ event: TransportEvent,
-        completion: @escaping () -> Void,
-        finalization: @escaping (TransportEventDeliveryOutcome) -> Void
-    ) {
-        emitTransportEvent(
-            event,
-            completion: completion,
-            finalization: finalization
-        )
     }
 
     func _test_handlePacket(_ packet: BitchatPacket, fromPeerID: PeerID, preseedPeer: Bool = true, signingPublicKey: Data? = nil) {
@@ -3385,100 +2343,15 @@ extension BLEService {
 
     func _test_enqueuePendingNoisePayload(
         _ payload: Data,
-        transferId: String,
         for peerID: PeerID
     ) {
-        guard privateMediaTransferAdmissions.begin(transferId) == .admitted else { return }
         onEngine {
-            pendingNoiseSessionQueues.appendTypedPayload(
-                payload,
-                transferId: transferId,
-                for: peerID
-            )
+            pendingNoiseSessionQueues.appendTypedPayload(payload, for: peerID)
         }
-    }
-
-    func _test_sendPendingNoisePayloadsAfterHandshake(for peerID: PeerID) {
-        sendPendingNoisePayloadsAfterHandshake(for: peerID)
-    }
-
-    func _test_hasPendingPrivateMediaPolicyResolution(for peerID: PeerID) -> Bool {
-        privateMediaSessions.hasPendingPolicyResolution(for: peerID.toShort())
-    }
-
-    func _test_forcePrivateMediaProofTimeout(for peerID: PeerID) {
-        let normalizedPeerID = peerID.toShort()
-        let target = privateMediaSessions.proofTimeoutTarget(for: normalizedPeerID)
-        guard let target else { return }
-        handlePrivateMediaProofTimeout(
-            for: normalizedPeerID,
-            fingerprint: target.fingerprint,
-            sessionGeneration: target.generation,
-            nonce: target.nonce
-        )
-    }
-
-    func _test_privateMediaTransferState(
-        transferId: String
-    ) -> (admissionActive: Bool, pendingNoise: Bool, activeScheduler: Int, pendingScheduler: Int) {
-        let scheduler = onEngine {
-            (
-                pendingNoiseSessionQueues.containsTypedPayload(transferId: transferId),
-                outboundFragmentTransfers.activeCount,
-                outboundFragmentTransfers.pendingCount
-            )
-        }
-        return (
-            privateMediaTransferAdmissions.isActive(transferId),
-            scheduler.0,
-            scheduler.1,
-            scheduler.2
-        )
-    }
-
-    func _test_privateMediaAdmissionEntryCount() -> Int {
-        privateMediaTransferAdmissions.count
     }
 
     func _test_makeGossipDelegate() -> GossipSyncManager.Delegate {
         makeGossipDelegate()
-    }
-
-    @discardableResult
-    func _test_beginPrivateMediaAdmission(_ transferId: String, now: Date) -> Bool {
-        privateMediaTransferAdmissions.begin(transferId, now: now) == .admitted
-    }
-
-    func _test_isPrivateMediaAdmissionActive(_ transferId: String, now: Date) -> Bool {
-        privateMediaTransferAdmissions.isActive(transferId, now: now)
-    }
-
-    func _test_finishPrivateMediaAdmission(_ transferId: String) {
-        privateMediaTransferAdmissions.finish(transferId)
-    }
-
-    func _test_drainPrivateMediaSendPipeline() async {
-        // Capture only the (Sendable) queue, not self, so the @Sendable
-        // dispatch closures carry no non-Sendable state.
-        let queue = messageQueue
-        await withCheckedContinuation { continuation in
-            queue.async {
-                queue.async {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    func _test_broadcastPrivateMediaPacket(
-        _ packet: BitchatPacket,
-        transferId: String
-    ) {
-        broadcastPacket(
-            packet,
-            transferId: transferId,
-            requiresPrivateMediaAdmission: true
-        )
     }
 
     func _test_drainNoiseMessagePipeline() async {
@@ -3541,94 +2414,7 @@ extension BLEService {
     // Advertising payload and alias policy live on BLERadioController.
 }
 
-// MARK: - Private Media Deletion
-
-extension BLEService: PrivateMediaDeletionPersisting {
-    @MainActor
-    func persistDeletedPrivateMedia(
-        messageIDs: [String],
-        payloadRelativePaths: [String: String],
-        protectedPayloadRelativePaths: Set<String>,
-        completion: @escaping @MainActor (Bool) -> Void
-    ) {
-        let fileStore = incomingFileStore
-        messageQueue.async {
-            guard let reservation = fileStore
-                    .reservePrivateMediaDeletion(
-                        messageIDs: messageIDs,
-                        payloadRelativePaths: payloadRelativePaths
-                    ) else {
-                Task { @MainActor in
-                    completion(false)
-                }
-                return
-            }
-            let persisted = fileStore
-                .commitPrivateMediaDeletion(
-                    reservation: reservation,
-                    messageIDs: messageIDs,
-                    payloadRelativePaths: payloadRelativePaths,
-                    protectedPayloadRelativePaths:
-                        protectedPayloadRelativePaths
-                )
-            Task { @MainActor in
-                completion(persisted)
-            }
-        }
-    }
-
-    @MainActor
-    func removeLegacyPrivateMediaPayload(relativePath: String) {
-        let fileStore = incomingFileStore
-        messageQueue.async {
-            fileStore.removeLegacyIncomingFile(relativePath: relativePath)
-        }
-    }
-}
-
 // MARK: - Private Helpers
-
-enum TransportEventDeliveryOutcome: Equatable {
-    /// A synchronous sink inserted the message and revalidation succeeded.
-    case accepted
-    /// A supported plain delegate was invoked, but insertion cannot be
-    /// confirmed synchronously.
-    case invokedUnconfirmed
-    /// No sink accepted the event, or receipt revalidation rejected it.
-    case rejected
-}
-
-enum TransportEventDeliveryGate {
-    /// Runs finalization exactly once for every attempted main-actor delivery,
-    /// including pre-insertion rejection, a missing/rejecting sink, and
-    /// post-insertion revalidation failure. Only a fully accepted delivery
-    /// runs `completion` (for example, a stable-media ACK).
-    @MainActor
-    static func attempt(
-        shouldDeliver: () -> Bool,
-        deliver: () -> TransportEventDeliveryOutcome,
-        completion: () -> Void,
-        finalization: (TransportEventDeliveryOutcome) -> Void
-    ) {
-        var outcome = TransportEventDeliveryOutcome.rejected
-        defer { finalization(outcome) }
-        guard shouldDeliver() else {
-            return
-        }
-        switch deliver() {
-        case .rejected:
-            return
-        case .invokedUnconfirmed:
-            outcome = .invokedUnconfirmed
-            return
-        case .accepted:
-            break
-        }
-        guard shouldDeliver() else { return }
-        outcome = .accepted
-        completion()
-    }
-}
 
 extension BLEService {
     
@@ -3650,88 +2436,37 @@ extension BLEService {
         }
     }
 
-    func emitTransportEvent(
-        _ event: TransportEvent,
-        shouldDeliver: (() -> Bool)? = nil,
-        completion: (() -> Void)? = nil,
-        finalization: ((TransportEventDeliveryOutcome) -> Void)? = nil
-    ) {
-        guard let generation = capturePanicLifecycleGeneration() else {
-            Task { @MainActor in
-                finalization?(.rejected)
-            }
-            return
-        }
-        Task { @MainActor [weak self] in
-            guard let self,
-                  self.isCurrentPanicLifecycleGeneration(generation) else {
-                finalization?(.rejected)
-                return
-            }
-            TransportEventDeliveryGate.attempt(
-                shouldDeliver: {
-                    self.isCurrentPanicLifecycleGeneration(generation)
-                        && (shouldDeliver?() ?? true)
-                },
-                deliver: {
-                    return self.deliverTransportEvent(event)
-                },
-                completion: { completion?() },
-                finalization: { finalization?($0) }
-            )
+    func emitTransportEvent(_ event: TransportEvent) {
+        notifyUI { [weak self] in
+            self?.deliverTransportEvent(event)
         }
     }
 
-    /// Delivers a transport event to the installed delegates and reports
-    /// whether acceptance was confirmed.
-    ///
-    /// For `.messageReceived`, returns `true` only when a
-    /// `SynchronousMessageTransportEventDelegate` synchronously confirmed
-    /// acceptance of the message (duplicates count as accepted). Returns
-    /// `false` when acceptance cannot be confirmed: the sink blocked the
-    /// message, the content was empty, or only a non-synchronous delegate is
-    /// installed so delivery happens without confirmation. Downstream logic
-    /// MUST NOT treat `false` as safe to acknowledge — a `false` return
-    /// means do not ACK.
-    ///
-    /// For all other events, returns `true` when any delegate received the
-    /// event and `false` when no delegate is installed.
+    /// Delivers a transport event to the installed delegates. A
+    /// `.messageReceived` event prefers a sink that inserts it synchronously.
     @MainActor
-    @discardableResult
-    private func deliverTransportEvent(
-        _ event: TransportEvent
-    ) -> TransportEventDeliveryOutcome {
+    private func deliverTransportEvent(_ event: TransportEvent) {
         if case .messageReceived(let message) = event {
             if let synchronousDelegate =
                 eventDelegate as? SynchronousMessageTransportEventDelegate {
-                return synchronousDelegate
-                    .didReceiveTransportMessageSynchronously(message)
-                    ? .accepted
-                    : .rejected
+                _ = synchronousDelegate.didReceiveTransportMessageSynchronously(message)
+                return
             }
             if let eventDelegate {
                 eventDelegate.didReceiveTransportEvent(event)
-                return .invokedUnconfirmed
+                return
             }
             if let synchronousDelegate =
                 delegate as? SynchronousMessageTransportEventDelegate {
-                return synchronousDelegate
-                    .didReceiveTransportMessageSynchronously(message)
-                    ? .accepted
-                    : .rejected
+                _ = synchronousDelegate.didReceiveTransportMessageSynchronously(message)
+                return
             }
         }
 
         if let eventDelegate {
             eventDelegate.didReceiveTransportEvent(event)
-            return .accepted
         } else {
-            guard let delegate else { return .rejected }
-            delegate.receiveTransportEvent(event)
-            if case .messageReceived = event {
-                return .invokedUnconfirmed
-            }
-            return .accepted
+            delegate?.receiveTransportEvent(event)
         }
     }
 
@@ -4237,97 +2972,60 @@ extension BLEService {
         #endif
         let normalizedPeerID = peerID.toShort()
         // The generation lease serializes this transition against session
-        // replacement; nil-inside-nil distinguishes a lost lease (outer)
-        // from the same-generation reconciliation path (inner).
-        guard let leased = noiseService.withCurrentSessionGeneration(
+        // replacement; a nil lease means the generation was already replaced.
+        guard let isFreshGeneration = noiseService.withCurrentSessionGeneration(
             for: normalizedPeerID,
             expected: generation,
             {
-                privateMediaSessions.beginAuthenticatedGeneration(
+                peerStateSessions.beginAuthenticatedGeneration(
                     for: normalizedPeerID,
-                    fingerprint: fingerprint,
                     generation: generation
                 )
             }
         ) else { return }
 
-        guard let fresh = leased else {
-            // A quarantined transport restored the same cryptographic
-            // generation. Its capability proof and announce state never
-            // became stale; only work queued while outbound keys were paused
-            // needs one idempotent ready transition. Retrying the bounded
-            // early-ciphertext queue is receive-side and therefore always
-            // safe under the restored keys.
-            noisePacketHandler.handleSessionAuthenticated(normalizedPeerID)
-            #if DEBUG
-            _test_onPrivateMediaSessionReconciled?(normalizedPeerID)
-            #endif
-            if deferOutboundUntilConvergence {
-                // Timeout-restore: the counterpart may have completed the
-                // replacement handshake and discarded these keys, so
-                // encrypting the parked queues here would lose them silently.
-                // The restore's mandatory convergence retry — or any later
-                // handshake the reconnect policy initiates — re-enters this
-                // transition with a fresh generation and drains them under
-                // keys both sides hold. The flag also holds the proof
-                // watchdog's drain to the same rule.
-                privateMediaSessions.setOutboundDeferredUntilConvergence(normalizedPeerID)
-                return
-            }
-            privateMediaSessions.clearOutboundDeferredUntilConvergence(normalizedPeerID)
-            sendPendingMessagesAfterHandshake(for: normalizedPeerID)
-            sendPendingNoisePayloadsAfterHandshake(for: normalizedPeerID)
-            return
-        }
-
-        completePrivateMediaPolicyResolution(fresh.rejected, with: .blockedDowngrade)
-        schedulePrivateMediaProofTimeout(
-            for: normalizedPeerID,
-            fingerprint: fingerprint,
-            sessionGeneration: generation,
-            nonce: fresh.watchdogNonce
-        )
         // Cross-link delivery can put ciphertext sent immediately after
         // message 3 ahead of message 3 itself. Retry the bounded queue only
         // after this generation's transport state has been fully installed.
+        // A quarantined transport that restored the same cryptographic
+        // generation only needs this idempotent ready transition: retrying
+        // the early-ciphertext queue is receive-side and therefore always
+        // safe under the restored keys.
         noisePacketHandler.handleSessionAuthenticated(normalizedPeerID)
+        #if DEBUG
+        _test_onNoiseSessionReconciled?(normalizedPeerID)
+        #endif
 
         if deferOutboundUntilConvergence {
-            // Timeout-restore: the session is back for receive purposes and
-            // the generation-bound protocol state above is rebuilt, but the
-            // counterpart may already hold replacement keys that discarded
-            // this generation's. Encrypting the pending queues here would
-            // lose them silently, so leave them parked: the restore's
+            // Timeout-restore: the session is back for receive purposes, but
+            // the counterpart may already hold replacement keys that
+            // discarded this generation's. Encrypting the pending queues here
+            // would lose them silently, so leave them parked: the restore's
             // mandatory convergence retry — or any later handshake the
             // reconnect policy initiates — re-enters this transition with a
             // fresh generation and drains them under keys both sides hold.
-            // The flag also holds the proof watchdog's drain to the same
-            // rule — its timeout can fire while this restore is current.
-            privateMediaSessions.setOutboundDeferredUntilConvergence(normalizedPeerID)
-            #if DEBUG
-            _test_onPrivateMediaSessionReconciled?(normalizedPeerID)
-            #endif
             return
         }
-        privateMediaSessions.clearOutboundDeferredUntilConvergence(normalizedPeerID)
 
-        // `onPeerAuthenticated` can fire while the initiator is returning XX
-        // message 3. This callback is queued behind the handshake handler, so
-        // message 3 is broadcast first. Both peers also send one idempotent
-        // echo after receiving the other's state to recover cross-link races.
-        sendAuthenticatedPeerState(to: normalizedPeerID, echo: false)
-        #if DEBUG
-        _test_onPrivateMediaSessionReconciled?(normalizedPeerID)
-        #endif
+        if isFreshGeneration {
+            // `onPeerAuthenticated` can fire while the initiator is returning
+            // XX message 3. This callback is queued behind the handshake
+            // handler, so message 3 is broadcast first. Both peers also send
+            // one idempotent echo after receiving the other's state to
+            // recover cross-link races.
+            sendAuthenticatedPeerState(to: normalizedPeerID, echo: false)
+        }
         sendPendingMessagesAfterHandshake(for: normalizedPeerID)
         sendPendingNoisePayloadsAfterHandshake(for: normalizedPeerID)
-        sendAnnounce(forceSend: true)
+        if isFreshGeneration {
+            sendAnnounce(forceSend: true)
+        }
     }
 
     private func sendAuthenticatedPeerState(to peerID: PeerID, echo: Bool) {
         let normalizedPeerID = peerID.toShort()
         guard let signingPublicKey = noiseService.getSigningPublicKeyData(),
-              privateMediaSessions.markPeerStateSend(for: normalizedPeerID, echo: echo) else { return }
+              peerStateSessions.markPeerStateSend(for: normalizedPeerID, echo: echo) else { return }
         let capabilities = localIdentityState.snapshot().advertisedCapabilities
         let state = AuthenticatedPeerStatePacket(
             capabilities: capabilities,
@@ -4340,6 +3038,10 @@ extension BLEService {
         sendNoisePayload(payload, to: normalizedPeerID)
     }
 
+    /// Binds the peer's announcement signing key to its Noise identity. The
+    /// surrounding session authenticates the state, so a later self-signed
+    /// announce cannot replace that key. The capabilities it carries are
+    /// not used: Wesh has no feature they gate.
     private func handleAuthenticatedPeerState(
         _ payload: Data,
         from peerID: PeerID,
@@ -4369,13 +3071,12 @@ extension BLEService {
             )
             return
         }
-        guard let application = noiseService.withCurrentSessionGeneration(
+        guard let accepted = noiseService.withCurrentSessionGeneration(
             for: normalizedPeerID,
             expected: generation,
-            {
-                () -> (accepted: Bool, completions: [@MainActor (PrivateMediaSendPolicy) -> Void]) in
-                guard privateMediaSessions.currentGeneration(for: normalizedPeerID) == generation else {
-                    return (false, [])
+            { () -> Bool in
+                guard peerStateSessions.currentGeneration(for: normalizedPeerID) == generation else {
+                    return false
                 }
 
                 // The generation lease (plus the engine slot this section
@@ -4391,47 +3092,23 @@ extension BLEService {
                     signingPublicKey: state.signingPublicKey,
                     claimedNickname: nil
                 )
-                if state.capabilities.contains(.privateMedia) {
-                    identityManager.markPrivateMediaCapable(fingerprint: fingerprint)
-                }
-
                 peerRegistry.mutate {
                     $0.bindAuthenticatedSigningPublicKey(
                         state.signingPublicKey,
                         for: normalizedPeerID
                     )
                 }
-                guard let completions = privateMediaSessions.applyAuthenticatedPeerState(
-                    for: normalizedPeerID,
-                    fingerprint: fingerprint,
-                    generation: generation,
-                    capabilities: state.capabilities
-                ) else {
-                    return (false, [])
-                }
-                return (true, completions)
+                return true
             }
-        ), application.accepted else { return }
+        ), accepted else { return }
 
         // One bounded echo makes initiator/responder proof ordering converge
         // even when message 3 and the first proof take different mesh links.
         sendAuthenticatedPeerState(to: normalizedPeerID, echo: true)
-        let policy = privateMediaSendPolicy(to: normalizedPeerID)
-        sendPendingNoisePayloadsAfterHandshake(for: normalizedPeerID)
-        completePrivateMediaPolicyResolution(application.completions, with: policy)
     }
 
     private func noteNoiseSessionCleared(for peerID: PeerID) {
-        let normalizedPeerID = peerID.toShort()
-        let reset = privateMediaSessions.clearSession(for: normalizedPeerID)
-        if let reset {
-            schedulePrivateMediaProofTimeout(
-                for: normalizedPeerID,
-                fingerprint: reset.fingerprint,
-                sessionGeneration: nil,
-                nonce: reset.nonce
-            )
-        }
+        peerStateSessions.clearSession(for: peerID.toShort())
     }
 
     private func clearNoiseSession(for peerID: PeerID) {
@@ -4489,27 +3166,9 @@ extension BLEService {
 
     private func makeEncryptedNoisePacket(
         _ typedPayload: Data,
-        to peerID: PeerID,
-        requiresAuthenticatedPrivateMediaReceipts: Bool = false
+        to peerID: PeerID
     ) throws -> BitchatPacket {
-        let encrypted: Data
-        let isPrivateFile = NoisePayloadType.isPrivateFile(rawValue: typedPayload.first)
-        if isPrivateFile {
-            let provenGeneration = privateMediaSessions.provenGeneration(
-                for: peerID,
-                requireReceipts: requiresAuthenticatedPrivateMediaReceipts
-            )
-            guard let provenGeneration else {
-                throw NoiseEncryptionError.sessionNotEstablished
-            }
-            encrypted = try noiseService.encryptPrivateFilePayload(
-                typedPayload,
-                for: peerID,
-                sessionGeneration: provenGeneration
-            )
-        } else {
-            encrypted = try noiseService.encrypt(typedPayload, for: peerID)
-        }
+        let encrypted = try noiseService.encrypt(typedPayload, for: peerID)
         return BitchatPacket(
             type: MessageType.noiseEncrypted.rawValue,
             senderID: myPeerIDData,
@@ -4517,9 +3176,7 @@ extension BLEService {
             timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
             payload: encrypted,
             signature: nil,
-            ttl: messageTTL,
-            // v1 has a 16-bit payload length; finalized media can exceed it.
-            version: isPrivateFile ? 2 : 1
+            ttl: messageTTL
         )
     }
 
@@ -5350,7 +4007,7 @@ extension BLEService {
         }
         guard isTransportTrafficAllowed else { return }
         // Sessions and wire recipient IDs are keyed by the short 16-hex form;
-        // callers may pass the full 64-hex noise key (mirrors sendFilePrivate).
+        // callers may pass the full 64-hex noise key.
         let recipientID = recipientID.toShort()
         SecureLogger.debug("📨 Sending PM to \(recipientID.id.prefix(8))… id=\(messageID.prefix(8))… chars=\(content.count) bytes=\(content.utf8.count)", category: .session)
 
@@ -5528,123 +4185,23 @@ extension BLEService {
         pad: Bool,
         maxChunk: Int? = nil,
         directedOnlyPeer: PeerID? = nil,
-        transferId: String? = nil,
         requireDirectPeerLink: Bool = false,
-        requireNoiseAuthenticatedPeerLink: Bool = false,
-        requiresPrivateMediaAdmission: Bool = false
+        requireNoiseAuthenticatedPeerLink: Bool = false
     ) -> Bool {
         let request = BLEOutboundFragmentTransferRequest(
             packet: packet,
             pad: pad,
             maxChunk: maxChunk,
-            directedPeer: directedOnlyPeer,
-            transferId: transferId,
-            requireDirectPeerLink: requireDirectPeerLink,
-            requireNoiseAuthenticatedPeerLink: requireNoiseAuthenticatedPeerLink,
-            servicesRequestGeneration: currentServicesRequestGeneration()
+            directedPeer: directedOnlyPeer
         )
-
-        let result: BLEOutboundFragmentTransferScheduler.SubmitResult? = onEngine {
-            if requiresPrivateMediaAdmission {
-                guard let transferId else { return nil }
-                // This lock is taken while the scheduler is already
-                // engine-confined. Cancellation takes the admission lock
-                // synchronously but never waits on the engine, avoiding
-                // lock inversion while giving submit/cancel one linear order.
-                return privateMediaTransferAdmissions.withActive(transferId) {
-                    outboundFragmentTransfers.submit(
-                        request,
-                        maxConcurrentTransfers: TransportConfig.bleMaxConcurrentTransfers
-                    )
-                }
-            }
-            return outboundFragmentTransfers.submit(
-                request,
-                maxConcurrentTransfers: TransportConfig.bleMaxConcurrentTransfers
-            )
-        }
-        guard let result else {
-            if let transferId, requiresPrivateMediaAdmission {
-                privateMediaTransferAdmissions.finish(transferId)
-            }
-            return false
-        }
-        if let transferId, requiresPrivateMediaAdmission {
-            // The scheduler now owns normal cancellation (active or pending).
-            privateMediaTransferAdmissions.finish(transferId)
-        }
-        return handleFragmentTransferSubmitResult(result)
-    }
-
-    @discardableResult
-    private func handleFragmentTransferSubmitResult(_ result: BLEOutboundFragmentTransferScheduler.SubmitResult) -> Bool {
-        switch result {
-        case let .start(request, reservedTransferId):
-            return startFragmentedPacket(request, reservedTransferId: reservedTransferId)
-
-        case let .queued(_, transferId, _):
-            if let transferId {
-                SecureLogger.debug("🚦 Queued media transfer \(transferId.prefix(8))… waiting for slot", category: .session)
-            } else {
-                SecureLogger.debug("🚦 Queued fragment transfer waiting for slot", category: .session)
-            }
-            return false
-
-        case let .rejectedStrict(_, transferId):
-            SecureLogger.debug(
-                "🚫 Strict directed fragment transfer \(transferId?.prefix(8) ?? "?")… rejected while scheduler busy",
-                category: .session
-            )
-            return false
-
-        case let .droppedDuplicate(_, activeTransferId):
-            SecureLogger.debug(
-                "🔁 Skipping duplicate outbound transfer — same content already in flight as \(activeTransferId?.prefix(8) ?? "?")…",
-                category: .session
-            )
-            return false
-        }
-    }
-
-    @discardableResult
-    private func startFragmentedPacket(
-        _ request: BLEOutboundFragmentTransferRequest,
-        reservedTransferId: String?
-    ) -> Bool {
-        let servicesGeneration = request.servicesRequestGeneration ?? currentServicesRequestGeneration()
-        let unavailableReason = String(
-            localized: "content.delivery.reason.send_error",
-            defaultValue: "send error",
-            comment: "Failure reason when scheduled media fragments can no longer be sent"
-        )
-        let releaseReservedSlot: (String) -> Void = { [weak self] id in
-            guard let self = self else { return }
-            TransferProgressManager.shared.cancel(id: id)
-            messageQueue.async { [weak self] in
-                _ = self?.outboundFragmentTransfers.releaseReservation(id)
-            }
-            self.messageQueue.async { [weak self] in
-                self?.startNextPendingTransferIfNeeded()
-            }
-        }
-
-        guard isTransportTrafficAllowed,
-              currentServicesRequestGeneration() == servicesGeneration else {
-            if let id = reservedTransferId {
-                releaseReservedSlot(id)
-                TransferProgressManager.shared.rejectBeforeStart(id: id, reason: unavailableReason)
-            }
-            return false
-        }
+        let servicesGeneration = currentServicesRequestGeneration()
+        guard isTransportTrafficAllowed else { return false }
 
         guard let plan = BLEOutboundFragmentPlanner.makePlan(
             for: request,
             defaultChunkSize: defaultFragmentSize,
             bleMaxMTU: bleMaxMTU
         ) else {
-            if let id = reservedTransferId {
-                releaseReservedSlot(id)
-            }
             return false
         }
 
@@ -5662,34 +4219,15 @@ extension BLEService {
             }
         }
 
-        let transferIdentifier: String?
-        if let id = reservedTransferId {
-            let activated = onEngine {
-                self.outboundFragmentTransfers.activateReservedTransfer(
-                    id: id,
-                    totalFragments: plan.totalFragments,
-                    workItems: []
-                )
-            }
-            // Cancellation may remove the reservation between submit and plan
-            // construction. Treat that as cancellation, not as permission to
-            // schedule an untracked fragment train.
-            guard activated else { return false }
-            TransferProgressManager.shared.start(id: id, totalFragments: plan.totalFragments)
-            transferIdentifier = id
-        } else {
-            transferIdentifier = nil
-        }
-
         let sendFragment: (BitchatPacket) -> Bool = { [weak self] fragmentPacket in
             guard let self, self.isTransportTrafficAllowed,
                   self.currentServicesRequestGeneration() == servicesGeneration else { return false }
-            if request.requireDirectPeerLink, let directedPeer = request.directedPeer {
+            if requireDirectPeerLink, let directedOnlyPeer {
                 return self.sendPacketDirected(
                     fragmentPacket,
-                    to: directedPeer,
+                    to: directedOnlyPeer,
                     requireDirectPeerLink: true,
-                    requireNoiseAuthenticatedPeerLink: request.requireNoiseAuthenticatedPeerLink
+                    requireNoiseAuthenticatedPeerLink: requireNoiseAuthenticatedPeerLink
                 )
             }
             self.broadcastPacket(fragmentPacket)
@@ -5702,107 +4240,24 @@ extension BLEService {
         // link or its bounded retry queue before the durable owner may commit.
         // A partial train is harmlessly abandoned and the envelope stays
         // retryable with a fresh fragment ID on the next encounter.
-        if request.requireDirectPeerLink {
-            let admitted = BLEStrictFragmentAdmission.admitAll(plan.fragmentPackets) { fragmentPacket in
-                guard sendFragment(fragmentPacket) else { return false }
-                if let transferId = transferIdentifier {
-                    markFragmentSent(transferId: transferId)
-                }
-                return true
-            }
-            guard admitted else {
-                if let id = reservedTransferId {
-                    releaseReservedSlot(id)
-                }
-                return false
-            }
-            return true
+        if requireDirectPeerLink {
+            return BLEStrictFragmentAdmission.admitAll(plan.fragmentPackets, accepting: sendFragment)
         }
-
-        var scheduledItems: [(item: DispatchWorkItem, index: Int)] = []
 
         for (index, fragmentPacket) in plan.fragmentPackets.enumerated() {
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
-                if let transferId = transferIdentifier {
-                    let isActive = onEngine { self.outboundFragmentTransfers.isActive(transferId) }
-                    guard isActive else { return }
-                }
                 if fragmentPacket.recipientID == nil || fragmentPacket.recipientID?.allSatisfy({ $0 == 0xFF }) == true {
                     self.gossipSyncManager?.onPublicPacketSeen(fragmentPacket)
                 }
-                guard sendFragment(fragmentPacket) else {
-                    if let transferId = transferIdentifier {
-                        let cancelled = onEngine {
-                            self.outboundFragmentTransfers.cancelTransfer(transferId)
-                        }
-                        if case let .active(_, workItems) = cancelled {
-                            workItems.forEach { $0.cancel() }
-                            TransferProgressManager.shared.rejectBeforeStart(
-                                id: transferId,
-                                reason: unavailableReason
-                            )
-                            self.startNextPendingTransferIfNeeded()
-                        }
-                    }
-                    return
-                }
-                if let transferId = transferIdentifier {
-                    self.markFragmentSent(transferId: transferId)
-                }
+                _ = sendFragment(fragmentPacket)
             }
-
-            scheduledItems.append((item: workItem, index: index))
-        }
-
-        if let transferId = transferIdentifier {
-            let workItems = scheduledItems.map { $0.item }
-            messageQueue.async { [weak self] in
-                _ = self?.outboundFragmentTransfers.updateWorkItems(workItems, for: transferId)
-            }
-        }
-
-        for (workItem, index) in scheduledItems {
             let delayMs = index * plan.spacingMs
             engineScheduler.schedule(after: Double(delayMs) / 1_000, execute: workItem)
         }
         return true
     }
-    
-    // MARK: - Fragmentation (Required for messages > BLE MTU)
 
-    private func markFragmentSent(transferId: String) {
-        messageQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            switch self.outboundFragmentTransfers.markFragmentSent(transferId: transferId) {
-            case .progress, .complete:
-                TransferProgressManager.shared.recordFragmentSent(id: transferId)
-
-            case .missing:
-                return
-            }
-
-            if !self.outboundFragmentTransfers.isActive(transferId) {
-                self.messageQueue.async { [weak self] in
-                    self?.startNextPendingTransferIfNeeded()
-                }
-            }
-        }
-    }
-
-    private func startNextPendingTransferIfNeeded() {
-        let results = onEngine {
-            outboundFragmentTransfers.reservePendingStarts(maxConcurrentTransfers: TransportConfig.bleMaxConcurrentTransfers)
-        }
-
-        for result in results {
-            messageQueue.async { [weak self] in
-                self?.handleFragmentTransferSubmitResult(result)
-            }
-        }
-    }
-    
     private func handleFragment(_ packet: BitchatPacket, from peerID: PeerID) {
         if DispatchQueue.getSpecific(key: messageQueueKey) != nil {
             fragmentHandler.handle(packet, from: peerID)
@@ -6144,13 +4599,18 @@ extension BLEService {
             handleNoiseEncrypted(packet, from: senderID)
             
         case .fragment:
+            // A BitChat file transfer travels as fragments: Wesh neither
+            // reassembles, stores for sync nor relays them.
+            if BLEFragmentHeader(packet: packet)?.originalType == MessageType.fileTransfer.rawValue {
+                return
+            }
             handleFragment(packet, from: senderID)
-            
+
         case .fileTransfer:
-            // Broadcast files that fail sender authentication must not spread
-            // to downstream (possibly older, ungated) nodes; skip the relay
-            // step below, like invalid board posts.
-            guard handleFileTransfer(packet, from: senderID) else { return }
+            // Wesh has no media: a BitChat file (public or directed) is
+            // neither stored, shown nor relayed. The type stays known so it
+            // never takes the `.none` path, which would relay it.
+            return
 
         case .courierEnvelope:
             handleCourierEnvelope(packet, from: peerID)
@@ -6249,15 +4709,15 @@ extension BLEService {
     private func handleAnnounce(_ packet: BitchatPacket, from peerID: PeerID) {
         let result = announceHandler.handle(packet, from: peerID)
 
-        // A capability bit in the public announce is only a discovery hint.
-        // Start authentication promptly for a directly connected candidate,
-        // but never pin or pre-queue private bytes until encrypted 0x21 state
-        // arrives from the completed Noise session.
+        // Start authentication promptly for a directly connected current
+        // client: a Wesh private send needs an established session with the
+        // QR contact. Any client that announces a capability set qualifies
+        // (this used to key on the private-media bit, which every current
+        // client advertised); older clients still authenticate on demand.
         if let result,
            result.isVerified,
            result.isDirectAnnounce,
-           result.announcement.capabilities?.contains(.privateMedia) == true,
-           privateMediaSendPolicy(to: result.peerID) == .awaitingCapabilityProof,
+           result.announcement.capabilities != nil,
            !noiseService.hasSession(with: result.peerID) {
             initiateNoiseHandshake(with: result.peerID)
         }
@@ -6889,7 +5349,7 @@ extension BLEService {
                     payload,
                     from: peerID,
                     establishedGenerationIsReady: { generation in
-                        self.privateMediaSessions.currentGeneration(
+                        self.peerStateSessions.currentGeneration(
                             for: peerID.toShort()
                         ) == generation
                     }
@@ -6910,15 +5370,8 @@ extension BLEService {
                 )
             },
             deliverNoisePayload: { [weak self] peerID, type, payload, timestamp in
-                if type == .privateFile {
-                    self?.fileTransferHandler.handlePrivatePayload(
-                        payload,
-                        from: peerID,
-                        timestamp: timestamp
-                    )
-                    return
-                }
-                // Single main-actor hop delivering `.noisePayloadReceived`.
+                // Single main-actor hop. A private file is not stored here:
+                // the app turns an admitted one into a placeholder line. delivering `.noisePayloadReceived`.
                 self?.notifyUI { [weak self] in
                     self?.deliverTransportEvent(.noisePayloadReceived(
                         peerID: peerID,
@@ -6934,83 +5387,16 @@ extension BLEService {
     // MARK: Helper Functions
     
     private func sendPendingNoisePayloadsAfterHandshake(for peerID: PeerID) {
-        let payloads = onEngine { () -> [BLEPendingTypedPayload] in
+        let payloads = onEngine { () -> [Data] in
             pendingNoiseSessionQueues.takeTypedPayloads(for: peerID)
         }
         guard !payloads.isEmpty else { return }
         SecureLogger.debug("📤 Sending \(payloads.count) pending noise payloads to \(peerID.id.prefix(8))… after handshake", category: .session)
-        for pending in payloads {
-            let isPrivateMedia = NoisePayloadType.isPrivateFile(rawValue: pending.payload.first)
-            let privateMediaTransferId = isPrivateMedia ? pending.transferId : nil
-
-            if isPrivateMedia {
-                switch privateMediaSendPolicy(to: peerID) {
-                case .encrypted:
-                    break
-
-                case .awaitingCapabilityProof:
-                    // Handshake completion alone is insufficient. Put the
-                    // exact payload back until authenticated 0x21 state
-                    // arrives; that handler calls this drain again.
-                    onEngine {
-                        pendingNoiseSessionQueues.appendTypedPayload(
-                            pending.payload,
-                            transferId: pending.transferId,
-                            for: peerID
-                        )
-                    }
-                    continue
-
-                case .legacyRequiresConsent, .blockedDowngrade:
-                    if let transferId = pending.transferId {
-                        TransferProgressManager.shared.rejectBeforeStart(
-                            id: transferId,
-                            reason: String(
-                                localized: "content.delivery.reason.private_media_capability_unresolved",
-                                defaultValue: "Could not confirm encrypted media support",
-                                comment: "Failure reason when queued private media cannot be authenticated after handshake"
-                            )
-                        )
-                        privateMediaTransferAdmissions.finish(transferId)
-                    }
-                    continue
-                }
-            }
-            if let transferId = privateMediaTransferId,
-               !privateMediaTransferAdmissions.isActive(transferId) {
-                privateMediaTransferAdmissions.finish(transferId)
-                continue
-            }
+        for payload in payloads {
             do {
-                if let transferId = privateMediaTransferId,
-                   !privateMediaTransferAdmissions.isActive(transferId) {
-                    privateMediaTransferAdmissions.finish(transferId)
-                    continue
-                }
-                let packet = try makeEncryptedNoisePacket(pending.payload, to: peerID)
-                if let transferId = privateMediaTransferId,
-                   !privateMediaTransferAdmissions.isActive(transferId) {
-                    privateMediaTransferAdmissions.finish(transferId)
-                    continue
-                }
-                broadcastPacket(
-                    packet,
-                    transferId: pending.transferId,
-                    requiresPrivateMediaAdmission: privateMediaTransferId != nil
-                )
+                broadcastPacket(try makeEncryptedNoisePacket(payload, to: peerID))
             } catch {
                 SecureLogger.error("❌ Failed to send pending noise payload to \(peerID.id.prefix(8))…: \(error)")
-                if let transferId = pending.transferId {
-                    TransferProgressManager.shared.rejectBeforeStart(
-                        id: transferId,
-                        reason: String(
-                            localized: "content.delivery.reason.encryption_failed",
-                            defaultValue: "Failed to encrypt media",
-                            comment: "Failure reason shown when queued private media cannot be encrypted after handshake"
-                        )
-                    )
-                    privateMediaTransferAdmissions.finish(transferId)
-                }
             }
         }
     }
@@ -7173,11 +5559,6 @@ extension BLEService {
     private func performCleanup() {
         let now = Date()
 
-        // Admission expiry is a visible transfer failure, never a silent
-        // eviction. The registry delivers notifications after releasing its
-        // lock, so this maintenance pass cannot deadlock a concurrent cancel.
-        privateMediaTransferAdmissions.prune(now: now)
-        
         // Clean old processed messages efficiently
         messageDeduplicator.cleanup()
         

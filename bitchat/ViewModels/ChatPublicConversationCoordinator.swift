@@ -37,9 +37,6 @@ protocol ChatPublicConversationContext: AnyObject {
     @discardableResult
     func appendPublicMessage(_ message: BitchatMessage, to conversationID: ConversationID) -> Bool
     func publicConversationContainsMessage(withID messageID: String, in conversationID: ConversationID) -> Bool
-    /// Removes a message by ID from whichever public conversation contains it.
-    @discardableResult
-    func removePublicMessage(withID messageID: String) -> BitchatMessage?
     /// Removes every matching message from a geohash conversation (block purge).
     func removePublicMessages(fromGeohash geohash: String, where predicate: (BitchatMessage) -> Bool)
     /// Empties a public conversation's timeline (`/clear`).
@@ -50,15 +47,10 @@ protocol ChatPublicConversationContext: AnyObject {
     /// Queues a system message for the next geohash channel visit.
     func queueGeohashSystemMessage(_ content: String)
 
-    // MARK: Private chats (block cleanup & message removal)
+    // MARK: Private chats (block cleanup)
     /// Removes the peer's chat entirely, including unread state
     /// (single-writer store intent; no-op for unknown peers).
     func removePrivateChat(_ peerID: PeerID)
-    /// Removes a message by ID from every private chat containing it,
-    /// dropping chats that become empty. Returns the removed message.
-    @discardableResult
-    func removePrivateMessage(withID messageID: String) -> BitchatMessage?
-    func cleanupLocalFile(forMessage message: BitchatMessage)
 
     // MARK: Geohash participants & presence
     var geoNicknames: [String: String] { get }
@@ -110,7 +102,6 @@ extension ChatViewModel: ChatPublicConversationContext {
     // `deriveNostrIdentity(forGeohash:)`, the public conversation store
     // intents (`appendPublicMessage(_:to:)`,
     // `publicConversationContainsMessage(withID:in:)`,
-    // `removePublicMessage(withID:)`,
     // `removePublicMessages(fromGeohash:where:)`,
     // `clearPublicConversation(_:)`, and `queueGeohashSystemMessage(_:)`)
     // are shared requirements with `ChatDeliveryContext` /
@@ -274,20 +265,6 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
         return (displaySender, senderPeerID)
     }
 
-    func removeMessage(withID messageID: String, cleanupFile: Bool = false) {
-        var removedMessage = context.removePublicMessage(withID: messageID)
-
-        if let removedPrivateMessage = context.removePrivateMessage(withID: messageID) {
-            removedMessage = removedMessage ?? removedPrivateMessage
-        }
-
-        if cleanupFile, let removedMessage {
-            context.cleanupLocalFile(forMessage: removedMessage)
-        }
-
-        context.notifyUIChanged()
-    }
-
     func clearCurrentPublicTimeline() {
         context.clearPublicConversation(ConversationID(channelID: context.activeChannel))
 
@@ -300,42 +277,6 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
             MeshEchoSettings.clearedThrough = Date()
             archivedEchoKeys.removeAll()
             context.purgeArchivedPublicMessages()
-        }
-
-        // The SPM test process shares the real Application Support tree, so this
-        // detached deletion can land mid-test under parallel scheduling and flake
-        // a file-dependent test. Tests never need the on-disk media cleared.
-        guard !TestEnvironment.isRunningTests else { return }
-
-        Task.detached(priority: .utility) {
-            // Skipped under tests: the test process shares the user's real
-            // ~/Library/Application Support/files tree, and this detached
-            // wipe fires at a nondeterministic time — racing tests that
-            // write media there (see the same guard in panicClearAllData).
-            guard !TestEnvironment.isRunningTests else { return }
-            do {
-                let base = try FileManager.default.url(
-                    for: .applicationSupportDirectory,
-                    in: .userDomainMask,
-                    appropriateFor: nil,
-                    create: true
-                )
-                let filesDir = base.appendingPathComponent("files", isDirectory: true)
-                let outgoingDirs = [
-                    filesDir.appendingPathComponent("voicenotes/outgoing", isDirectory: true),
-                    filesDir.appendingPathComponent("images/outgoing", isDirectory: true),
-                    filesDir.appendingPathComponent("files/outgoing", isDirectory: true)
-                ]
-
-                for dir in outgoingDirs {
-                    if FileManager.default.fileExists(atPath: dir.path) {
-                        try? FileManager.default.removeItem(at: dir)
-                        try? LocalFileProtection.createDirectory(dir)
-                    }
-                }
-            } catch {
-                SecureLogger.error("Failed to clear media files: \(error)", category: .session)
-            }
         }
     }
 

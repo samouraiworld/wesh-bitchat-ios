@@ -77,7 +77,6 @@ final class ChatViewModelBootstrapper {
         startRuntimeServices()
         bindPeerService()
         configureNoiseCallbacks()
-        bindTransferProgress()
         configureGeoChannels()
         configureGateway()
         configureBridge()
@@ -308,17 +307,6 @@ private extension ChatViewModelBootstrapper {
 
     func configureNoiseCallbacks() {
         viewModel.setupNoiseCallbacks()
-    }
-
-    func bindTransferProgress() {
-        TransferProgressManager.shared.publisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak viewModel] event in
-                Task { @MainActor [weak viewModel] in
-                    viewModel?.handleTransferEvent(event)
-                }
-            }
-            .store(in: &viewModel.cancellables)
     }
 
     func configureGeoChannels() {

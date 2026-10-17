@@ -366,78 +366,6 @@ struct ChatViewModelDeliveryStatusTests {
     }
 
     @Test @MainActor
-    func authenticatedNoiseAckClearsOnlyIntendedPeersPrivateMediaRetry() async throws {
-        let (viewModel, transport) = makeTestableViewModel()
-        let intendedPeer = PeerID(str: "0102030405060708")
-        let otherPeer = PeerID(str: "1112131415161718")
-        let fileName = "voice_0011223344556677.m4a"
-        let content = Data("voice".utf8)
-
-        transport.privateMediaPolicies[intendedPeer] = .encrypted
-        transport.privateMediaReceiptSessionGenerations[intendedPeer] = UUID()
-        viewModel.selectedPrivateChatPeer = intendedPeer
-        let coordinator = ChatMediaTransferCoordinator(
-            context: viewModel,
-            prepareVoiceNotePacket: { _ in
-                BitchatFilePacket(
-                    fileName: fileName,
-                    fileSize: UInt64(content.count),
-                    mimeType: "audio/mp4",
-                    content: content
-                )
-            },
-            transferIDFactory: { "\($0)-receipt-ack" }
-        )
-        viewModel.mediaTransferCoordinator = coordinator
-
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "scoped-media-ack-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        let sourceURL = directory.appendingPathComponent(fileName)
-        try content.write(to: sourceURL)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        coordinator.sendVoiceNote(at: sourceURL)
-        #expect(await TestHelpers.waitUntil(
-            {
-                transport.sentPrivateFiles.count == 1
-                    && coordinator.retainedReconnectRetryCount == 1
-            },
-            timeout: TestConstants.longTimeout
-        ))
-        let messageID = try #require(
-            viewModel.privateChats[intendedPeer]?.first?.id
-        )
-        let transferID = try #require(
-            transport.sentPrivateFiles.first?.transferID
-        )
-
-        #expect(!viewModel.deliveryCoordinator
-            .updateAcknowledgedMessageDeliveryStatus(
-                messageID,
-                status: .delivered(to: "Other", at: Date()),
-                from: [otherPeer]
-            ))
-        #expect(coordinator.retainedReconnectRetryCount == 1)
-        #expect(transport.cancelledTransfers.isEmpty)
-
-        #expect(viewModel.deliveryCoordinator
-            .updateAcknowledgedMessageDeliveryStatus(
-                messageID,
-                status: .delivered(to: "Intended", at: Date()),
-                from: [intendedPeer]
-            ))
-        #expect(coordinator.retainedReconnectRetryCount == 0)
-        #expect(transport.cancelledTransfers == [transferID])
-    }
-
-    @Test @MainActor
     func cleanupOldReadReceipts_removesReceiptIDsWithoutMessages() async {
         let (viewModel, transport) = makeTestableViewModel()
         let peerID = PeerID(str: "0102030405060709")
@@ -778,7 +706,6 @@ private final class MockChatDeliveryContext: ChatDeliveryContext {
     private(set) var notifyUIChangedCount = 0
     private(set) var markedDeliveredMessageIDs: [String] = []
     private(set) var peerBoundDeliveredMessages: [(messageID: String, peerIDs: Set<PeerID>)] = []
-    private(set) var confirmedMediaMessageIDs: [String] = []
 
     @discardableResult
     func setDeliveryStatus(_ status: DeliveryStatus, forMessageID messageID: String) -> Bool {
@@ -822,10 +749,6 @@ private final class MockChatDeliveryContext: ChatDeliveryContext {
 
     func markMessageDelivered(_ messageID: String, from peerIDs: Set<PeerID>) {
         peerBoundDeliveredMessages.append((messageID, peerIDs))
-    }
-
-    func confirmPrivateMediaDelivery(_ messageID: String) {
-        confirmedMediaMessageIDs.append(messageID)
     }
 
     func isOutgoingPrivateMessage(_ messageID: String, toAny peerIDs: Set<PeerID>) -> Bool {
@@ -1039,12 +962,11 @@ struct ChatDeliveryCoordinatorContextTests {
         #expect(isSent(coordinator.deliveryStatus(for: messageID)))
         // The router-side clear runs, but bound only to the wrong peer's own
         // aliases — a scoped no-op that cannot touch the intended peer's
-        // retained copy. Status, media retry, and UI stay untouched.
+        // retained copy. Status and UI stay untouched.
         #expect(context.peerBoundDeliveredMessages.count == 1)
         #expect(context.peerBoundDeliveredMessages[0].messageID == messageID)
         #expect(context.peerBoundDeliveredMessages[0].peerIDs == [otherPeer])
         #expect(context.markedDeliveredMessageIDs.isEmpty)
-        #expect(context.confirmedMediaMessageIDs.isEmpty)
         #expect(context.notifyUIChangedCount == 0)
     }
 
@@ -1072,12 +994,11 @@ struct ChatDeliveryCoordinatorContextTests {
         #expect(isRead(coordinator.deliveryStatus(for: messageID)))
         // The peer-scoped router clear re-runs (idempotent: the earlier read
         // receipt already emptied this peer's retained copy), but the stale
-        // delivered ack must not downgrade the read status, release media, or
+        // delivered ack must not downgrade the read status, or
         // notify the UI.
         #expect(context.peerBoundDeliveredMessages.count == 1)
         #expect(context.peerBoundDeliveredMessages[0].peerIDs == [peerID])
         #expect(context.markedDeliveredMessageIDs.isEmpty)
-        #expect(context.confirmedMediaMessageIDs.isEmpty)
         #expect(context.notifyUIChangedCount == 0)
     }
 

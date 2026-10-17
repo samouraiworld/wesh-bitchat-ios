@@ -287,8 +287,7 @@ struct BLEFragmentHandlerTests {
             packet: packet,
             pad: false,
             maxChunk: nil,
-            directedPeer: nil,
-            transferId: nil
+            directedPeer: nil
         )
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
             for: request,

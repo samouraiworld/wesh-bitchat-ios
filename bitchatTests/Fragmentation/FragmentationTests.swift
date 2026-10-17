@@ -79,62 +79,6 @@ struct FragmentationTests {
         #expect(capture.publicMessages.first?.content.count == 2048)
     }
 
-    @Test("Max-sized file transfer survives reassembly")
-    func maxSizedFileTransferSurvivesReassembly() async throws {
-        let ble = makeBLEService()
-        let capture = CaptureDelegate()
-        ble.delegate = capture
-
-        // Broadcast file transfers must carry a valid sender signature (same
-        // gate as public messages), so sign the packet and preseed the
-        // sender's signing key into the registry.
-        let signer = NoiseEncryptionService(keychain: MockKeychain())
-        let signingKey = signer.getSigningPublicKeyData()!
-        let remoteID = PeerID(str: "CAFEBABECAFEBABE")
-        let fileContent = Data(repeating: 0x42, count: FileTransferLimits.maxPayloadBytes)
-        let filePacket = BitchatFilePacket(
-            fileName: "limit.bin",
-            fileSize: UInt64(fileContent.count),
-            mimeType: "application/octet-stream",
-            content: fileContent
-        )
-        let encoded = try #require(filePacket.encode(), "File packet encoding failed")
-
-        let packet = try #require(
-            signer.signPacket(BitchatPacket(
-                type: MessageType.fileTransfer.rawValue,
-                senderID: Data(hexString: remoteID.id) ?? Data(),
-                recipientID: nil,
-                timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-                payload: encoded,
-                signature: nil,
-                ttl: 7,
-                version: 2
-            )),
-            "Failed to sign file transfer packet"
-        )
-
-        let fragments = fragmentPacket(packet, fragmentSize: 4096, pad: false)
-        #expect(!fragments.isEmpty)
-
-        for fragment in fragments {
-            ble._test_handlePacket(fragment, fromPeerID: remoteID, signingPublicKey: signingKey)
-        }
-
-        await ble._test_drainFragmentPipeline()
-
-        let message = try #require(capture.receivedMessages.first, "Expected file transfer message")
-        #expect(message.content.hasPrefix("[file]"))
-
-        if let fileName = message.content.split(separator: " ").last {
-            let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let filesRoot = base.appendingPathComponent("files", isDirectory: true)
-            let incoming = filesRoot.appendingPathComponent("files/incoming", isDirectory: true)
-            let url = incoming.appendingPathComponent(String(fileName))
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-    
     @Test("Invalid fragment header is ignored")
     func invalidFragmentHeaderIsIgnored() async throws {
         let ble = makeBLEService()
@@ -173,14 +117,6 @@ struct FragmentationTests {
 }
 
 extension FragmentationTests {
-    @Test("A transport refuses inbound media unless it opts in")
-    func transportRefusesInboundMediaByDefault() {
-        let service = BLEService(keychain: MockKeychain(), idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
-                                 identityManager: MockIdentityManager(MockKeychain()), initializeBluetoothManagers: false)
-        #expect(!service.acceptsIncomingMedia())
-        #expect(makeBLEService().acceptsIncomingMedia())
-    }
-
     private func makeBLEService() -> BLEService {
         let mockKeychain = MockKeychain()
         let mockIdentityManager = MockIdentityManager(mockKeychain)
@@ -192,7 +128,6 @@ extension FragmentationTests {
             identityManager: mockIdentityManager,
             initializeBluetoothManagers: false
         )
-        service.acceptsIncomingMedia = { true }
         return service
     }
 
@@ -200,7 +135,6 @@ extension FragmentationTests {
     private final class CaptureDelegate: BitchatDelegate, @unchecked Sendable {
         private let lock = NSLock()
         private var _publicMessages: [(peerID: PeerID, nickname: String, content: String)] = []
-        private var _receivedMessages: [BitchatMessage] = []
 
         private func withLock<T>(_ body: () -> T) -> T {
             lock.lock()
@@ -212,13 +146,7 @@ extension FragmentationTests {
             withLock { _publicMessages }
         }
 
-        var receivedMessages: [BitchatMessage] {
-            withLock { _receivedMessages }
-        }
-
-        func didReceiveMessage(_ message: BitchatMessage) {
-            withLock { _receivedMessages.append(message) }
-        }
+        func didReceiveMessage(_ message: BitchatMessage) {}
 
         func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?) {
             withLock { _publicMessages.append((peerID, nickname, content)) }

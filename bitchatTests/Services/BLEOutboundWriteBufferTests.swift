@@ -11,7 +11,7 @@ struct BLEOutboundWriteBufferTests {
         _ = buffer.enqueue(
             data: Data(repeating: 0x01, count: 4),
             for: peerID,
-            priority: .fileTransfer,
+            priority: .low,
             capBytes: 64
         )
         _ = buffer.enqueue(
@@ -38,7 +38,7 @@ struct BLEOutboundWriteBufferTests {
         let peerID = "peer-1"
 
         _ = buffer.enqueue(data: Data(repeating: 0x01, count: 8), for: peerID, priority: .low, capBytes: 16)
-        _ = buffer.enqueue(data: Data(repeating: 0x02, count: 8), for: peerID, priority: .fileTransfer, capBytes: 16)
+        _ = buffer.enqueue(data: Data(repeating: 0x02, count: 8), for: peerID, priority: .fragment(totalFragments: 2), capBytes: 16)
         let result = buffer.enqueue(data: Data(repeating: 0x03, count: 8), for: peerID, priority: .high, capBytes: 16)
 
         if case let .enqueued(trimmedBytes, remainingBytes) = result {

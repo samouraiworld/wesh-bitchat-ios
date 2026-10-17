@@ -42,6 +42,8 @@ protocol ChatTransportEventContext: AnyObject {
     func checkForMentions(_ message: BitchatMessage)
     func sendHapticFeedback(for message: BitchatMessage)
     func parseMentions(from content: String) -> [String]
+    /// The private-message admission rule (Wesh: a QR-enrolled contact).
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool
 
     // MARK: Peer identity & sessions
     func isPeerBlocked(_ peerID: PeerID) -> Bool
@@ -491,11 +493,32 @@ private extension ChatTransportEventCoordinator {
             // BitChat peers, whose voice frames are dropped unread.
             break
 
-        case .privateFile, .authenticatedPeerState:
-            // BLEService validates and persists decrypted private files before
-            // emitting a normal `.messageReceived` event, and consumes peer
-            // state inside the transport. Neither payload crosses this
-            // UI-facing typed-payload fallback.
+        case .privateFile:
+            // Wesh has no media. A BitChat private file from an admitted
+            // contact becomes one placeholder line, handled like a private
+            // message but never acknowledged as delivered; nothing of the file
+            // is kept. From anyone else it leaves no trace.
+            guard !context.isPeerBlocked(peerID), context.admitsPrivateSender(peerID) else { return }
+            let message = BitchatMessage(
+                id: UnsupportedPrivateMedia.messageID(
+                    payload: payload,
+                    senderPeerID: peerID,
+                    recipientPeerID: context.myPeerID
+                ),
+                sender: context.unifiedPeer(for: peerID)?.nickname ?? "Unknown",
+                content: WeshIncomingMediaPolicy.placeholder,
+                timestamp: timestamp,
+                isRelay: false,
+                originalSender: nil,
+                isPrivate: true,
+                recipientNickname: context.nickname,
+                senderPeerID: peerID,
+                deliveryStatus: .delivered(to: context.nickname, at: timestamp)
+            )
+            context.handlePrivateMessage(message)
+
+        case .authenticatedPeerState:
+            // Consumed inside the transport; it never reaches this fallback.
             break
         }
     }

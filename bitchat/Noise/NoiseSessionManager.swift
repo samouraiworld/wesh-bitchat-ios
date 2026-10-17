@@ -1152,24 +1152,6 @@ final class NoiseSessionManager {
         }
     }
 
-    /// Encrypts only if `expected` still names the current established entry.
-    /// A rekey between capability proof and media encryption therefore fails
-    /// closed instead of sending on an unproven reconnect session.
-    func encrypt(
-        _ plaintext: Data,
-        for peerID: PeerID,
-        expectedSessionGeneration expected: UUID
-    ) throws -> Data {
-        try managerQueue.sync {
-            guard let session = sessions[peerID],
-                  session.isEstablished(),
-                  sessionGenerations[peerID] == expected else {
-                throw NoiseEncryptionError.sessionNotEstablished
-            }
-            return try session.encrypt(plaintext)
-        }
-    }
-    
     func decrypt(_ ciphertext: Data, from peerID: PeerID) throws -> Data {
         try decryptWithSessionGeneration(ciphertext, from: peerID).plaintext
     }
