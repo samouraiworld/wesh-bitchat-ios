@@ -550,7 +550,7 @@ struct BLEServiceCoreTests {
         #expect(delegate.noisePayloadTypes.isEmpty)
     }
 
-    @Test
+    @Test @MainActor
     func fileTransferForAnotherPeerIsStillRelayedButNeverDelivered() async throws {
         // A BitChat file between two other phones crosses Wesh as before,
         // whole or fragmented; nothing of it is handled here.
