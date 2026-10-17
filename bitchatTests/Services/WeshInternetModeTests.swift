@@ -477,6 +477,25 @@ struct WeshInternetModeTests {
         #expect(stuck.events == ["network:off", "deleteArti"])
     }
 
+    @Test func aWipeInterruptedOnArtiCompletesBeforeTheWelcome() {
+        let harness = Harness()
+        let mode = enabledMode(harness)
+        harness.deleteResults = [false, false, false]
+        #expect(!mode.wipeForPanic())
+        harness.events.removeAll()
+        // The next launch opens on the welcome, so Internet mode is not started; Arti goes anyway.
+        harness.make().clearArtiWhileOff()
+        #expect(harness.events == ["network:off", "deleteArti"])
+    }
+
+    @Test func clearingArtiBeforeTheWelcomeLeavesAnInternetModeThatIsOnAlone() {
+        let harness = Harness()
+        _ = enabledMode(harness)
+        harness.events.removeAll()
+        harness.make().clearArtiWhileOff()
+        #expect(harness.events.isEmpty)
+    }
+
     @Test func artiDataDirectoryIsTheDirectoryTorManagerUses() throws {
         let url = try #require(WeshInternetPolicy.artiDataDirectory())
         #expect(url.path.hasSuffix("Application Support/bitchat/arti"))

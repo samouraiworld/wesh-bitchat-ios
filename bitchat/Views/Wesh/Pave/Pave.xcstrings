@@ -2178,6 +2178,23 @@
         }
       }
     },
+    "pave.onboarding.notificationsNext" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next, Wesh asks to send notifications, so you know a message arrived. They never show its text or who sent it unless you choose to."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ensuite, Wesh demande à envoyer des notifications, pour savoir qu’un message est arrivé. Elles n’affichent ni son texte ni qui l’envoie, sauf si vous le choisissez."
+          }
+        }
+      }
+    },
     "pave.onboarding.privateByQR" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2909,6 +2926,23 @@
         }
       }
     },
+    "pave.settings.previewsHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications say a message arrived, without its text or the person’s nickname."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les notifications disent qu’un message est arrivé, sans le texte ni le surnom de la personne."
+          }
+        }
+      }
+    },
     "pave.settings.previewsHidden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2939,6 +2973,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aperçus visibles"
+          }
+        }
+      }
+    },
+    "pave.settings.previewsToggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide notification previews"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masquer les aperçus des notifications"
           }
         }
       }

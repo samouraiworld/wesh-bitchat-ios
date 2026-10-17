@@ -144,7 +144,9 @@ final class AppRuntime: ObservableObject {
     /// (still off unless the person had turned it on).
     func welcomeFinished() {
         NotificationService.shared.requestAuthorization()
-        guard WeshMode.isActive, started else { return }
+        guard WeshMode.isActive, started, chatViewModel.networkActivationAllowed else { return }
+        // After a wipe the mesh stayed stopped through the welcome (`AppChromeModel.panicClearAllData`).
+        chatViewModel.meshService.startServices()
         NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled())
         startWeshInternet()
     }
@@ -186,7 +188,7 @@ final class AppRuntime: ObservableObject {
         NetworkActivationService.shared.start()
         if WeshMode.isActive {
             // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
-            if WeshWelcome.isDone() { startWeshInternet() }
+            if WeshWelcome.isDone() { startWeshInternet() } else { WeshInternetMode.shared.clearArtiWhileOff() }
         } else if NetworkActivationService.shared.userInternetEnabled {
             GeohashPresenceService.shared.start()
         }
@@ -261,7 +263,8 @@ final class AppRuntime: ObservableObject {
         case .active:
             guard chatViewModel.networkActivationAllowed else { return }
             record(.scenePhaseChanged(.active))
-            chatViewModel.meshService.startServices()
+            // A wipe leaves the mesh stopped until the welcome ends.
+            if !WeshMode.isActive || WeshWelcome.isDone() { chatViewModel.meshService.startServices() }
             TorManager.shared.setAppForeground(true)
             WeshInternetMode.shared.appWillEnterForeground()
             let shouldRefreshNostrConnections = didHandleInitialActive && didEnterBackground

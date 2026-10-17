@@ -56,6 +56,32 @@ struct WeshRootMountTests {
         #expect(!service.holdsBluetoothPrompt)
     }
 
+    /// After a wipe the new identity stays silent on Bluetooth until the welcome ends.
+    @Test @MainActor func aWipeCanKeepBluetoothStoppedUntilTheWelcomeEnds() {
+        for restartMesh in [false, true] {
+            let keychain = MockKeychain()
+            let ble = BLEService(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                 identityManager: MockIdentityManager(keychain), initializeBluetoothManagers: false)
+            defer { ble.stopServices() }
+            var wipes = PanicPersistentStoreWipes(
+                courier: { true }, bridge: { true }, publicArchive: { true },
+                prekeys: { true }, board: { true }, sharedContent: { true }
+            )
+            wipes.qrContacts = { true }
+            wipes.notifications = {}
+            wipes.pasteboard = {}
+            let operations = PanicRecoveryOperations(isPending: { false }, begin: {
+                PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
+            }, wipeMedia: { _ in }, complete: {})
+            let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                   identityManager: MockIdentityManager(keychain), transport: ble,
+                                   panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true,
+                                   panicPersistentStoreWipes: wipes)
+            #expect(vm.panicClearAllData(restartMesh: restartMesh))
+            #expect(ble.areServicesRequested == restartMesh)
+        }
+    }
+
     @Test func theDiscretionRowFollowsTheNotificationPreviewSetting() {
         let defaults = Self.freshDefaults()
         let note = WeshMeetingNoteStore.Content()

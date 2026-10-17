@@ -29,7 +29,7 @@ struct PaveExchangeScreen: View {
     var camera: Camera = .live
     let onScan: (String) -> Void
     /// What the last scan came to, when it needs words: invalid, your own code, not saved…
-    var notice: String?
+    var notice: PaveExchangeNotice?
     /// « Autre méthode »: a link pasted after comparing it in person. Nil hides it.
     var onPaste: ((String) -> Void)?
     /// Called once, on « Ouvrir la discussion »: never by a timer.
@@ -68,7 +68,7 @@ struct PaveExchangeScreen: View {
                 } else {
                     scanner
                     if let notice {
-                        Text(notice)
+                        Text(notice.text)
                             .paveText(.label)
                             .foregroundStyle(theme[.ink])
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,8 +94,9 @@ struct PaveExchangeScreen: View {
             if complete { PaveHaptics.play(.scanSuccess) }
         }
         // VoiceOver hears every scan outcome and every check as it fills.
+        // Each scan outcome is its own event: two invalid codes in a row are both announced.
         .onChange(of: notice) { notice in
-            if let notice { PaveAccessibility.announce(notice) }
+            if let notice { PaveAccessibility.announce(notice.text) }
         }
         .onChange(of: progress.theyScannedMe) { done in
             if done { PaveAccessibility.announce(PaveExchangeCheck.yourCode.label(done: true)) }
@@ -317,6 +318,14 @@ struct PaveExchangeScreen: View {
             try? await Task.sleep(nanoseconds: 15_000_000_000)
         }
     }
+}
+
+/// One scan outcome. A new one is a new event even with the same words, so VoiceOver repeats it.
+struct PaveExchangeNotice: Equatable {
+    let text: String
+    let id = UUID()
+
+    init(_ text: String) { self.text = text }
 }
 
 /// `label` (whose key it is) above a short fingerprint in monospace; VoiceOver reads it one

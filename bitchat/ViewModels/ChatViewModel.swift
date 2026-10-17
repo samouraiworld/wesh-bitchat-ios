@@ -1756,7 +1756,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // PANIC: Emergency data clearing for activist safety
     @MainActor
     @discardableResult
-    func panicClearAllData(restartServices: Bool = true) -> Bool {
+    /// `restartMesh: false` keeps Bluetooth stopped after the wipe (Wesh: until the welcome ends),
+    /// while the rest of the network lifecycle restarts as usual.
+    func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
@@ -1986,7 +1988,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             // Startup recovery reopens admission but leaves actual service
             // start to the bootstrapper immediately after this method.
             panicTransport.completePanicReset(
-                restartServices: restartServices
+                restartServices: restartServices && restartMesh
             )
         }
 
@@ -1999,7 +2001,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             // All persistent state and media are gone. Bring each service back
             // only now, under the new identity — a panic-resetting transport
             // owns its own restart sequencing above.
-            if !(meshService is PanicResettingTransport) {
+            if !(meshService is PanicResettingTransport) && restartMesh {
                 meshService.startServices()
             }
 

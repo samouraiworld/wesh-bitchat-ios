@@ -150,7 +150,9 @@ final class AppChromeModel: ObservableObject {
 
         prepareForPanic?()
         onPanicWipe()
-        return chatViewModel.panicClearAllData()
+        // Wesh: Bluetooth stays off until the welcome and its terms are accepted again, so the new
+        // identity announces nothing before (`AppRuntime.welcomeFinished`).
+        return chatViewModel.panicClearAllData(restartMesh: !WeshMode.isActive)
     }
 
     private func bind(privateInboxModel: PrivateInboxModel) {

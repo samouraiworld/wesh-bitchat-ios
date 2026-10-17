@@ -299,6 +299,14 @@ final class WeshInternetMode: ObservableObject {
         dependencies.retryConnections()
     }
 
+    /// Before the welcome: no Internet yet, but a wipe interrupted on Arti still completes, as
+    /// `start()` would do with Internet off. Does nothing while Internet is on.
+    func clearArtiWhileOff() {
+        guard !machine.isEnabled else { return }
+        dependencies.setNetworkEnabled(false)
+        _ = deleteArtiDirectory()
+    }
+
     func appDidEnterBackground() { apply(.background) }
     func appWillEnterForeground() { apply(.foreground) }
 
