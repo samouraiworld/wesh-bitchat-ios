@@ -18,6 +18,23 @@
         }
       }
     },
+    "pave.about.licenseFont" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poster typeface: Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, under the SIL Open Font License 1.1, reproduced below."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Police d’affiche : Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, sous SIL Open Font License 1.1, reproduite ci-dessous."
+          }
+        }
+      }
+    },
     "pave.about.licenseThirdParty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -303,6 +320,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Échec de l'envoi. Réessayer."
+          }
+        }
+      }
+    },
+    "pave.bubble.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
           }
         }
       }
@@ -1313,6 +1347,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Empreinte indisponible"
+          }
+        }
+      }
+    },
+    "pave.fluo.bluetooth.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth off"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth coupé"
+          }
+        }
+      }
+    },
+    "pave.fluo.bluetooth.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth on"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth actif"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphones à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphones à portée"
           }
         }
       }

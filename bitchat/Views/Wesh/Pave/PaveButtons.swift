@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// Principal: `private` fill, full width, 56 pt. One per screen.
+/// Principal: `private` fill, full width, 56 pt, label in Pavé Fluo poster capitals. One per screen.
+/// Its label is always app copy, never a nickname (the poster face covers Latin only).
 struct PavePrimaryButtonStyle: ButtonStyle {
     @Environment(\.paveTheme) private var theme
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .paveText(.label)
+            .font(PaveDisplayStyle.displaySmall.font)
+            .textCase(.uppercase)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, minHeight: PaveTouch.primary)
             .padding(.horizontal, PaveSpace.s4)

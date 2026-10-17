@@ -64,8 +64,8 @@ final class WeshInboundRequests: ObservableObject {
         let date = now()
         deleted = deleted.filter { date.timeIntervalSince($0.value) < Self.deletedMemory }
         guard deleted[fingerprint + "|" + message.id] == nil else { return false }
-        // Sender-chosen: shown in the list, the detail and the block flow.
-        let nickname = WeshDisplayName.clean(message.sender, fallback: "Participant")
+        // Sender-chosen and kept raw: every view draws it through `PaveDisplayName.safe`, once.
+        let nickname = message.sender
         let shown = BitchatMessage(
             id: message.id, sender: message.sender,
             content: WeshIncomingMediaPolicy.displayText(message.content),
@@ -251,12 +251,13 @@ struct WeshRequestsSection: View {
                 ForEach(requests.requests) { request in
                     NavigationLink { WeshRequestDetail(runtime: runtime, requestID: request.id) } label: {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(request.nickname).font(.headline)
+                            Text(PaveDisplayName.safe(request.nickname)).font(.headline)
+                            PaveFingerprintText(fingerprint: PaveFingerprint.short(request.noiseKey))
                             Text("Non vérifié · \(request.messages.count) message\(request.messages.count > 1 ? "s" : "")")
                                 .font(.subheadline).foregroundStyle(theme.secondary)
                         }.padding(.vertical, 8)
                     }
-                    .accessibilityLabel("Demande de \(request.nickname), non vérifiée")
+                    .accessibilityLabel("Demande de \(PaveDisplayName.safe(request.nickname)), non vérifiée, " + PaveFingerprint.accessibilityText(PaveFingerprint.short(request.noiseKey)))
                 }
             } header: { WeshSectionLabel(text: "Demandes") } footer: {
                 Text("Personnes qui vous ont écrit sans vérification QR. Pas de réponse possible avant de scanner leur QR en personne.")
@@ -286,8 +287,8 @@ private struct WeshRequestDetail: View {
             if let request {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(request.nickname).font(.title2.weight(.semibold))
-                        Text("Identité · " + String(request.id.prefix(8))).font(.caption.monospaced()).foregroundStyle(theme.secondary)
+                        Text(PaveDisplayName.safe(request.nickname)).font(.title2.weight(.semibold))
+                        PaveFingerprintText(fingerprint: PaveFingerprint.short(request.noiseKey))
                         Text(trust.fingerprints.contains(request.id)
                              ? "Contact vérifié. Écrivez-lui depuis Discussions."
                              : "Non vérifié. Un surnom ne prouve pas une identité. Vous ne pouvez pas répondre avant de scanner son QR en personne.")
@@ -324,7 +325,7 @@ private struct WeshRequestDetail: View {
                 guard let request else { return dismiss() }
                 // Nickname and fingerprint only: the request's private messages never leave.
                 reportOffer = PaveReportMail.blockThenOffer(.request(request)) {
-                    runtime.chatViewModel.blockMeshPeer(peerID: request.peerID, displayName: request.nickname)
+                    runtime.chatViewModel.blockMeshPeer(peerID: request.peerID, displayName: PaveDisplayName.safe(request.nickname))
                     requests.remove(request.id)
                     return true
                 }.offer

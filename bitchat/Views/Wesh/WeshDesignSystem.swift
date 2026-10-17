@@ -6,41 +6,42 @@ import UniformTypeIdentifiers
 import AppKit
 #endif
 
-/// Stable stored IDs keep existing appearance preferences while both metals use pure black.
+/// Stable stored IDs keep existing appearance preferences: `night` is Pavé Fluo Nuit (OLED
+/// asphalt, the default), `day` is Jour (poster paper for full sun).
 enum WeshAppearance: String, CaseIterable, Identifiable {
     case night, day
     var id: String { rawValue }
-    var title: String { self == .night ? "Argent" : "Or" }
-    var subtitle: String { self == .night ? "Noir pur · argent poli" : "Noir pur · or lumineux" }
+    var title: String { self == .night ? "Nuit" : "Jour" }
+    var subtitle: String { self == .night ? "Asphalte, noir réel pour l’OLED" : "Papier d’affiche, pour le plein soleil" }
+    var paveTheme: PaveThemeID { self == .night ? .nuit : .jour }
 }
 
+/// The Wesh screens' palette, read from the Pavé Fluo tokens (`WeshTokens.swift`) so every
+/// screen shares one source. Flat colours only: no metal, no gradient.
 struct WeshTheme {
     var appearance: WeshAppearance = .night
-    var isDark: Bool { true }
-    var scheme: ColorScheme { .dark }
-    var canvas: Color { .black }
-    var ink: Color { .white }
-    var secondary: Color { Color(white: 180/255) }
-    var accent: Color {
-        appearance == .night ? Color(red: 203/255, green: 209/255, blue: 217/255)
-            : Color(red: 217/255, green: 180/255, blue: 95/255)
-    }
-    var metallicStops: [Color] {
-        appearance == .night
-            ? [Color(red: 174/255, green: 182/255, blue: 192/255), .white,
-               Color(red: 203/255, green: 209/255, blue: 217/255)]
-            : [Color(red: 200/255, green: 155/255, blue: 60/255),
-               Color(red: 255/255, green: 240/255, blue: 184/255),
-               Color(red: 217/255, green: 180/255, blue: 95/255)]
-    }
+    private var pave: PaveTheme { PaveTheme(appearance.paveTheme) }
+    var isDark: Bool { appearance == .night }
+    var scheme: ColorScheme { pave.colorScheme }
+    var canvas: Color { pave[.bg] }
+    var ink: Color { pave[.ink] }
+    var secondary: Color { pave[.inkMuted] }
+    /// Interactive tint and emphasis: ink. Public yellow is reserved for public fills.
+    var accent: Color { pave[.ink] }
+    var publicFill: Color { pave[.publicFill] }
+    var onPublic: Color { pave[.onPublic] }
+    /// Kept for the call sites that fill a primary control: one flat `private` colour.
+    var metallicStops: [Color] { [pave[.privateFill], pave[.privateFill]] }
     var metalFill: LinearGradient {
-        LinearGradient(colors: metallicStops, startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: metallicStops, startPoint: .top, endPoint: .bottom)
     }
-    var onAccent: Color { .black }
-    var line: Color { accent.opacity(0.55) }
-    var radius: CGFloat { appearance == .night ? 26 : 14 }
-    var messageRadius: CGFloat { appearance == .night ? 23 : 15 }
-    var contentInset: CGFloat { appearance == .night ? 24 : 20 }
+    var onAccent: Color { pave[.onPrivate] }
+    /// Field outlines, control strokes and separators: `lineStrong`, so every boundary meets 3:1
+    /// against the ground (the hairline `line` token reads 1.4:1 by day and 1.7:1 by night).
+    var line: Color { pave[.lineStrong] }
+    var radius: CGFloat { PaveRadius.control }
+    var messageRadius: CGFloat { PaveRadius.bubble }
+    var contentInset: CGFloat { PaveSpace.s4 }
 }
 
 private struct WeshThemeKey: EnvironmentKey {
@@ -59,8 +60,9 @@ struct WeshPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .font(PaveDisplayStyle.displaySmall.font)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, minHeight: PaveTouch.primary)
             .padding(.horizontal, 16)
             .foregroundStyle(enabled ? theme.onAccent : theme.secondary)
             .background(enabled ? AnyShapeStyle(theme.metalFill) : AnyShapeStyle(theme.canvas), in: RoundedRectangle(cornerRadius: theme.radius))
@@ -71,6 +73,8 @@ struct WeshPrimaryButtonStyle: ButtonStyle {
 
 private struct WeshCanvas: ViewModifier {
     let title: String
+    /// False for a contact's nickname: it keeps the system face and its own letters.
+    var appCopy = true
     @Environment(\.weshTheme) private var theme
     func body(content: Content) -> some View {
         content
@@ -79,16 +83,25 @@ private struct WeshCanvas: ViewModifier {
             .weshNavigationBar(theme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(title == "Wesh" ? "wesh" : title)
-                        .font(title == "Wesh" ? .system(.title2, design: .rounded).weight(.bold) : .headline)
-                        .foregroundStyle(theme.ink).accessibilityAddTraits(.isHeader)
+                    if appCopy {
+                        // App titles: poster capitals, read as written.
+                        Text(title)
+                            .font(PaveDisplayStyle.displaySmall.font)
+                            .textCase(.uppercase)
+                            .foregroundStyle(theme.ink).accessibilityAddTraits(.isHeader)
+                            .accessibilityLabel(Text(title))
+                    } else {
+                        // A nickname: never capitals or the Latin-only poster face.
+                        Text(verbatim: title).font(.headline)
+                            .foregroundStyle(theme.ink).accessibilityAddTraits(.isHeader)
+                    }
                 }
             }
     }
 }
 
 extension View {
-    func weshCanvas(title: String) -> some View { modifier(WeshCanvas(title: title)) }
+    func weshCanvas(title: String, appCopy: Bool = true) -> some View { modifier(WeshCanvas(title: title, appCopy: appCopy)) }
     func weshSheetBackground() -> some View { modifier(WeshSheetBackground()) }
 }
 

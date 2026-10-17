@@ -31,15 +31,17 @@ enum WeshDisplayName {
         InputValidator.validateNickname(raw) ?? fallback
     }
 
-    /// The name a block confirmation, its VoiceOver label and the resulting
-    /// timeline line may show.
+    /// The name a block or report confirmation, its VoiceOver label, the resulting timeline line
+    /// and the stored block name show. `privateTitle` is already through the rule; a public
+    /// sender goes through it here, once.
     static func blockTarget(sender: String, privateTitle: String, isPrivate: Bool) -> String {
-        clean(isPrivate ? privateTitle : sender, fallback: "Participant")
+        isPrivate ? privateTitle : PaveDisplayName.safe(sender)
     }
 
+    /// A petname is chosen on this phone; a claimed nickname is the peer's and goes through the rule.
     static func blockedContact(petname: String?, claimedNickname: String?) -> String {
-        let raw = petname ?? claimedNickname ?? ""
-        return raw.isEmpty ? "Personne sans nom" : clean(raw, fallback: "Participant")
+        if let petname, !petname.isEmpty { return clean(petname, fallback: PaveDisplayName.safe(claimedNickname)) }
+        return PaveDisplayName.safe(claimedNickname)
     }
 }
 

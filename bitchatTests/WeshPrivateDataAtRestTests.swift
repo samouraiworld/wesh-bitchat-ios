@@ -576,12 +576,17 @@ struct WeshPrivateDataAtRestTests {
     // MARK: Contact names
 
     @Test func blockFlowsNeverCarryARawPeerName() {
-        #expect(WeshDisplayName.blockTarget(sender: "Pi\u{202E}rate", privateTitle: "Nora", isPrivate: false) == "Participant")
+        // A public sender and a claimed nickname go through the remote-name rule, once.
+        #expect(WeshDisplayName.blockTarget(sender: "Pi\u{202E}rate", privateTitle: "Nora", isPrivate: false)
+                == PaveDisplayName.safe("Pi\u{202E}rate"))
         #expect(WeshDisplayName.blockTarget(sender: " Alex ", privateTitle: "Nora", isPrivate: false) == "Alex")
         #expect(WeshDisplayName.blockTarget(sender: "Alex", privateTitle: "Nora", isPrivate: true) == "Nora")
-        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: "Mal\u{0007}") == "Participant")
+        let reserved = PaveCopy.text("pave.name.reserved")
+        #expect(WeshDisplayName.blockTarget(sender: "Information", privateTitle: "Nora", isPrivate: false) == reserved)
+        #expect(WeshDisplayName.blockTarget(sender: "Vous", privateTitle: "Nora", isPrivate: false) == reserved)
+        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: "Mal\u{0007}") == PaveDisplayName.safe("Mal\u{0007}"))
         #expect(WeshDisplayName.blockedContact(petname: "Voisin", claimedNickname: "Mal\u{0007}") == "Voisin")
-        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: nil) == "Personne sans nom")
+        #expect(WeshDisplayName.blockedContact(petname: nil, claimedNickname: nil) == PaveCopy.text("pave.name.unnamed"))
     }
 
     /// System text selection would copy to the general pasteboard: plain,

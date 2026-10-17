@@ -9,33 +9,35 @@ import UIKit
 @MainActor
 struct WeshDesignSystemTests {
     @Test(arguments: WeshAppearance.allCases)
-    func everyMetalCanvasIsOpaquePureBlack(_ appearance: WeshAppearance) throws {
+    func everyCanvasIsTheOpaquePaveGround(_ appearance: WeshAppearance) throws {
         let canvas = try rgba(WeshTheme(appearance: appearance).canvas, appearance: appearance)
-        #expect(canvas.red == 0)
-        #expect(canvas.green == 0)
-        #expect(canvas.blue == 0)
+        let ground = PaveTheme(appearance.paveTheme).rgb(.bg)
+        #expect(abs(canvas.red - Double(ground.red) / 255) < 0.002)
+        #expect(abs(canvas.green - Double(ground.green) / 255) < 0.002)
+        #expect(abs(canvas.blue - Double(ground.blue) / 255) < 0.002)
         #expect(canvas.alpha == 1)
     }
 
-    @Test func silverDefaultRetainsExistingStoredAppearanceIDs() {
+    @Test func storedAppearanceIDsKeepTheirMeaning() {
         #expect(WeshTheme().appearance == .night)
-        #expect(WeshAppearance(rawValue: "night")?.title == "Argent")
-        #expect(WeshAppearance(rawValue: "day")?.title == "Or")
+        #expect(WeshAppearance(rawValue: "night")?.title == "Nuit")
+        #expect(WeshAppearance(rawValue: "night")?.paveTheme == .nuit)
+        #expect(WeshAppearance(rawValue: "day")?.title == "Jour")
+        #expect(WeshAppearance(rawValue: "day")?.paveTheme == .jour)
     }
 
     @Test(arguments: WeshAppearance.allCases)
-    func metallicStopsKeepBlackLabelsReadable(_ appearance: WeshAppearance) throws {
+    func primaryFillsKeepTheirLabelsReadable(_ appearance: WeshAppearance) throws {
         let theme = WeshTheme(appearance: appearance)
         let canvas = try rgba(theme.canvas, appearance: appearance)
         let label = try rgba(theme.onAccent, appearance: appearance)
-        #expect(label.red == 0 && label.green == 0 && label.blue == 0 && label.alpha == 1)
         for (index, color) in theme.metallicStops.enumerated() {
             let stop = try rgba(color, appearance: appearance)
             // Primary-button press applies 0.8 opacity to the complete rendered button.
             for opacity in [1.0, 0.8] {
                 let background = RGBA(red: stop.red, green: stop.green, blue: stop.blue, alpha: stop.alpha * opacity).over(canvas)
                 let ratio = contrast(label.over(background), background)
-                #expect(ratio >= 4.5, "\(appearance.title) stop \(index), opacity \(opacity): black label contrast \(ratio):1; needs 4.5:1")
+                #expect(ratio >= 4.5, "\(appearance.title) fill \(index), opacity \(opacity): label contrast \(ratio):1; needs 4.5:1")
             }
         }
     }
