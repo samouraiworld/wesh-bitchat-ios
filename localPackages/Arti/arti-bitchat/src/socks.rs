@@ -116,18 +116,39 @@ where
     }
 }
 
-/// A requested host name: nonempty UTF-8 without NUL that is not an IP literal. Otherwise
-/// the SOCKS reply code that refuses it.
+/// A requested host name, lowercased and without a final dot, or the SOCKS reply code that
+/// refuses it. IP forms, including those other resolvers accept (`127.1`, `2130706433`,
+/// `0x7f.0.0.1`), get "address type not supported"; anything else that is not a DNS name
+/// (labels of 1 to 63 letters, digits or inner hyphens, 253 characters at most; IDNs arrive
+/// as punycode) gets a general failure. The last label needs a letter and is never a hex
+/// number, as in `NostrRelayURL.hasDomainNameHost` on the Swift side.
 fn host_name(bytes: &[u8]) -> Result<String, u8> {
-    let name = std::str::from_utf8(bytes).map_err(|_| SOCKS5_REP_FAILURE)?;
-    if name.is_empty() || name.contains('\0') {
-        return Err(SOCKS5_REP_FAILURE);
-    }
-    let unbracketed = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')).unwrap_or(name);
-    if unbracketed.parse::<std::net::IpAddr>().is_ok() {
+    let raw = std::str::from_utf8(bytes).map_err(|_| SOCKS5_REP_FAILURE)?;
+    if raw.starts_with('[') || raw.contains(':') {
         return Err(SOCKS5_REP_ADDRESS_NOT_SUPPORTED);
     }
-    Ok(name.to_owned())
+    let name = raw.strip_suffix('.').unwrap_or(raw);
+    if name.parse::<std::net::IpAddr>().is_ok() {
+        return Err(SOCKS5_REP_ADDRESS_NOT_SUPPORTED);
+    }
+    if name.is_empty() || name.len() > 253 {
+        return Err(SOCKS5_REP_FAILURE);
+    }
+    let is_label = |label: &str| {
+        (1..=63).contains(&label.len())
+            && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    };
+    if !name.split('.').all(is_label) {
+        return Err(SOCKS5_REP_FAILURE);
+    }
+    let last = name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase();
+    let hex = last.strip_prefix("0x").is_some_and(|d| d.bytes().all(|b| b.is_ascii_hexdigit()));
+    if !last.bytes().any(|b| b.is_ascii_alphabetic()) || hex {
+        return Err(SOCKS5_REP_ADDRESS_NOT_SUPPORTED);
+    }
+    Ok(name.to_ascii_lowercase())
 }
 
 async fn read_port<S: AsyncRead + Unpin>(stream: &mut S) -> io::Result<u16> {
@@ -190,8 +211,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_domain_name_target_is_returned() {
-        let (result, reply) = exchange(&connect(0x03, &domain(b"relay.example.org"), 443)).await;
-        assert_eq!(result.unwrap(), ("relay.example.org".to_owned(), 443));
+        let (result, reply) = exchange(&connect(0x03, &domain(b"relay.damus.io"), 443)).await;
+        assert_eq!(result.unwrap(), ("relay.damus.io".to_owned(), 443));
         assert!(reply.is_empty());
     }
 
@@ -214,6 +235,59 @@ mod tests {
             let (result, reply) = exchange(&connect(0x03, &domain(literal), 443)).await;
             assert_refused(&result, &reply, SOCKS5_REP_ADDRESS_NOT_SUPPORTED);
         }
+    }
+
+    #[test]
+    fn ip_forms_other_resolvers_accept_are_refused_as_addresses() {
+        for name in [
+            "127.1",
+            "0x7f.0.0.1",
+            "2130706433",
+            "0177.0.0.1",
+            "127.0.0.1.",
+            "0x7f",
+            "relay.example.0x1f",
+            "::1",
+            "::ffff:127.0.0.1",
+            "relay.example.org:443",
+            "[relay.example.org]",
+        ] {
+            assert_eq!(host_name(name.as_bytes()), Err(SOCKS5_REP_ADDRESS_NOT_SUPPORTED), "{}", name);
+        }
+    }
+
+    #[test]
+    fn names_outside_the_dns_grammar_are_refused() {
+        let long_label = format!("{}.example", "a".repeat(64));
+        let long_name = format!("{}.io", vec!["a".repeat(62); 4].join("."));
+        assert_eq!(long_name.len(), 254);
+        for name in [
+            "",
+            ".",
+            "-bad.example",
+            "bad-.example",
+            "a..b",
+            ".relay.example.org",
+            "relay.example.org..",
+            "relay_1.example.org",
+            "relay example.org",
+            "caf\u{e9}.example",
+            long_label.as_str(),
+            long_name.as_str(),
+        ] {
+            assert_eq!(host_name(name.as_bytes()), Err(SOCKS5_REP_FAILURE), "{}", name);
+        }
+    }
+
+    #[test]
+    fn dns_names_are_accepted_lowercased_without_a_final_dot() {
+        assert_eq!(host_name(b"relay.damus.io"), Ok("relay.damus.io".to_owned()));
+        assert_eq!(host_name(b"Relay.Damus.IO."), Ok("relay.damus.io".to_owned()));
+        assert_eq!(host_name(b"xn--caf-dma.example"), Ok("xn--caf-dma.example".to_owned()));
+        assert_eq!(host_name(b"1.relay-2.example"), Ok("1.relay-2.example".to_owned()));
+        let longest = format!("{}.io", vec!["a".repeat(62); 4].join(".")[1..].to_owned());
+        assert_eq!(longest.len(), 253);
+        assert_eq!(host_name(longest.as_bytes()), Ok(longest.clone()));
     }
 
     #[tokio::test]
