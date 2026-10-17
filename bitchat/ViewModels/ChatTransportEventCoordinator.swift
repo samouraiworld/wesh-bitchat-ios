@@ -77,9 +77,6 @@ protocol ChatTransportEventContext: AnyObject {
     func handleVerifyChallengePayload(from peerID: PeerID, payload: Data)
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data)
 
-    // MARK: Live voice (push-to-talk)
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date)
-
     func handleVouchPayload(from peerID: PeerID, payload: Data)
 }
 
@@ -150,10 +147,6 @@ extension ChatViewModel: ChatTransportEventContext {
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data) {
         verificationCoordinator.handleVerifyResponsePayload(from: peerID, payload: payload)
     }
-
-    // `handleVoiceFramePayload(from:payload:timestamp:)` lives in
-    // ChatViewModel+PrivateChat.swift next to the rest of the live-voice
-    // surface.
 
     func handleVouchPayload(from peerID: PeerID, payload: Data) {
         vouchCoordinator.handleVouchPayload(from: peerID, payload: payload)
@@ -494,7 +487,9 @@ private extension ChatTransportEventCoordinator {
             context.handleVouchPayload(from: peerID, payload: payload)
 
         case .voiceFrame:
-            context.handleVoiceFramePayload(from: peerID, payload: payload, timestamp: timestamp)
+            // Wesh has no live voice; the type value stays reserved for
+            // BitChat peers, whose voice frames are dropped unread.
+            break
 
         case .privateFile, .authenticatedPeerState:
             // BLEService validates and persists decrypted private files before

@@ -1516,65 +1516,6 @@ struct ChatViewModelPrivateMediaDeletionTests {
     }
 
     @Test @MainActor
-    func clearPrivateChatPreservesActiveLiveVoiceAssembly() throws {
-        let (viewModel, transport) = makeTestableViewModel()
-        let peerID = PeerID(str: String(repeating: "7", count: 64))
-        viewModel.selectedPrivateChatPeer = peerID
-        let burstID = Data(
-            repeating: 0xE1,
-            count: VoiceBurstPacket.burstIDSize
-        )
-        let start = try #require(VoiceBurstPacket(
-            burstID: burstID,
-            seq: 0,
-            kind: .start(codec: .aacLC16kMono)
-        ))
-        let cancel = try #require(VoiceBurstPacket(
-            burstID: burstID,
-            seq: 1,
-            kind: .canceled
-        ))
-        let coordinator = viewModel.liveVoiceCoordinator
-        coordinator.acceptsIncomingMedia = { true }
-        defer {
-            coordinator.handleVoiceFramePayload(
-                from: peerID,
-                payload: cancel.encode(),
-                timestamp: Date()
-            )
-        }
-        coordinator.handleVoiceFramePayload(
-            from: peerID,
-            payload: start.encode(),
-            timestamp: Date()
-        )
-        let liveMessage = try #require(
-            viewModel.privateChats[peerID]?.first
-        )
-        #expect(coordinator.isLiveVoiceMessage(liveMessage))
-        let ordinary = BitchatMessage(
-            id: "clear-around-live-voice",
-            sender: "Peer",
-            content: "old text",
-            timestamp: Date(),
-            isRelay: false,
-            isPrivate: true,
-            recipientNickname: viewModel.nickname,
-            senderPeerID: peerID
-        )
-        #expect(viewModel.appendPrivateMessage(ordinary, to: peerID))
-
-        viewModel.clearPrivateChat(peerID)
-
-        #expect(transport.deletedPrivateMediaMessageIDBatches.isEmpty)
-        #expect(
-            viewModel.privateChats[peerID]?.map(\.id)
-                == [liveMessage.id]
-        )
-        #expect(coordinator.isLiveVoiceMessage(liveMessage))
-    }
-
-    @Test @MainActor
     func overlappingClearsTombstoneTheLastMirroredStableAlias() {
         let (viewModel, transport) = makeTestableViewModel()
         transport.deferDeletedPrivateMediaPersistence = true

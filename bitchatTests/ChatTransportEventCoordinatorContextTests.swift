@@ -168,13 +168,6 @@ private final class MockChatTransportEventContext: ChatTransportEventContext {
     func handleVouchPayload(from peerID: PeerID, payload: Data) {
         vouchPayloads.append((peerID, payload))
     }
-
-    // Live voice payloads
-    private(set) var voiceFramePayloads: [(peerID: PeerID, payload: Data, timestamp: Date)] = []
-
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date) {
-        voiceFramePayloads.append((peerID, payload, timestamp))
-    }
 }
 
 // MARK: - Helpers
@@ -483,6 +476,33 @@ struct ChatTransportEventCoordinatorContextTests {
         for type in [NoisePayloadType.groupInvite, .groupKeyUpdate] {
             coordinator.didReceiveNoisePayload(from: peerID, type: type, payload: Data([0x01, 0x02]), timestamp: Date())
         }
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.verifyChallengePayloads.isEmpty)
+        #expect(context.verifyResponsePayloads.isEmpty)
+        #expect(context.vouchPayloads.isEmpty)
+    }
+
+    @Test @MainActor
+    func voiceFramePayloadsFromBitChatPeersReachNoHandler() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+
+        coordinator.didReceiveNoisePayload(
+            from: peerID,
+            type: .voiceFrame,
+            payload: Data(repeating: 0x71, count: 64),
+            timestamp: Date()
+        )
         await drainMainActorTasks()
 
         #expect(context.handledPrivateMessages.isEmpty)

@@ -55,11 +55,6 @@ extension ChatViewModel {
         mediaTransferCoordinator.sendVoiceNote(at: url)
     }
 
-    /// Inbound handler for `NoisePayloadType.voiceFrame`.
-    @MainActor
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date) {
-        liveVoiceCoordinator.handleVoiceFramePayload(from: peerID, payload: payload, timestamp: timestamp)
-    }
 
     @MainActor
     func sendImage(from sourceURL: URL, cleanup: (() -> Void)? = nil) {
@@ -106,9 +101,6 @@ extension ChatViewModel {
 
     @MainActor
     func handlePrivateMessage(_ message: BitchatMessage) {
-        // A finalized voice note whose burst already streamed in live swaps
-        // into the existing bubble instead of appearing (and notifying) twice.
-        if liveVoiceCoordinator.absorbFinalizedVoiceNote(message) { return }
         privateConversationCoordinator.handlePrivateMessage(message)
     }
 
