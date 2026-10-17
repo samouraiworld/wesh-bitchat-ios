@@ -17,6 +17,15 @@ struct WeshRootMountTests {
         #expect(WeshRootScreen(panicRecoveryBlocked: true, welcomed: false) == .eraseRecovery)
     }
 
+    @Test func bluetoothWaitsForTheWelcomeOnlyInWesh() {
+        let defaults = Self.freshDefaults()
+        // A first launch, or a wipe (finished or resumed at launch) that removed the flag.
+        #expect(!WeshWelcome.meshMayStart(weshActive: true, in: defaults))
+        #expect(WeshWelcome.meshMayStart(weshActive: false, in: defaults))
+        defaults.set(true, forKey: WeshWelcome.key)
+        #expect(WeshWelcome.meshMayStart(weshActive: true, in: defaults))
+    }
+
     @Test func anUpdateKeepsANicknameSomeoneChose() {
         #expect(WeshWelcome.keptNickname(" Renard 42 ") == "Renard 42")
         // The stand-in set before any choice, or nothing, gives way to a suggested name.

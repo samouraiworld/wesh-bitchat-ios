@@ -144,9 +144,11 @@ final class AppRuntime: ObservableObject {
     /// (still off unless the person had turned it on).
     func welcomeFinished() {
         NotificationService.shared.requestAuthorization()
-        guard WeshMode.isActive, started, chatViewModel.networkActivationAllowed else { return }
-        // After a wipe the mesh stayed stopped through the welcome (`AppChromeModel.panicClearAllData`).
+        guard WeshMode.isActive, chatViewModel.networkActivationAllowed else { return }
+        // After a wipe the mesh stayed stopped through the welcome (`AppChromeModel.panicClearAllData`),
+        // also when the runtime never started because a wipe had to be resumed by hand.
         chatViewModel.meshService.startServices()
+        guard started else { return }
         NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled())
         startWeshInternet()
     }
@@ -264,7 +266,7 @@ final class AppRuntime: ObservableObject {
             guard chatViewModel.networkActivationAllowed else { return }
             record(.scenePhaseChanged(.active))
             // A wipe leaves the mesh stopped until the welcome ends.
-            if !WeshMode.isActive || WeshWelcome.isDone() { chatViewModel.meshService.startServices() }
+            if WeshWelcome.meshMayStart() { chatViewModel.meshService.startServices() }
             TorManager.shared.setAppForeground(true)
             WeshInternetMode.shared.appWillEnterForeground()
             let shouldRefreshNostrConnections = didHandleInitialActive && didEnterBackground
