@@ -100,7 +100,6 @@ enum PrivateConversationAvailability: Equatable {
 }
 
 struct PrivateConversationHeaderState: Equatable {
-    let conversationPeerID: PeerID
     let headerPeerID: PeerID
     let displayName: String
     let availability: PrivateConversationAvailability
@@ -217,7 +216,6 @@ final class PrivateConversationModel: ObservableObject {
                 displayName = String(localized: "common.unknown", comment: "Fallback label for unknown peer")
             }
             return PrivateConversationHeaderState(
-                conversationPeerID: conversationPeerID,
                 headerPeerID: conversationPeerID,
                 displayName: displayName,
                 availability: .meshReachable,
@@ -240,7 +238,6 @@ final class PrivateConversationModel: ObservableObject {
             : chatViewModel.getEncryptionStatus(for: headerPeerID)
 
         return PrivateConversationHeaderState(
-            conversationPeerID: conversationPeerID,
             headerPeerID: headerPeerID,
             displayName: displayName,
             availability: availability,

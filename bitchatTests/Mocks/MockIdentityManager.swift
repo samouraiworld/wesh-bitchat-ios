@@ -141,14 +141,6 @@ final class MockIdentityManager: SecureIdentityStateManagerProtocol {
         return true
     }
 
-    func validVouchers(for fingerprint: String) -> [VouchRecord] {
-        vouchesByVouchee[fingerprint] ?? []
-    }
-
-    func isVouched(fingerprint: String) -> Bool {
-        !(vouchesByVouchee[fingerprint] ?? []).isEmpty
-    }
-
     func lastVouchBatchSent(to fingerprint: String) -> Date? {
         vouchBatchSentAt[fingerprint]
     }
