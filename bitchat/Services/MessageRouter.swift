@@ -589,6 +589,9 @@ final class MessageRouter {
     /// is retried on the next read scan (chat open / foreground / reconnect).
     @discardableResult
     func sendReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) -> Bool {
+        // A media placeholder stands for a file never received: it is never
+        // reported read. Done, so nothing retries it.
+        if UnsupportedPrivateMedia.isPlaceholderID(receipt.originalMessageID) { return true }
         // Denied receipts stay unsent, like an unroutable one.
         guard admitsControlMessage(to: peerID) else { return false }
         if let transport = reachableTransport(for: peerID) {

@@ -497,8 +497,9 @@ struct BLEServiceCoreTests {
 
     @Test @MainActor
     func fileTransferFromABitChatPeerIsNeitherRelayedNorDelivered() async throws {
-        // Wesh has no media: a BitChat file (0x22), broadcast or directed,
-        // whole or fragmented, stops at this node with no event at all.
+        // Wesh has no media: a broadcast BitChat file (0x22), whole or
+        // fragmented, or one addressed to us stops here with no event at all.
+        // The V1 never spreads public files.
         let ble = makeService()
         let delegate = TransportEventCaptureDelegate()
         ble.eventDelegate = delegate
@@ -507,7 +508,7 @@ struct BLEServiceCoreTests {
         let outbound = OutboundPacketTap()
         ble._test_onOutboundPacket = outbound.record
         let timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
-        for recipient in [nil, Data(hexString: "8899aabbccddeeff")] as [Data?] {
+        for recipient in [nil, Data(hexString: ble.myPeerID.id)] as [Data?] {
             let packet = BitchatPacket(
                 type: MessageType.fileTransfer.rawValue,
                 senderID: Data(hexString: alicePeerID.id) ?? Data(),
@@ -547,6 +548,80 @@ struct BLEServiceCoreTests {
         #expect(!relayed)
         #expect(delegate.messageIDs.isEmpty)
         #expect(delegate.noisePayloadTypes.isEmpty)
+    }
+
+    @Test
+    func fileTransferForAnotherPeerIsStillRelayedButNeverDelivered() async throws {
+        // A BitChat file between two other phones crosses Wesh as before,
+        // whole or fragmented; nothing of it is handled here.
+        let ble = makeService()
+        let delegate = TransportEventCaptureDelegate()
+        ble.eventDelegate = delegate
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let otherPeer = try #require(Data(hexString: "8899aabbccddeeff"))
+        let timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
+        let whole = BitchatPacket(
+            type: MessageType.fileTransfer.rawValue,
+            senderID: Data(hexString: alicePeerID.id) ?? Data(),
+            recipientID: otherPeer,
+            timestamp: timestamp,
+            payload: Data(repeating: 0x5A, count: 300),
+            signature: nil,
+            ttl: 7
+        )
+        let signed = try #require(alice.signPacket(whole))
+        ble._test_handlePacket(signed, fromPeerID: alicePeerID, signingPublicKey: alice.getSigningPublicKeyData()!)
+        let large = BitchatPacket(
+            type: MessageType.fileTransfer.rawValue,
+            senderID: Data(hexString: alicePeerID.id) ?? Data(),
+            recipientID: otherPeer,
+            timestamp: timestamp + 1,
+            payload: Data((0..<1_200).map { _ in UInt8.random(in: 0...255) }),
+            signature: nil,
+            ttl: 7
+        )
+        let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+            for: BLEOutboundFragmentTransferRequest(packet: large, pad: false, maxChunk: 256, directedPeer: nil),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
+            bleMaxMTU: 512
+        ))
+        #expect(plan.totalFragments > 1)
+        for fragment in plan.fragmentPackets {
+            ble._test_handlePacket(fragment, fromPeerID: alicePeerID)
+        }
+
+        let relayed = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .fileTransfer) >= 1 && outbound.count(ofType: .fragment) >= plan.totalFragments },
+            timeout: TestConstants.longTimeout
+        )
+        #expect(relayed)
+        #expect(outbound.snapshot().allSatisfy { $0.recipientID == otherPeer })
+        #expect(delegate.messageIDs.isEmpty)
+        #expect(delegate.noisePayloadTypes.isEmpty)
+    }
+
+    @Test
+    func readReceiptForAMediaPlaceholderIsNeverSent() async throws {
+        // The placeholder stands for a file this phone never received.
+        let ble = makeService()
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let peer = PeerID(str: "8899aabbccddeeff")
+        let placeholderID = UnsupportedPrivateMedia.messageID(
+            payload: Data([0x01, 0x02]), senderPeerID: peer, recipientPeerID: ble.myPeerID
+        )
+        #expect(UnsupportedPrivateMedia.isPlaceholderID(placeholderID))
+        ble.sendReadReceipt(
+            ReadReceipt(originalMessageID: placeholderID, readerID: ble.myPeerID, readerNickname: "me"),
+            to: peer
+        )
+        await ble._test_drainNoiseMessagePipeline()
+        let sent = await TestHelpers.waitUntil({ !outbound.snapshot().isEmpty }, timeout: TestConstants.negativeWaitWindow)
+        #expect(!sent)
+        #expect(!UnsupportedPrivateMedia.isPlaceholderID(UUID().uuidString))
     }
 
     @Test
