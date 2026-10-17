@@ -204,15 +204,15 @@ struct BLEIncomingFileStore: @unchecked Sendable {
     /// orphans a previous session left behind.
     static let liveCapturePrefix = "voice_live_"
 
+    #if os(iOS)
     /// Media payloads follow the same at-rest posture as the app's other
     /// persistence layers (courier, outbox, receipt index): protected until
     /// first unlock, so the launch-time retention sweep can still run after
-    /// a reboot. Applied to the media directories so recordings that save
-    /// as they go (live captures, `AVAudioRecorder`) inherit it, and stated
-    /// explicitly at the payload write site like every other store.
+    /// a reboot. Used by the launch-time protection migration.
     static var mediaProtectionAttributes: [FileAttributeKey: Any]? {
         LocalFileProtection.directoryAttributes
     }
+    #endif
 
     /// Exposed so callers that write progressively into the store's
     /// directories (live voice captures) share the same file manager.

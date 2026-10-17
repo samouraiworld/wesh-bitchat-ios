@@ -11,9 +11,6 @@ final class ConversationUIModel: ObservableObject {
     @Published private(set) var isBatchingPublic = false
     @Published private(set) var canSendMediaInCurrentContext = true
     @Published private(set) var legacyPrivateMediaConsentRequest: LegacyPrivateMediaConsentRequest?
-    /// Who is talking live in the public mesh channel right now (floor
-    /// courtesy: the composer mic tints "busy" while someone holds the floor).
-    @Published private(set) var activeLiveVoiceTalker: String?
 
     private let chatViewModel: ChatViewModel
     private let privateConversationModel: PrivateConversationModel
@@ -79,10 +76,6 @@ final class ConversationUIModel: ObservableObject {
         chatViewModel.$isBatchingPublic
             .receive(on: DispatchQueue.main)
             .assign(to: &$isBatchingPublic)
-
-        chatViewModel.$activePublicVoiceTalker
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$activeLiveVoiceTalker)
 
         chatViewModel.$legacyPrivateMediaConsentRequest
             .receive(on: DispatchQueue.main)
