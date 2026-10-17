@@ -55,10 +55,11 @@ struct ChatViewModelInitializationTests {
 
     @Test @MainActor
     func initialization_startsServices() async {
+        // Services start during init, except in Wesh before the welcome ends (the iOS test host).
+        let expectedStarts = WeshWelcome.meshMayStart() ? 1 : 0
         let (_, transport) = makeTestableViewModel()
 
-        // Services should be started during init
-        #expect(transport.startServicesCallCount == 1)
+        #expect(transport.startServicesCallCount == expectedStarts)
     }
 
     @Test @MainActor
@@ -2204,7 +2205,7 @@ struct ChatViewModelPanicTests {
 
         #expect(events == ["read", "begin", "wipe", "complete"])
         #expect(transport.emergencyDisconnectCallCount == 1)
-        #expect(transport.startServicesCallCount == 1)
+        #expect(transport.startServicesCallCount == (WeshWelcome.meshMayStart() ? 1 : 0))
         #expect(viewModel.networkActivationAllowed)
     }
 
@@ -2344,8 +2345,10 @@ struct ChatViewModelLifecycleTests {
 
     @Test @MainActor
     func startServices_calledOnInit() async {
+        // In Wesh (the iOS test host) the mesh waits for the welcome.
+        let expectedStarts = WeshWelcome.meshMayStart() ? 1 : 0
         let (_, transport) = makeTestableViewModel()
 
-        #expect(transport.startServicesCallCount == 1)
+        #expect(transport.startServicesCallCount == expectedStarts)
     }
 }

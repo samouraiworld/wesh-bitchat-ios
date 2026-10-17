@@ -28,6 +28,10 @@ struct PaveExchangeScreen: View {
     let progress: PaveExchangeProgress
     var camera: Camera = .live
     let onScan: (String) -> Void
+    /// What the last scan came to, when it needs words: invalid, your own code, not saved…
+    var notice: PaveExchangeNotice?
+    /// « Autre méthode »: a link pasted after comparing it in person. Nil hides it.
+    var onPaste: ((String) -> Void)?
     /// Called once, on « Ouvrir la discussion »: never by a timer.
     let onComplete: () -> Void
     let onClose: () -> Void
@@ -42,6 +46,8 @@ struct PaveExchangeScreen: View {
     @State private var latch = PaveCompletionLatch()
     @State private var myFingerprint: String?
     @State private var contactFingerprint: String?
+    @State private var pasted = ""
+    @FocusState private var pasteFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -61,8 +67,21 @@ struct PaveExchangeScreen: View {
                     successCard
                 } else {
                     scanner
+                    if let notice {
+                        Text(notice.text)
+                            .paveText(.label)
+                            .foregroundStyle(theme[.ink])
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    if let onPaste { otherMethod(onPaste) }
                 }
                 checkmarks
+                // The checks follow what reached this phone; only your own scan proves who is in front of you.
+                Text(PaveCopy.text("pave.exchange.inPerson"))
+                    .paveText(.caption)
+                    .foregroundStyle(theme[.inkMuted])
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, PaveSpace.s4)
             .padding(.bottom, PaveSpace.s8)
@@ -73,6 +92,17 @@ struct PaveExchangeScreen: View {
         .task(id: contactNoiseKey) { contactFingerprint = await PaveFingerprint.computed(contactNoiseKey) }
         .onChange(of: progress.isComplete) { complete in
             if complete { PaveHaptics.play(.scanSuccess) }
+        }
+        // VoiceOver hears every scan outcome and every check as it fills.
+        // Each scan outcome is its own event: two invalid codes in a row are both announced.
+        .onChange(of: notice) { notice in
+            if let notice { PaveAccessibility.announce(notice.text) }
+        }
+        .onChange(of: progress.theyScannedMe) { done in
+            if done { PaveAccessibility.announce(PaveExchangeCheck.yourCode.label(done: true)) }
+        }
+        .onChange(of: progress.iScannedThem) { done in
+            if done { PaveAccessibility.announce(PaveExchangeCheck.theirCode.label(done: true)) }
         }
     }
 
@@ -200,6 +230,37 @@ struct PaveExchangeScreen: View {
         .accessibilityLabel(PaveCopy.text("pave.exchange.cameraA11y"))
     }
 
+    private func otherMethod(_ verify: @escaping (String) -> Void) -> some View {
+        DisclosureGroup(PaveCopy.text("pave.exchange.otherMethod")) {
+            VStack(alignment: .leading, spacing: PaveSpace.s3) {
+                Text(PaveCopy.text("pave.exchange.pasteHelp"))
+                    .paveText(.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(theme[.inkMuted])
+                TextField(PaveCopy.text("pave.exchange.pasteLabel"), text: $pasted, axis: .vertical)
+                    .paveText(.body)
+                    .lineLimit(2...5)
+                    .focused($pasteFocused)
+                    .autocorrectionDisabled()
+                    .weshNoAutocapitalization()
+                    .padding(PaveSpace.s3)
+                    .overlay(RoundedRectangle(cornerRadius: PaveRadius.control)
+                        .strokeBorder(theme[.lineStrong], lineWidth: PaveStroke.control))
+                    .accessibilityLabel(PaveCopy.text("pave.exchange.pasteLabel"))
+                Button(PaveCopy.text("pave.exchange.pasteVerify")) {
+                    pasteFocused = false
+                    verify(pasted)
+                }
+                .buttonStyle(.paveSecondary)
+                .disabled(pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.top, PaveSpace.s2)
+        }
+        .paveText(.label)
+        .tint(theme[.ink])
+        .foregroundStyle(theme[.ink])
+    }
+
     private func blockedCard(text: String, showsSettings: Bool) -> some View {
         VStack(spacing: PaveSpace.s3) {
             Label(text, systemImage: "exclamationmark.triangle.fill")
@@ -257,6 +318,15 @@ struct PaveExchangeScreen: View {
             try? await Task.sleep(nanoseconds: 15_000_000_000)
         }
     }
+}
+
+/// One scan outcome. A new one is a new event even with the same words, so VoiceOver repeats it.
+struct PaveExchangeNotice: Equatable {
+    let text: String
+    // periphery:ignore - read by the synthesized Equatable, which tells two identical notices apart
+    let id = UUID()
+
+    init(_ text: String) { self.text = text }
 }
 
 /// `label` (whose key it is) above a short fingerprint in monospace; VoiceOver reads it one

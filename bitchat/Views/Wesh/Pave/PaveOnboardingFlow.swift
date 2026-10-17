@@ -6,8 +6,6 @@ struct PaveOnboardingFlow: View {
         case welcome, bluetooth
     }
 
-    static let termsURL = URL(string: "https://wesh.samourai.app/conditions")
-
     /// Triggers the system Bluetooth prompt.
     let onRequestBluetooth: () -> Void
     /// Receives the chosen nickname once onboarding ends.
@@ -105,15 +103,13 @@ struct PaveOnboardingFlow: View {
                     .paveText(.caption)
                     .foregroundStyle(theme[.inkMuted])
                     .multilineTextAlignment(.center)
-                if let termsURL = Self.termsURL {
-                    Link(destination: termsURL) {
-                        Text(PaveCopy.text("pave.onboarding.readTerms"))
-                            .paveText(.caption)
-                            .underline()
-                            .frame(minHeight: PaveTouch.minimum)
-                    }
-                    .foregroundStyle(theme[.ink])
+                Link(destination: WeshLinks.terms) {
+                    Text(PaveCopy.text("pave.onboarding.readTerms"))
+                        .paveText(.caption)
+                        .underline()
+                        .frame(minHeight: PaveTouch.minimum)
                 }
+                .foregroundStyle(theme[.ink])
             }
         }
     }
@@ -131,6 +127,8 @@ struct PaveOnboardingFlow: View {
                 Text(PaveCopy.text("pave.onboarding.bluetoothWhy")).paveText(.body)
                 Text(PaveCopy.text("pave.onboarding.bluetoothPrompt")).paveText(.body)
                 Text(PaveCopy.text("pave.onboarding.noLocation")).paveText(.body)
+                // The notification prompt follows this one; say so before it appears.
+                Text(PaveCopy.text("pave.onboarding.notificationsNext")).paveText(.body)
             }
             Label(PaveCopy.text("pave.connexion.visibility"), systemImage: "exclamationmark.triangle.fill")
                 .paveText(.caption)
@@ -145,8 +143,6 @@ struct PaveOnboardingFlow: View {
                     onFinish(trimmedNickname)
                 }
                 .buttonStyle(.pavePrimary)
-                Button(PaveCopy.text("pave.onboarding.later")) { onFinish(trimmedNickname) }
-                    .buttonStyle(.paveSecondary)
             }
         }
     }

@@ -9,6 +9,58 @@ enum WeshMode {
     }
 }
 
+/// The first-launch welcome (nickname, terms, then Bluetooth). Until it ends, the system Bluetooth
+/// prompt is held back, so it appears on the step that explains it.
+enum WeshWelcome {
+    static let key = "wesh.welcomed.v1"
+
+    static func isDone(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: key)
+    }
+
+    /// Whether Bluetooth may start: never in Wesh before the welcome (first launch, or after a
+    /// wipe, including one resumed at launch), always outside Wesh.
+    static func meshMayStart(weshActive: Bool, in defaults: UserDefaults = .standard) -> Bool {
+        !weshActive || isDone(in: defaults)
+    }
+
+    @MainActor
+    static func meshMayStart() -> Bool {
+        meshMayStart(weshActive: WeshMode.isActive)
+    }
+
+    /// The welcome keeps a nickname someone chose in an earlier build; the « anon1234 » stand-in
+    /// set before any choice gives way to a suggested one.
+    static func keptNickname(_ current: String) -> String? {
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.range(of: #"^anon\d{4}$"#, options: .regularExpression) == nil else { return nil }
+        return trimmed
+    }
+}
+
+extension PaveSettingsSummary {
+    /// The Settings rows as Wesh stores them: notification previews (hidden by default) and the
+    /// appearance from `defaults`, the meeting note's place or else its title.
+    static func wesh(nickname: String, meetingNote: WeshMeetingNoteStore.Content, blockedCount: Int,
+                     defaults: UserDefaults = .standard) -> PaveSettingsSummary {
+        let appearance = defaults.string(forKey: "wesh.appearance.v1").flatMap(WeshAppearance.init(rawValue:)) ?? .night
+        return PaveSettingsSummary(nickname: nickname,
+                                   previewsHidden: NotificationPrivacySettings.hideMessagePreviews(in: defaults),
+                                   meetingNote: meetingNote.place.isEmpty ? meetingNote.title : meetingNote.place,
+                                   blockedCount: blockedCount,
+                                   theme: appearance.paveTheme)
+    }
+}
+
+/// What the root shows: an unfinished erase first, then the first-launch welcome, then the app.
+enum WeshRootScreen: Equatable {
+    case eraseRecovery, welcome, tabs
+
+    init(panicRecoveryBlocked: Bool, welcomed: Bool) {
+        if panicRecoveryBlocked { self = .eraseRecovery } else { self = welcomed ? .tabs : .welcome }
+    }
+}
+
 /// `WeshMode.isActive` for code off the main actor (BLE and Nostr queues).
 enum WeshModeFlag {
     private static let lock = NSLock()
@@ -31,15 +83,17 @@ enum WeshDisplayName {
         InputValidator.validateNickname(raw) ?? fallback
     }
 
-    /// The name a block confirmation, its VoiceOver label and the resulting
-    /// timeline line may show.
+    /// The name a block or report confirmation, its VoiceOver label, the resulting timeline line
+    /// and the stored block name show. `privateTitle` is already through the rule; a public
+    /// sender goes through it here, once.
     static func blockTarget(sender: String, privateTitle: String, isPrivate: Bool) -> String {
-        clean(isPrivate ? privateTitle : sender, fallback: "Participant")
+        isPrivate ? privateTitle : PaveDisplayName.safe(sender)
     }
 
+    /// A petname is chosen on this phone; a claimed nickname is the peer's and goes through the rule.
     static func blockedContact(petname: String?, claimedNickname: String?) -> String {
-        let raw = petname ?? claimedNickname ?? ""
-        return raw.isEmpty ? "Personne sans nom" : clean(raw, fallback: "Participant")
+        if let petname, !petname.isEmpty { return clean(petname, fallback: PaveDisplayName.safe(claimedNickname)) }
+        return PaveDisplayName.safe(claimedNickname)
     }
 }
 

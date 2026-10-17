@@ -190,7 +190,8 @@ private extension ChatViewModelBootstrapper {
     }
 
     func startRuntimeServices() {
-        viewModel.meshService.startServices()
+        // Checked after any wipe resumed at launch, which brings the welcome back.
+        if WeshWelcome.meshMayStart() { viewModel.meshService.startServices() }
 
         viewModel.publicMessagePipeline.delegate = viewModel.publicConversationCoordinator
 
@@ -671,6 +672,8 @@ private extension ChatViewModelBootstrapper {
     }
 
     func requestNotifications() {
+        // In Wesh the prompt waits for the end of the welcome (`AppRuntime.welcomeFinished`).
+        guard !WeshMode.isActive || WeshWelcome.isDone() else { return }
         NotificationService.shared.requestAuthorization()
     }
 

@@ -18,6 +18,23 @@
         }
       }
     },
+    "pave.about.licenseFont" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poster typeface: Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, under the SIL Open Font License 1.1, reproduced below."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Police d’affiche : Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, sous SIL Open Font License 1.1, reproduite ci-dessous."
+          }
+        }
+      }
+    },
     "pave.about.licenseThirdParty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -303,6 +320,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Échec de l'envoi. Réessayer."
+          }
+        }
+      }
+    },
+    "pave.bubble.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
           }
         }
       }
@@ -1096,6 +1130,23 @@
         }
       }
     },
+    "pave.exchange.inPerson" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A photo or a forwarded link does not prove who you are meeting. Only your own scan of the code on their screen verifies them, on this phone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une photo ou un lien transféré ne prouve pas qui vous rencontrez. Seul votre propre scan du code affiché sur son écran le vérifie, sur ce téléphone."
+          }
+        }
+      }
+    },
     "pave.exchange.intro" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1126,6 +1177,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ouvrir la discussion"
+          }
+        }
+      }
+    },
+    "pave.exchange.otherMethod" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other method"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autre méthode"
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare the link on the screen of the person in front of you before pasting it."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comparez le lien sur l’écran de la personne devant vous avant de le coller."
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your contact’s QR link"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lien du QR de votre contact"
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteVerify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check this code"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérifier ce code"
           }
         }
       }
@@ -1170,13 +1289,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Exchange done"
+            "value" : "Verified on this phone"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Échange réussi"
+            "value" : "Vérifié sur ce téléphone"
           }
         }
       }
@@ -1204,13 +1323,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your code was scanned"
+            "value" : "Their phone answered"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Votre code est scanné"
+            "value" : "Son téléphone a répondu"
           }
         }
       }
@@ -1313,6 +1432,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Empreinte indisponible"
+          }
+        }
+      }
+    },
+    "pave.fluo.bluetooth.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth off"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth coupé"
+          }
+        }
+      }
+    },
+    "pave.fluo.bluetooth.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth on"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth actif"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "téléphones à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.one" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phone in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphone à portée"
+          }
+        }
+      }
+    },
+    "pave.fluo.reach.sentence.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d phones in range"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d téléphones à portée"
           }
         }
       }
@@ -1889,23 +2110,6 @@
         }
       }
     },
-    "pave.onboarding.later" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not now"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plus tard"
-          }
-        }
-      }
-    },
     "pave.onboarding.nicknameHelp" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1970,6 +2174,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wesh n'utilise pas votre position."
+          }
+        }
+      }
+    },
+    "pave.onboarding.notificationsNext" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next, Wesh asks to send notifications, so you know a message arrived. They never show its text or who sent it unless you choose to."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ensuite, Wesh demande à envoyer des notifications, pour savoir qu’un message est arrivé. Elles n’affichent ni son texte ni qui l’envoie, sauf si vous le choisissez."
           }
         }
       }
@@ -2416,6 +2637,142 @@
         }
       }
     },
+    "pave.scanResult.contactsUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts unavailable, try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts indisponibles, réessayez."
+          }
+        }
+      }
+    },
+    "pave.scanResult.identityUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your identity is unavailable."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité indisponible."
+          }
+        }
+      }
+    },
+    "pave.scanResult.invalid" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid or expired code. Ask your contact to show their code."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code invalide ou expiré. Demandez à votre contact d’afficher son code."
+          }
+        }
+      }
+    },
+    "pave.scanResult.noConfirmation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No confirmation. Keep Wesh open on both phones, then scan again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis scannez à nouveau."
+          }
+        }
+      }
+    },
+    "pave.scanResult.notFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact not found or a different identity. Bring the phones closer and try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact introuvable ou identité différente. Rapprochez les téléphones et réessayez."
+          }
+        }
+      }
+    },
+    "pave.scanResult.ownCode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That is your code. Scan your contact’s."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "C’est votre code. Scannez celui de votre contact."
+          }
+        }
+      }
+    },
+    "pave.scanResult.pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking %@… Keep Wesh open on both phones."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérification de %@ en cours… Gardez Wesh ouvert sur les deux téléphones."
+          }
+        }
+      }
+    },
+    "pave.scanResult.verifiedWaiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You verified your contact on this phone. For them to write to you, they now need to scan your code."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous avez vérifié votre contact sur ce téléphone. Pour qu’il puisse vous écrire, il doit maintenant scanner votre code."
+          }
+        }
+      }
+    },
     "pave.settings.about" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2569,6 +2926,23 @@
         }
       }
     },
+    "pave.settings.previewsHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications say a message arrived, without its text or the person’s nickname."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les notifications disent qu’un message est arrivé, sans le texte ni le surnom de la personne."
+          }
+        }
+      }
+    },
     "pave.settings.previewsHidden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2599,6 +2973,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aperçus visibles"
+          }
+        }
+      }
+    },
+    "pave.settings.previewsToggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide notification previews"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masquer les aperçus des notifications"
           }
         }
       }

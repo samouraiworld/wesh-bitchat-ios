@@ -333,7 +333,8 @@ struct WeshNativeUITests {
         #expect(!vm.panicRecoveryBlocked && !note.isSuspended)
         #expect(committed == 1 && begun == 2 && eraseAttempts == 2)
         #expect(vm.weshPanicGeneration == 2)
-        #expect(transport.startServicesCallCount == starts + 1)
+        // In Wesh the mesh stays stopped until the welcome that follows a wipe ends.
+        #expect(transport.startServicesCallCount == starts + (WeshMode.isActive ? 0 : 1))
         #expect(note.edit(\.note, value: "Note après reprise", generation: note.generation))
         #expect(!note.edit(\.note, value: "Ancienne vue", generation: failedGeneration))
         #expect(note.content.note == "Note après reprise")
@@ -985,12 +986,15 @@ struct WeshNativeUITests {
         #expect(requests.requests.isEmpty)
     }
 
-    @Test @MainActor func requestNamesAreSanitizedBeforeDisplayOrBlocking() {
+    /// Kept raw, so every view, the block and the report draw it through the rule exactly once.
+    @Test @MainActor func requestNamesStayRawUntilDrawnThroughTheRuleOnce() throws {
         let requests = WeshInboundRequests()
         let message = BitchatMessage(id: "n1", sender: "Ad\u{202E}min", content: "texte", timestamp: Date(), isRelay: false,
                                      originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
         #expect(requests.add(message, from: Data(repeating: 0x54, count: 32)))
-        #expect(requests.requests.first?.nickname == "Participant")
+        let stored = try #require(requests.requests.first?.nickname)
+        #expect(stored == "Ad\u{202E}min")
+        #expect(!PaveDisplayName.safe(stored).contains("\u{202E}"))
     }
 
     @Test @MainActor func deletedRequestStaysDeletedWhenTheSenderRetriesTheSameMessage() {
