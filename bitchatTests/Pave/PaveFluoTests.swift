@@ -1,3 +1,4 @@
+import CoreBluetooth
 import Foundation
 import Testing
 @testable import bitchat
@@ -44,5 +45,36 @@ struct PaveFluoTests {
         #expect(PaveDisplayFont.isAvailable)
         // Shown in full in Licences, as the OFL asks of a bundled font.
         #expect(PaveDisplayFont.licenseText?.contains("SIL Open Font License") == true)
+    }
+}
+
+struct PaveSettingsWiringTests {
+    @Test @MainActor func aWipeFromSettingsShowsItsResultAndTheShortcutStillOpensTheHold() {
+        let request = PaveEraseRequest()
+        request.show(.erased)
+        #expect(request.isPresented && request.outcome == .erased)
+        request.close()
+        request.show(.failed)
+        #expect(request.outcome == .failed)
+        request.close()
+        request.request()
+        #expect(request.isPresented && request.outcome == .ready)
+    }
+
+    @Test func onlyAPoweredOnRadioReadsAsOn() {
+        #expect(PaveBluetoothStatus(CBManagerState.poweredOn) == .on)
+        #expect(PaveBluetoothStatus(CBManagerState.unauthorized) == .unauthorized)
+        for state in [CBManagerState.poweredOff, .unknown, .resetting, .unsupported] {
+            #expect(PaveBluetoothStatus(state) == .off)
+        }
+    }
+}
+
+struct WeshWelcomeTests {
+    @Test func theWelcomeShowsUntilItEnds() {
+        let defaults = UserDefaults(suiteName: "wesh.welcome.\(UUID().uuidString)")!
+        #expect(!WeshWelcome.isDone(in: defaults))
+        defaults.set(true, forKey: WeshWelcome.key)
+        #expect(WeshWelcome.isDone(in: defaults))
     }
 }

@@ -348,6 +348,13 @@ final class BLEService: NSObject {
     var peripheralManager: CBPeripheralManager?
     var characteristic: CBMutableCharacteristic?
     private let shouldInitializeBluetoothManagers: Bool
+    /// Wesh first launch: no CoreBluetooth manager, so no system prompt, until the welcome's
+    /// Bluetooth step calls `allowBluetoothPrompt()`.
+    private let bluetoothPromptLock = NSLock()
+    private var _bluetoothPromptDeferred: Bool
+    private var isBluetoothPromptDeferred: Bool { bluetoothPromptLock.withLock { _bluetoothPromptDeferred } }
+    /// True until `allowBluetoothPrompt()`; no CoreBluetooth manager exists meanwhile.
+    var holdsBluetoothPrompt: Bool { isBluetoothPromptDeferred }
     private let panicLifecycleLock = NSLock()
     private var _isPanicSuspended: Bool
     private var panicLifecycleGeneration: UInt64 = 0
@@ -516,6 +523,7 @@ final class BLEService: NSObject {
         initializeBluetoothManagers: Bool = true,
         incomingFileStore: BLEIncomingFileStore = BLEIncomingFileStore(),
         startSuspendedForPanicRecovery: Bool = false,
+        deferBluetoothPrompt: Bool = false,
         noiseResponderHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
         engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
@@ -526,6 +534,7 @@ final class BLEService: NSObject {
         self.incomingFileStore = incomingFileStore
         self.shouldInitializeBluetoothManagers = initializeBluetoothManagers
         self._isPanicSuspended = startSuspendedForPanicRecovery
+        self._bluetoothPromptDeferred = deferBluetoothPrompt
         self.noiseResponderHandshakeTimeout = noiseResponderHandshakeTimeout
         noiseService = NoiseEncryptionService(
             keychain: keychain,
@@ -736,8 +745,19 @@ final class BLEService: NSObject {
             && panicLifecycleGeneration == generation
     }
 
+    /// The welcome asked for Bluetooth: create the managers, which shows the system prompt once.
+    func allowBluetoothPrompt() {
+        let wasDeferred = bluetoothPromptLock.withLock { () -> Bool in
+            defer { _bluetoothPromptDeferred = false }
+            return _bluetoothPromptDeferred
+        }
+        guard wasDeferred else { return }
+        resumeRequestedServices()
+    }
+
     private func initializeBluetoothManagersIfNeeded() {
         guard shouldInitializeBluetoothManagers,
+              !isBluetoothPromptDeferred,
               centralManager == nil,
               peripheralManager == nil,
               isTransportTrafficAllowed else { return }

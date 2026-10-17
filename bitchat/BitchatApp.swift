@@ -26,7 +26,8 @@ struct BitchatApp: App {
         WeshMode.isActive = true
         PaveDisplayName.warmUp()
         // Wesh Internet mode is opt-in (default off); WeshInternetMode forces Tor.
-        NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled())
+        // Before the welcome's terms are accepted, even an Internet mode left on stays off.
+        NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled() && WeshWelcome.isDone())
         BridgeService.shared.setEnabled(false)
         GatewayService.shared.setEnabled(false)
         _runtime = StateObject(wrappedValue: AppRuntime())

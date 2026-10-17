@@ -1157,7 +1157,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             keychain: keychain,
             idBridge: idBridge,
             identityManager: identityManager,
-            startSuspendedForPanicRecovery: startSuspendedForRecovery
+            startSuspendedForPanicRecovery: startSuspendedForRecovery,
+            deferBluetoothPrompt: WeshMode.isActive && !WeshWelcome.isDone()
         )
         meshService.sfMetrics = .shared
         self.init(
@@ -1501,6 +1502,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         verificationCoordinator.qrAttemptNonce(for: noiseKey)
     }
 
+    func weshScannedMyCode(noiseKey: Data, since: Date) -> Bool {
+        verificationCoordinator.scannedMyCode(noiseKey: noiseKey, since: since)
+    }
+
     @discardableResult
     func removeWeshContact(for noiseKey: Data) -> Bool {
         verificationCoordinator.cancelQRVerification(for: noiseKey)
@@ -1751,7 +1756,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // PANIC: Emergency data clearing for activist safety
     @MainActor
     @discardableResult
-    func panicClearAllData(restartServices: Bool = true) -> Bool {
+    /// `restartMesh: false` keeps Bluetooth stopped after the wipe (Wesh: until the welcome ends),
+    /// while the rest of the network lifecycle restarts as usual.
+    func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
@@ -1835,7 +1842,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // identity and re-enroll the contact that was just erased.
         verificationCoordinator.cancelAllQRVerifications()
         let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
-        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1"] {
+        // The welcome and its terms come back after a wipe, like on a new phone.
+        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1", WeshWelcome.key] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
@@ -1980,7 +1988,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             // Startup recovery reopens admission but leaves actual service
             // start to the bootstrapper immediately after this method.
             panicTransport.completePanicReset(
-                restartServices: restartServices
+                restartServices: restartServices && restartMesh
             )
         }
 
@@ -1993,7 +2001,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             // All persistent state and media are gone. Bring each service back
             // only now, under the new identity — a panic-resetting transport
             // owns its own restart sequencing above.
-            if !(meshService is PanicResettingTransport) {
+            if !(meshService is PanicResettingTransport) && restartMesh {
                 meshService.startServices()
             }
 

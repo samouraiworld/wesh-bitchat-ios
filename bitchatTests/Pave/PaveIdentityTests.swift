@@ -56,8 +56,8 @@ struct PaveReservedWordsTests {
                      "via Internet", "Bluetooth", "Pas encore de message", "No messages yet",
                      "Salon public", "Public room", "Échanger", "Exchange", "Demandes", "Requests",
                      "Empreinte de la clé", "Key fingerprint", "Empreinte indisponible", "Fingerprint unavailable",
-                     "Votre empreinte", "Empreinte du contact", "Échange réussi", "Ouvrir la discussion",
-                     "Votre code est scanné", "Son code est scanné", "Profil", "Profile"] {
+                     "Votre empreinte", "Empreinte du contact", "Vérifié sur ce téléphone", "Ouvrir la discussion",
+                     "Son téléphone a répondu", "Son code est scanné", "Profil", "Profile"] {
             #expect(words.contains(word), "\(word) is not reserved")
         }
     }

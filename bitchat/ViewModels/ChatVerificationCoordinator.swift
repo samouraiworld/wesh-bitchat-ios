@@ -194,6 +194,9 @@ final class ChatVerificationCoordinator {
     private var completedQRNonces: [String: Data] = [:]
     private var lastVerifyNonceByPeer: [PeerID: Data] = [:]
     private var lastInboundVerifyChallengeAt: [String: Date] = [:]
+    /// Inbound challenges for my key, by the fingerprint of the key the sender proved in its
+    /// Noise session (never an announced one, which can be copied).
+    private var scannedMyCodeAt: [String: Date] = [:]
     private var lastMutualToastAt: [String: Date] = [:]
 
     init(context: any ChatVerificationContext, weshMode: Bool = false, qrTrust: WeshQRTrust? = nil,
@@ -244,7 +247,20 @@ final class ChatVerificationCoordinator {
     func cancelAllQRVerifications() {
         pendingQRVerifications.removeAll()
         completedQRNonces.removeAll()
+        lastInboundVerifyChallengeAt.removeAll()
+        scannedMyCodeAt.removeAll()
     }
+
+    /// The holder of this key scanned my code since `since`: its challenge for my key came in
+    /// over a Noise session in which it proved this key. An indicator, not a proof: the challenge
+    /// names my key, not the code on screen, so trust still comes only from my own scan.
+    func scannedMyCode(noiseKey: Data, since: Date) -> Bool {
+        guard noiseKey.count == 32, let challengeAt = scannedMyCodeAt[noiseKey.sha256Fingerprint()] else { return false }
+        return challengeAt >= since && now().timeIntervalSince(challengeAt) <= Self.scannedMyCodeLifetime
+    }
+
+    /// No older than one displayed code: a QR is accepted for five minutes.
+    static let scannedMyCodeLifetime = TransportConfig.verificationQRMaxAgeSeconds
 
     func verifyFingerprint(for peerID: PeerID) {
         guard context.isIdentityStateAvailable else { return }
@@ -431,6 +447,11 @@ final class ChatVerificationCoordinator {
         guard lastVerifyNonceByPeer[peerID] != challenge.nonceA else { return }
 
         lastVerifyNonceByPeer[peerID] = challenge.nonceA
+        if let sessionKey = context.noiseSessionPublicKeyData(for: peerID), sessionKey.count == 32 {
+            let date = now()
+            scannedMyCodeAt = scannedMyCodeAt.filter { date.timeIntervalSince($0.value) <= Self.scannedMyCodeLifetime }
+            scannedMyCodeAt[sessionKey.sha256Fingerprint()] = date
+        }
 
         if let fingerprint = context.getFingerprint(for: peerID) {
             lastInboundVerifyChallengeAt[fingerprint] = Date()

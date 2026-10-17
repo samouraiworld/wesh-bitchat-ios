@@ -43,6 +43,8 @@ struct PaveSettingsSummary {
 
 struct PaveSettingsScreen: View {
     let summary: PaveSettingsSummary
+    /// False when the caller shows the wipe's result itself (the app's root rebuilds after a wipe).
+    var presentsOutcome = true
     /// Runs the local wipe; returns whether it completed, like `PaveEraseScreen`.
     let onErase: () -> Bool
     let onSelect: (PaveSettingsDestination) -> Void
@@ -69,7 +71,7 @@ struct PaveSettingsScreen: View {
             PaveHoldToErase(layout: .row) {
                 let outcome = PaveEraseScreen.Outcome(erased: onErase())
                 if outcome == .failed { PaveHaptics.play(.failure) }
-                eraseOutcome = outcome
+                if presentsOutcome { eraseOutcome = outcome }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: PaveSpace.s3) {
@@ -162,6 +164,8 @@ struct PaveAboutScreen: View {
                         Link(destination: donationsURL) { Text(PaveCopy.text("pave.about.donate")) }
                             .buttonStyle(.paveSecondary)
                     }
+                    Link(destination: WeshLinks.terms) { Text(PaveCopy.text("pave.onboarding.readTerms")) }
+                        .buttonStyle(.paveSecondary)
                 }
                 VStack(alignment: .leading, spacing: PaveSpace.s2) {
                     Text(PaveCopy.text("pave.about.licensesTitle"))
@@ -172,6 +176,9 @@ struct PaveAboutScreen: View {
                         .paveText(.label)
                         .fontWeight(.regular)
                         .foregroundStyle(theme[.inkMuted])
+                    // The poster face's OFL, in full.
+                    NavigationLink { PaveLicensesScreen() } label: { Text(PaveCopy.text("pave.about.licensesTitle")) }
+                        .buttonStyle(.paveSecondary)
                 }
                 Text(PaveCopy.text("pave.settings.footer"))
                     .paveText(.caption)

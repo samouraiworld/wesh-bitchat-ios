@@ -19,7 +19,7 @@ import Foundation
 /// Defaults to hidden: a locked phone lying on a table or taken at a protest
 /// should not narrate conversations, and someone who wants previews can say so.
 enum NotificationPrivacySettings {
-    private static let hidePreviewsKey = "notifications.hideMessagePreviews"
+    static let hidePreviewsKey = "notifications.hideMessagePreviews"
 
     static var hideMessagePreviews: Bool {
         get { hideMessagePreviews(in: .standard) }

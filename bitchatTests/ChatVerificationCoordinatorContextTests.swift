@@ -706,6 +706,51 @@ struct ChatVerificationCoordinatorContextTests {
     }
 
     @Test @MainActor
+    func scannedMyCode_countsOnlyTheKeyProvenInTheSessionAndOnlySinceTheScreenOpened() async {
+        let context = MockChatVerificationContext()
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let coordinator = ChatVerificationCoordinator(context: context, now: { clock })
+        let peerID = PeerID(str: "1122334455667788")
+        let proven = Data(repeating: 0x44, count: 32)
+        let announced = Data(repeating: 0x43, count: 32)
+        context.noiseSessionKeysByPeerID[peerID] = proven
+        context.fingerprintsByPeerID[peerID] = announced.sha256Fingerprint()
+        let opened = clock
+        clock = clock.addingTimeInterval(5)
+
+        coordinator.handleVerifyChallengePayload(
+            from: peerID,
+            payload: makeVerifyChallengeTLV(noiseKeyHex: context.myNoiseStaticKey.hexEncodedString(),
+                                            nonceA: Data(repeating: 0x07, count: 16))
+        )
+
+        #expect(coordinator.scannedMyCode(noiseKey: proven, since: opened))
+        #expect(!coordinator.scannedMyCode(noiseKey: announced, since: opened))
+        #expect(!coordinator.scannedMyCode(noiseKey: proven, since: clock.addingTimeInterval(1)))
+        // No older than one displayed code.
+        clock = clock.addingTimeInterval(ChatVerificationCoordinator.scannedMyCodeLifetime + 1)
+        #expect(!coordinator.scannedMyCode(noiseKey: proven, since: opened))
+        clock = opened.addingTimeInterval(5)
+        coordinator.cancelAllQRVerifications()
+        #expect(!coordinator.scannedMyCode(noiseKey: proven, since: opened))
+    }
+
+    @Test @MainActor
+    func scannedMyCode_needsASessionKey() async {
+        let context = MockChatVerificationContext()
+        let coordinator = ChatVerificationCoordinator(context: context)
+        let peerID = PeerID(str: "1122334455667788")
+        let announced = Data(repeating: 0x43, count: 32)
+        context.fingerprintsByPeerID[peerID] = announced.sha256Fingerprint()
+        coordinator.handleVerifyChallengePayload(
+            from: peerID,
+            payload: makeVerifyChallengeTLV(noiseKeyHex: context.myNoiseStaticKey.hexEncodedString(),
+                                            nonceA: Data(repeating: 0x07, count: 16))
+        )
+        #expect(!coordinator.scannedMyCode(noiseKey: announced, since: .distantPast))
+    }
+
+    @Test @MainActor
     func handleVerifyChallengePayload_postsMutualVerificationToastOncePerMinute() async {
         let context = MockChatVerificationContext()
         let coordinator = ChatVerificationCoordinator(context: context)

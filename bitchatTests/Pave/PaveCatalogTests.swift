@@ -33,10 +33,13 @@ struct PaveCatalogTests {
         return result
     }
 
+    /// The Pavé screens, plus the Wesh views next to them that read Pavé copy (the root view).
     private static func sources() throws -> [(name: String, text: String)] {
-        try FileManager.default.contentsOfDirectory(at: paveDirectory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "swift" }
-            .map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+        try [paveDirectory, paveDirectory.deletingLastPathComponent()].flatMap { directory in
+            try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "swift" }
+                .map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+        }
     }
 
     private static func formatSpecifiers(_ value: String) -> [String] {
