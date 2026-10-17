@@ -21,6 +21,7 @@ tokio = { version = "1", default-features = false, features = [
     "sync",
     "time",
     "macros",
+    "io-util",
 ] }
 
 # Tor runtime compatibility
