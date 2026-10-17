@@ -88,11 +88,7 @@ final class AppRuntime: ObservableObject {
             privateConversationModel: self.privateConversationModel,
             peerIdentityStore: peerIdentityStore
         )
-        self.conversationUIModel = ConversationUIModel(
-            chatViewModel: self.chatViewModel,
-            privateConversationModel: self.privateConversationModel,
-            conversations: conversations
-        )
+        self.conversationUIModel = ConversationUIModel(chatViewModel: self.chatViewModel)
         self.peerListModel = PeerListModel(
             chatViewModel: self.chatViewModel,
             conversations: conversations,
@@ -175,23 +171,18 @@ final class AppRuntime: ObservableObject {
         record(.startupCompleted)
     }
 
-    /// Drops media that has outlived the retention window, then applies the
-    /// explicit protection class to files that older builds wrote without
-    /// one. Expiry runs first so the migration never touches files the
-    /// sweep is about to delete. Detached because `AppRuntime` is
-    /// main-actor and both passes go file by file through the media tree;
-    /// best-effort, nothing at launch depends on their results. Files older
-    /// builds left in backups are excluded first.
+    /// Wesh has no media: deletes the media an older build may have stored,
+    /// after excluding from backups the files older builds left there.
+    /// Detached because `AppRuntime` is main-actor; best-effort, nothing at
+    /// launch depends on the result. Skipped under tests, whose process
+    /// shares the developer's real Application Support tree.
     private func performMediaMaintenance() {
+        guard !TestEnvironment.isRunningTests else { return }
         Task.detached(priority: .utility) {
             #if os(iOS)
-            if !TestEnvironment.isRunningTests {
-                LocalFileProtection.excludeApplicationSupportFromBackup()
-            }
+            LocalFileProtection.excludeApplicationSupportFromBackup()
             #endif
-            let store = BLEIncomingFileStore()
-            store.expireAgedMedia()
-            store.migrateFileProtectionIfNeeded()
+            try? PanicRecoveryFileStore().removeLegacyMedia()
         }
     }
 

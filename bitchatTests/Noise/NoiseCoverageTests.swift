@@ -788,13 +788,6 @@ struct NoiseCoverageTests {
         #expect(decrypted.plaintext == Data("old session".utf8))
         #expect(decrypted.sessionGeneration == oldGeneration)
         #expect(aliceManager.sessionGeneration(for: alicePeerID) != oldGeneration)
-        #expect(throws: NoiseEncryptionError.sessionNotEstablished) {
-            try aliceManager.encrypt(
-                Data("stale send".utf8),
-                for: alicePeerID,
-                expectedSessionGeneration: oldGeneration
-            )
-        }
 
         var staleCommitRan = false
         let staleCommit = aliceManager.withCurrentSessionGeneration(

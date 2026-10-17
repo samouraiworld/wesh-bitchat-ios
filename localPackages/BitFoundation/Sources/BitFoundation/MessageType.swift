@@ -23,7 +23,9 @@ public enum MessageType: UInt8 {
 
     // Fragmentation (simplified)
     case fragment = 0x20        // Single fragment type for large messages
-    case fileTransfer = 0x22    // Binary file/audio/image payloads
+    // BitChat file/audio/image payloads. Wesh sends none and drops received
+    // ones (fragmented or not) without relaying; the value stays reserved.
+    case fileTransfer = 0x22
     case boardPost = 0x23       // Signed geohash bulletin-board post or tombstone
     case prekeyBundle = 0x24    // Signed batch of one-time prekeys (gossiped)
     case groupMessage = 0x25    // Group-encrypted broadcast (cleartext group ID, ChaChaPoly body)

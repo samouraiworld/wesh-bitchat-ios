@@ -2,7 +2,7 @@
 // ChatViewModel+PrivateChat.swift
 // bitchat
 //
-// Private chat and media transfer logic for ChatViewModel
+// Private chat logic for ChatViewModel
 //
 
 import BitFoundation
@@ -48,64 +48,6 @@ extension ChatViewModel {
     @MainActor
     func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
         privateConversationCoordinator.handleReadReceipt(payload, senderPubkey: senderPubkey, convKey: convKey)
-    }
-
-    @MainActor
-    func sendVoiceNote(at url: URL) {
-        mediaTransferCoordinator.sendVoiceNote(at: url)
-    }
-
-    #if os(iOS)
-    func processThenSendImage(_ image: UIImage?) {
-        mediaTransferCoordinator.processThenSendImage(image)
-    }
-    #elseif os(macOS)
-    func processThenSendImage(from url: URL?) {
-        mediaTransferCoordinator.processThenSendImage(from: url)
-    }
-    #endif
-
-    @MainActor
-    func sendImage(from sourceURL: URL, cleanup: (() -> Void)? = nil) {
-        mediaTransferCoordinator.sendImage(from: sourceURL, cleanup: cleanup)
-    }
-
-    @MainActor
-    func enqueueMediaMessage(content: String, targetPeer: PeerID?) -> BitchatMessage {
-        mediaTransferCoordinator.enqueueMediaMessage(content: content, targetPeer: targetPeer)
-    }
-
-    @MainActor
-    func registerTransfer(transferId: String, messageID: String) {
-        mediaTransferCoordinator.registerTransfer(transferId: transferId, messageID: messageID)
-    }
-
-    func makeTransferID(messageID: String) -> String {
-        mediaTransferCoordinator.makeTransferID(messageID: messageID)
-    }
-
-    @MainActor
-    func clearTransferMapping(for messageID: String) {
-        mediaTransferCoordinator.clearTransferMapping(for: messageID)
-    }
-
-    @MainActor
-    func handleTransferEvent(_ event: TransferProgressManager.Event) {
-        mediaTransferCoordinator.handleTransferEvent(event)
-    }
-
-    func cleanupLocalFile(forMessage message: BitchatMessage) {
-        mediaTransferCoordinator.cleanupLocalFile(forMessage: message)
-    }
-
-    @MainActor
-    func cancelMediaSend(messageID: String) {
-        mediaTransferCoordinator.cancelMediaSend(messageID: messageID)
-    }
-
-    @MainActor
-    func deleteMediaMessage(messageID: String) {
-        mediaTransferCoordinator.deleteMediaMessage(messageID: messageID)
     }
 
     @MainActor

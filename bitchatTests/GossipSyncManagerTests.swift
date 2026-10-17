@@ -176,10 +176,8 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.seenCapacity = 10
         config.fragmentCapacity = 5
-        config.fileTransferCapacity = 4
         config.messageSyncIntervalSeconds = 1
         config.fragmentSyncIntervalSeconds = 1
-        config.fileTransferSyncIntervalSeconds = 1
         config.prekeyBundleSyncIntervalSeconds = 1
         config.maintenanceIntervalSeconds = 0
 
@@ -237,23 +235,22 @@ struct GossipSyncManagerTests {
         manager._performMaintenanceSynchronously(now: Date())
 
         // One request per due schedule so each type group gets the full
-        // filter capacity: publicMessages, fragment, fileTransfer, and
-        // prekeyBundle.
+        // filter capacity: publicMessages, fragment and prekeyBundle. Wesh
+        // has no media, so it never asks peers for file transfers.
         let sentPackets = delegate.packets
-        #expect(sentPackets.count == 4)
+        #expect(sentPackets.count == 3)
         let decoded = sentPackets.compactMap { RequestSyncPacket.decode(from: $0.payload) }
-        #expect(decoded.count == 4)
+        #expect(decoded.count == 3)
         let allTypes = decoded.compactMap(\.types).reduce(SyncTypeFlags(rawValue: 0)) { $0.union($1) }
         #expect(allTypes.contains(.announce))
         #expect(allTypes.contains(.message))
         #expect(allTypes.contains(.fragment))
-        #expect(allTypes.contains(.fileTransfer))
+        #expect(!allTypes.contains(.fileTransfer))
         #expect(allTypes.contains(.prekeyBundle))
         // Wesh has no groups, so it never asks peers for group messages.
         #expect(!allTypes.contains(.groupMessage))
         #expect(decoded.contains { $0.types == .publicMessages })
         #expect(decoded.contains { $0.types == .fragment })
-        #expect(decoded.contains { $0.types == .fileTransfer })
         #expect(decoded.contains { $0.types == .prekeyBundle })
     }
 
@@ -263,7 +260,6 @@ struct GossipSyncManagerTests {
         config.gcsMaxBytes = 32 // caps the filter at 28 IDs (256 bits / 9 bits per element)
         config.messageSyncIntervalSeconds = 1
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.maintenanceIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
@@ -306,7 +302,6 @@ struct GossipSyncManagerTests {
         config.seenCapacity = 100
         config.messageSyncIntervalSeconds = 1
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.maintenanceIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
@@ -338,7 +333,6 @@ struct GossipSyncManagerTests {
         config.seenCapacity = 5
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
@@ -409,7 +403,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
@@ -449,7 +442,6 @@ struct GossipSyncManagerTests {
         config.seenCapacity = 5
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         config.responseRateLimitMaxResponses = 1
         config.responseRateLimitWindowSeconds = 60
@@ -486,9 +478,7 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.seenCapacity = 10
         config.fragmentCapacity = 5
-        config.fileTransferCapacity = 4
         config.fragmentSyncIntervalSeconds = 1
-        config.fileTransferSyncIntervalSeconds = 1
 
         let requestSyncManager = RequestSyncManager()
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: requestSyncManager)
@@ -504,7 +494,7 @@ struct GossipSyncManagerTests {
         #expect(types.contains(.announce))
         #expect(types.contains(.message))
         #expect(types.contains(.fragment))
-        #expect(types.contains(.fileTransfer))
+        #expect(!types.contains(.fileTransfer))
         #expect(types.contains(.prekeyBundle))
     }
 
@@ -512,10 +502,8 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.seenCapacity = 5
         config.fragmentCapacity = 5
-        config.fileTransferCapacity = 0
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: requestSyncManager)
@@ -565,7 +553,7 @@ struct GossipSyncManagerTests {
         var payload = fragmentID
         payload.append(contentsOf: withUnsafeBytes(of: index.bigEndian) { Data($0) })
         payload.append(contentsOf: withUnsafeBytes(of: UInt16(4).bigEndian) { Data($0) })
-        payload.append(MessageType.fileTransfer.rawValue)
+        payload.append(MessageType.message.rawValue)
         payload.append(Data([0xEE]))
         return BitchatPacket(
             type: MessageType.fragment.rawValue,
@@ -583,7 +571,6 @@ struct GossipSyncManagerTests {
         config.fragmentCapacity = 10
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
 
         let requestSyncManager = RequestSyncManager()
@@ -630,7 +617,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         let requestSyncManager = RequestSyncManager()
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: requestSyncManager)
         let delegate = RecordingDelegate()
@@ -654,7 +640,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         config.stalePeerCleanupIntervalSeconds = 0
         config.stalePeerTimeoutSeconds = 5
@@ -745,7 +730,6 @@ struct GossipSyncManagerTests {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
 
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
@@ -808,7 +792,6 @@ struct GossipSyncManagerTests {
         config.gcsMaxBytes = 32 // caps the filter at 28 IDs (256 bits / 9 bits per element)
         config.messageSyncIntervalSeconds = 1
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         config.maintenanceIntervalSeconds = 0
 
@@ -1010,26 +993,22 @@ struct GossipSyncManagerTests {
         #expect(manager._messageCount(for: PeerID(hexData: packets[2].senderID)) == 1)
     }
 
-    @Test func fragmentAndFileStoresEvictOldestPastTheirByteBudgets() async throws {
+    @Test func fragmentStoreEvictsOldestPastItsByteBudget() async throws {
         var config = GossipSyncManager.Config()
         config.fragmentByteBudget = 250
-        config.fileTransferByteBudget = 250
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
         let delegate = RecordingDelegate()
         manager.delegate = delegate
 
         var expectedIDs: Set<Data> = []
-        for type in [MessageType.fragment, .fileTransfer] {
-            let packets = try makeBudgetPackets(type: type)
-            packets.forEach(manager.onPublicPacketSeen)
-            expectedIDs.formUnion(packets.dropFirst().map { PacketIdUtil.computeId($0) })
-        }
+        let packets = try makeBudgetPackets(type: .fragment)
+        packets.forEach(manager.onPublicPacketSeen)
+        expectedIDs.formUnion(packets.dropFirst().map { PacketIdUtil.computeId($0) })
 
-        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: [.fragment, .fileTransfer])
+        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: [.fragment])
         manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
 
         try await TestHelpers.waitFor({ delegate.packets.count >= expectedIDs.count }, timeout: TestConstants.settleTimeout)
@@ -1039,11 +1018,31 @@ struct GossipSyncManagerTests {
         #expect(delegate.packets.count == expectedIDs.count)
     }
 
+    @Test func fileTransfersFromBitChatPeersAreNeitherStoredNorServed() throws {
+        var config = GossipSyncManager.Config()
+        config.messageSyncIntervalSeconds = 0
+        config.fragmentSyncIntervalSeconds = 0
+        config.prekeyBundleSyncIntervalSeconds = 0
+        let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
+        let delegate = RecordingDelegate()
+        manager.delegate = delegate
+
+        for packet in try makeBudgetPackets(type: .fileTransfer) {
+            manager.onPublicPacketSeen(packet)
+        }
+        // A BitChat peer may still ask for files; Wesh holds none to serve.
+        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: SyncTypeFlags.publicMessages.union(.fileTransfer))
+        manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
+        // Barrier: flush the sync queue so a late reply would be visible.
+        manager._performMaintenanceSynchronously(now: Date())
+
+        #expect(!delegate.packets.contains { $0.type == MessageType.fileTransfer.rawValue })
+    }
+
     @Test func groupMessagesFromBitChatPeersAreNeitherStoredNorServed() throws {
         var config = GossipSyncManager.Config()
         config.messageSyncIntervalSeconds = 0
         config.fragmentSyncIntervalSeconds = 0
-        config.fileTransferSyncIntervalSeconds = 0
         config.prekeyBundleSyncIntervalSeconds = 0
         let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
         let delegate = RecordingDelegate()

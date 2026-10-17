@@ -1,9 +1,6 @@
 import BitFoundation
 import Combine
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 
 @MainActor
 final class ConversationUIModel: ObservableObject {
@@ -12,30 +9,17 @@ final class ConversationUIModel: ObservableObject {
     @Published private(set) var selectedAutocompleteIndex = 0
     @Published private(set) var currentNickname: String
     @Published private(set) var isBatchingPublic = false
-    @Published private(set) var canSendMediaInCurrentContext = true
-    @Published private(set) var legacyPrivateMediaConsentRequest: LegacyPrivateMediaConsentRequest?
 
     private let chatViewModel: ChatViewModel
-    private let privateConversationModel: PrivateConversationModel
-    private let conversations: ConversationStore
-    private var activeChannel: ChannelID
     private var cancellables = Set<AnyCancellable>()
 
-    init(
-        chatViewModel: ChatViewModel,
-        privateConversationModel: PrivateConversationModel,
-        conversations: ConversationStore
-    ) {
+    init(chatViewModel: ChatViewModel) {
         self.chatViewModel = chatViewModel
-        self.privateConversationModel = privateConversationModel
-        self.conversations = conversations
-        self.activeChannel = conversations.activeChannel
         self.currentNickname = chatViewModel.nickname
         self.isBatchingPublic = chatViewModel.isBatchingPublic
         self.showAutocomplete = chatViewModel.showAutocomplete
         self.autocompleteSuggestions = chatViewModel.autocompleteSuggestions
         self.selectedAutocompleteIndex = chatViewModel.selectedAutocompleteIndex
-        self.canSendMediaInCurrentContext = chatViewModel.canSendMediaInCurrentContext
 
         bind()
     }
@@ -140,20 +124,12 @@ final class ConversationUIModel: ObservableObject {
         chatViewModel.formatMessageHeader(message, colorScheme: colorScheme, theme: theme)
     }
 
-    func mediaAttachment(for message: BitchatMessage) -> BitchatMessage.Media? {
-        message.mediaAttachment(for: currentNickname)
-    }
-
     func isSelfSender(peerID: PeerID?, displayName: String?) -> Bool {
         chatViewModel.isSelfSender(peerID: peerID, displayName: displayName)
     }
 
     func isSentByCurrentUser(_ message: BitchatMessage) -> Bool {
         message.sender == currentNickname || message.sender.hasPrefix(currentNickname + "#")
-    }
-
-    func isMediaMessageFromCurrentUser(_ message: BitchatMessage) -> Bool {
-        message.sender == currentNickname || message.senderPeerID == chatViewModel.meshService.myPeerID
     }
 
     /// Whether a private-message row should show the filled verification seal
@@ -178,33 +154,6 @@ final class ConversationUIModel: ObservableObject {
         return fallbackMessages.last(where: { $0.senderPeerID == peerID && $0.sender != "system" })?.sender
     }
 
-    #if os(iOS)
-    func processSelectedImage(_ image: UIImage?) {
-        chatViewModel.processThenSendImage(image)
-    }
-    #endif
-
-    func processSelectedImage(from url: URL?) {
-        #if os(macOS)
-        chatViewModel.processThenSendImage(from: url)
-        #endif
-    }
-
-    func resolveLegacyPrivateMediaConsent(requestID: UUID, approved: Bool) {
-        chatViewModel.resolveLegacyPrivateMediaConsent(
-            requestID: requestID,
-            approved: approved
-        )
-    }
-
-    func cancelMediaSend(messageID: String) {
-        chatViewModel.cancelMediaSend(messageID: messageID)
-    }
-
-    func deleteMediaMessage(messageID: String) {
-        chatViewModel.deleteMediaMessage(messageID: messageID)
-    }
-
     private func bind() {
         chatViewModel.$nickname
             .receive(on: DispatchQueue.main)
@@ -226,25 +175,6 @@ final class ConversationUIModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$isBatchingPublic)
 
-        chatViewModel.$legacyPrivateMediaConsentRequest
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$legacyPrivateMediaConsentRequest)
-
-        conversations.$activeChannel
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] channel in
-                self?.activeChannel = channel
-                self?.refreshComputedState()
-            }
-            .store(in: &cancellables)
-
-        privateConversationModel.$selectedPeerID
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshComputedState()
-            }
-            .store(in: &cancellables)
-
         // Verify/unverify while a DM is open must repaint existing rows —
         // showsVerifiedSeal is computed per render, so forward the store change.
         chatViewModel.peerIdentityStore.$verifiedFingerprints
@@ -253,19 +183,5 @@ final class ConversationUIModel: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
-    }
-
-    private func refreshComputedState() {
-        if let selectedPeerID = privateConversationModel.selectedPeerID {
-            canSendMediaInCurrentContext = !(selectedPeerID.isGeoDM || selectedPeerID.isGeoChat)
-            return
-        }
-
-        switch activeChannel {
-        case .mesh:
-            canSendMediaInCurrentContext = true
-        case .location:
-            canSendMediaInCurrentContext = false
-        }
     }
 }

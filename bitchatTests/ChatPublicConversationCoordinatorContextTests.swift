@@ -62,18 +62,6 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
         conversations[conversationID]?.contains(where: { $0.id == messageID }) == true
     }
 
-    @discardableResult
-    func removePublicMessage(withID messageID: String) -> BitchatMessage? {
-        for (conversationID, timeline) in conversations {
-            guard let index = timeline.firstIndex(where: { $0.id == messageID }) else { continue }
-            var updated = timeline
-            let removed = updated.remove(at: index)
-            conversations[conversationID] = updated
-            return removed
-        }
-        return nil
-    }
-
     func removePublicMessages(fromGeohash geohash: String, where predicate: (BitchatMessage) -> Bool) {
         conversations[.geohash(geohash.lowercased())]?.removeAll(where: predicate)
     }
@@ -98,32 +86,11 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
     var privateChats: [PeerID: [BitchatMessage]] = [:]
     var unreadPrivateMessages: Set<PeerID> = []
     private(set) var removedPrivateChats: [PeerID] = []
-    private(set) var cleanedUpFileMessageIDs: [String] = []
 
     func removePrivateChat(_ peerID: PeerID) {
         removedPrivateChats.append(peerID)
         privateChats.removeValue(forKey: peerID)
         unreadPrivateMessages.remove(peerID)
-    }
-
-    @discardableResult
-    func removePrivateMessage(withID messageID: String) -> BitchatMessage? {
-        var removed: BitchatMessage?
-        for (peerID, chat) in privateChats {
-            guard let message = chat.first(where: { $0.id == messageID }) else { continue }
-            removed = removed ?? message
-            let remaining = chat.filter { $0.id != messageID }
-            if remaining.isEmpty {
-                privateChats.removeValue(forKey: peerID)
-            } else {
-                privateChats[peerID] = remaining
-            }
-        }
-        return removed
-    }
-
-    func cleanupLocalFile(forMessage message: BitchatMessage) {
-        cleanedUpFileMessageIDs.append(message.id)
     }
 
     // Geohash participants & presence
@@ -473,23 +440,6 @@ struct ChatPublicConversationCoordinatorContextTests {
 
         coordinator.unblockGeohashUser(pubkeyHexLowercased: hex, displayName: "rude#abcd")
         #expect(!context.blockedNostrPubkeys.contains(hex))
-    }
-
-    @Test @MainActor
-    func removeMessage_removesEverywhereAndCleansUpFile() async {
-        let context = MockChatPublicConversationContext()
-        let coordinator = ChatPublicConversationCoordinator(context: context)
-        let peerID = PeerID(str: "0102030405060708")
-        let message = makePublicMessage(id: "doomed-msg")
-        context.conversations[.mesh] = [message]
-        context.privateChats[peerID] = [message]
-
-        coordinator.removeMessage(withID: "doomed-msg", cleanupFile: true)
-
-        #expect(context.publicMessages(in: .mesh).isEmpty)
-        #expect(context.privateChats[peerID] == nil)
-        #expect(context.cleanedUpFileMessageIDs == ["doomed-msg"])
-        #expect(context.notifyUIChangedCount == 1)
     }
 
     @Test @MainActor

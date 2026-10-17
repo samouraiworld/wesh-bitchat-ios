@@ -74,7 +74,7 @@ final class GossipSyncManager {
         var seenCapacity: Int = 1000          // max packets per sync (cap across types)
         var gcsMaxBytes: Int = 400           // filter size budget (128..1024)
         var gcsTargetFpr: Double = 0.01      // 1%
-        var maxMessageAgeSeconds: TimeInterval = 900  // 15 min - fragments/files/announces
+        var maxMessageAgeSeconds: TimeInterval = 900  // 15 min - fragments/announces
         // Whole public messages stay sync-able much longer so devices carry
         // the room's recent history between partitions and across restarts.
         var publicMessageMaxAgeSeconds: TimeInterval = 900
@@ -82,16 +82,13 @@ final class GossipSyncManager {
         var stalePeerCleanupIntervalSeconds: TimeInterval = 60.0
         var stalePeerTimeoutSeconds: TimeInterval = 60.0
         var fragmentCapacity: Int = 600
-        var fileTransferCapacity: Int = 200
         // Payload byte budgets on top of the count caps. Each sits well above
         // what the count cap holds in ordinary traffic (1000 chat messages,
         // 600 fragments of ~500 B), so it only binds when packets are
-        // oversized — e.g. 200 file transfers at the 1.1 MB frame cap.
+        // oversized.
         var messageByteBudget: Int = 8 * 1024 * 1024
         var fragmentByteBudget: Int = 1024 * 1024
-        var fileTransferByteBudget: Int = 32 * 1024 * 1024
         var fragmentSyncIntervalSeconds: TimeInterval = 30.0
-        var fileTransferSyncIntervalSeconds: TimeInterval = 60.0
         var messageSyncIntervalSeconds: TimeInterval = 15.0
         // Board posts are few but long-lived (days, until each post's own
         // expiry), so they get a slow round with their own capacity instead
@@ -125,7 +122,6 @@ final class GossipSyncManager {
     // Storage: broadcast packets by type, and latest announce per sender
     private var messages = PacketStore()
     private var fragments = PacketStore()
-    private var fileTransfers = PacketStore()
     private var latestAnnouncementByPeer: [PeerID: BitchatPacket] = [:]
     // Latest verified prekey bundle per owner. Unlike announces, bundles are
     // NOT dropped on leave/stale peer: their whole purpose is reaching a
@@ -155,9 +151,6 @@ final class GossipSyncManager {
         }
         if config.fragmentCapacity > 0 && config.fragmentSyncIntervalSeconds > 0 {
             schedules.append(SyncSchedule(types: .fragment, interval: config.fragmentSyncIntervalSeconds, lastSent: .distantPast))
-        }
-        if config.fileTransferCapacity > 0 && config.fileTransferSyncIntervalSeconds > 0 {
-            schedules.append(SyncSchedule(types: .fileTransfer, interval: config.fileTransferSyncIntervalSeconds, lastSent: .distantPast))
         }
         if config.prekeyBundleCapacity > 0 && config.prekeyBundleSyncIntervalSeconds > 0 {
             schedules.append(SyncSchedule(types: .prekeyBundle, interval: config.prekeyBundleSyncIntervalSeconds, lastSent: .distantPast))
@@ -205,9 +198,6 @@ final class GossipSyncManager {
             if self.config.fragmentCapacity > 0 && self.config.fragmentSyncIntervalSeconds > 0 {
                 types.formUnion(.fragment)
             }
-            if self.config.fileTransferCapacity > 0 && self.config.fileTransferSyncIntervalSeconds > 0 {
-                types.formUnion(.fileTransfer)
-            }
             if self.config.prekeyBundleCapacity > 0 && self.config.prekeyBundleSyncIntervalSeconds > 0 {
                 types.formUnion(.prekeyBundle)
             }
@@ -225,8 +215,8 @@ final class GossipSyncManager {
     }
 
     // Helper to check if a packet is within the age threshold. Whole public
-    // messages get the long town-crier window; fragments, file transfers and
-    // announces keep the short one.
+    // messages get the long town-crier window; fragments and announces keep
+    // the short one.
     private func isPacketFresh(_ packet: BitchatPacket) -> Bool {
         let maxAgeSeconds: TimeInterval
         switch packet.type {
@@ -291,11 +281,6 @@ final class GossipSyncManager {
             guard isPacketFresh(packet) else { return }
             let idHex = PacketIdUtil.computeId(packet).hexEncodedString()
             fragments.insert(idHex: idHex, packet: packet, capacity: max(1, config.fragmentCapacity), byteBudget: config.fragmentByteBudget)
-        case .fileTransfer:
-            guard isBroadcastRecipient else { return }
-            guard isPacketFresh(packet) else { return }
-            let idHex = PacketIdUtil.computeId(packet).hexEncodedString()
-            fileTransfers.insert(idHex: idHex, packet: packet, capacity: max(1, config.fileTransferCapacity), byteBudget: config.fileTransferByteBudget)
         case .prekeyBundle:
             // Callers only feed verified bundles here (own bundles at send
             // time, peers' after signature verification), so gossip never
@@ -474,20 +459,6 @@ final class GossipSyncManager {
             }
         }
 
-        if requestedTypes.contains(.fileTransfer) {
-            let files = fileTransfers.allPackets(isFresh: isPacketFresh)
-            for pkt in files {
-                if let since, pkt.timestamp < since { continue }
-                let idBytes = PacketIdUtil.computeId(pkt)
-                if !mightContain(idBytes) {
-                    var toSend = pkt
-                    toSend.ttl = 0
-                    toSend.isRSR = true // Mark as solicited response
-                    delegate?.sendPacket(to: peerID, packet: toSend)
-                }
-            }
-        }
-
         // Like announces, prekey bundles are exempt from the since-cursor:
         // there is at most one per owner (newer replaces older), so the
         // resend cost is bounded and a joining peer must be able to learn
@@ -536,9 +507,6 @@ final class GossipSyncManager {
         if types.contains(.fragment) {
             candidates.append(contentsOf: fragments.allPackets(isFresh: isPacketFresh))
         }
-        if types.contains(.fileTransfer) {
-            candidates.append(contentsOf: fileTransfers.allPackets(isFresh: isPacketFresh))
-        }
         if types.contains(.prekeyBundle) {
             for (_, pair) in latestPrekeyBundleByPeer where isPacketFresh(pair.packet) {
                 candidates.append(pair.packet)
@@ -561,8 +529,6 @@ final class GossipSyncManager {
         let cap: Int
         if types == .fragment {
             cap = max(1, config.fragmentCapacity)
-        } else if types == .fileTransfer {
-            cap = max(1, config.fileTransferCapacity)
         } else if types == .prekeyBundle {
             cap = max(1, config.prekeyBundleCapacity)
         } else if types == .board {
@@ -607,7 +573,6 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.removeExpired(isFresh: isPacketFresh)
-        fileTransfers.removeExpired(isFresh: isPacketFresh)
         latestPrekeyBundleByPeer = latestPrekeyBundleByPeer.filter { _, pair in
             isPacketFresh(pair.packet)
         }
@@ -779,7 +744,6 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.remove { PeerID(hexData: $0.senderID) == peerID }
-        fileTransfers.remove { PeerID(hexData: $0.senderID) == peerID }
     }
 }
 

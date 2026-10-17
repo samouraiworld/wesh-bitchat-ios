@@ -112,16 +112,6 @@ struct PanicNetworkLifecycle {
     }
 }
 
-private struct PendingPrivateChatClear {
-    let peerID: PeerID
-    let sourceConversationID: ConversationID
-    let messages: [BitchatMessage]
-    let otherMessageIDs: Set<String>
-    let localPeerID: PeerID
-    let nickname: String
-    let outgoingMedia: [BitchatMessage]
-}
-
 /// Manages the application state and business logic for BitChat.
 /// Acts as the primary coordinator between UI components and backend services,
 /// implementing the BitchatDelegate protocol to handle network events.
@@ -130,17 +120,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     typealias Patterns = MessageFormattingEngine.Patterns
 
     typealias GeoOutgoingContext = (channel: GeohashChannel, event: NostrEvent, identity: NostrIdentity, teleported: Bool)
-
-    @MainActor
-    var canSendMediaInCurrentContext: Bool {
-        if let peer = selectedPrivateChatPeer {
-            return !(peer.isGeoDM || peer.isGeoChat)
-        }
-        switch activeChannel {
-        case .mesh: return true
-        case .location: return false
-        }
-    }
 
     var publicRateLimiter = MessageRateLimiter(
         senderCapacity: TransportConfig.uiSenderRateBucketCapacity,
@@ -212,7 +191,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     lazy var publicConversationCoordinator = ChatPublicConversationCoordinator(context: self)
     lazy var privateConversationCoordinator = ChatPrivateConversationCoordinator(context: self)
     lazy var nostrCoordinator = ChatNostrCoordinator(context: self)
-    lazy var mediaTransferCoordinator = ChatMediaTransferCoordinator(context: self)
     let weshPrivatePolicyEnabled: Bool
     /// Wesh Internet mode is On (Tor ready, a pinned relay connected). Injectable for tests.
     var weshInternetIsOn: @MainActor () -> Bool = { WeshInternetMode.shared.state == .on }
@@ -401,13 +379,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published private(set) var noiseIdentityAvailability: NoiseIdentityAvailability = .available
     @Published private(set) var isRecoveringNoiseIdentity = false
     @Published private(set) var noiseIdentityRetryFailed = false
-    @Published private(set) var legacyPrivateMediaConsentRequest: LegacyPrivateMediaConsentRequest?
-    @MainActor private var queuedPrivateChatClears: [
-        PendingPrivateChatClear
-    ] = []
-    @MainActor private var privateChatClearInFlight = false
-    @MainActor private var privateChatClearGeneration: UInt64 = 0
-    private var pendingLegacyPrivateMediaConsents: [PendingLegacyPrivateMediaConsent] = []
 
     private func performDeliveryUpdate(_ update: @escaping @MainActor (ChatDeliveryCoordinator) -> Void) {
         if Thread.isMainThread {
@@ -439,14 +410,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // MARK: - Message Delivery Tracking
 
     var cancellables = Set<AnyCancellable>()
-
-    var transferIdToMessageIDs: [String: [String]] {
-        mediaTransferCoordinator.transferIdToMessageIDs
-    }
-
-    var messageIDToTransferId: [String: String] {
-        mediaTransferCoordinator.messageIDToTransferId
-    }
 
     // MARK: - Public message batching (UI perf)
     let publicMessagePipeline: PublicMessagePipeline
@@ -642,7 +605,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.append(message, to: .directPeer(peerID))
     }
 
-    /// Replace-or-append a private message by ID (media progress, mirrored
+    /// Replace-or-append a private message by ID (mirrored
     /// copies); an existing message keeps its timeline position.
     @MainActor
     func upsertPrivateMessage(_ message: BitchatMessage, in peerID: PeerID) {
@@ -674,280 +637,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Empties the peer's chat but keeps the conversation alive (`/clear`).
     @MainActor
     func clearPrivateChat(_ peerID: PeerID) {
-        let sourceConversationID = ConversationID.directPeer(peerID)
-        let messages = privateMessages(for: peerID)
-        let localPeerID = meshService.myPeerID.toShort()
-        let currentNickname = nickname
-        let mediaPrefixes = [
-            MimeType.Category.audio.messagePrefix,
-            MimeType.Category.image.messagePrefix,
-            MimeType.Category.file.messagePrefix
-        ]
-        let outgoingMedia = messages.filter { message in
-            guard mediaPrefixes.contains(where: {
-                message.content.hasPrefix($0)
-            }) else {
-                return false
-            }
-            if let senderPeerID = message.senderPeerID {
-                return senderPeerID.toShort() == localPeerID
-            }
-            return message.sender == currentNickname
-                || message.sender.hasPrefix(currentNickname + "#")
-        }
-
-        // Send ownership is canceled at command time even when another clear
-        // transaction is ahead in the queue. UI and files remain untouched
-        // until this request's receiver journal commit succeeds.
-        for message in outgoingMedia {
-            mediaTransferCoordinator
-                .cancelMediaTransferForConversationClear(
-                    messageID: message.id
-                )
-        }
-
-        queuedPrivateChatClears.append(PendingPrivateChatClear(
-            peerID: peerID,
-            sourceConversationID: sourceConversationID,
-            messages: messages,
-            otherMessageIDs: Set(
-                privateChats
-                    .filter { $0.key != peerID }
-                    .flatMap { $0.value.map(\.id) }
-            ),
-            localPeerID: localPeerID,
-            nickname: currentNickname,
-            outgoingMedia: outgoingMedia
-        ))
-        startNextPrivateChatClearIfNeeded()
-    }
-
-    @MainActor
-    private func startNextPrivateChatClearIfNeeded() {
-        guard !privateChatClearInFlight,
-              !queuedPrivateChatClears.isEmpty else {
-            return
-        }
-        privateChatClearInFlight = true
-        let request = queuedPrivateChatClears.removeFirst()
-        let generation = privateChatClearGeneration
-        performPrivateChatClear(
-            request,
-            generation: generation
-        ) { [weak self] in
-            guard let self,
-                  self.privateChatClearGeneration == generation else {
-                return
-            }
-            self.privateChatClearInFlight = false
-            self.startNextPrivateChatClearIfNeeded()
-        }
-    }
-
-    @MainActor
-    private func performPrivateChatClear(
-        _ request: PendingPrivateChatClear,
-        generation: UInt64,
-        completion: @escaping @MainActor () -> Void
-    ) {
-        guard privateChatClearGeneration == generation else {
-            completion()
-            return
-        }
-        let peerID = request.peerID
-        let selectedConversationID = request.sourceConversationID
-        let messagesToClear = request.messages
-        guard !messagesToClear.isEmpty else {
-            completion()
-            return
-        }
-
-        // Capture the transaction's exact UI set before any off-main receipt
-        // I/O. Messages arriving while the journal is written are not part of
-        // this command and must remain visible.
-        let capturedMessageIDs = Set(messagesToClear.map(\.id))
-        let survivingMessageIDs = request.otherMessageIDs
-        let mediaPrefixes = [
-            MimeType.Category.audio.messagePrefix,
-            MimeType.Category.image.messagePrefix,
-            MimeType.Category.file.messagePrefix
-        ]
-        let localPeerID = request.localPeerID
-        let isMedia: (BitchatMessage) -> Bool = { message in
-            mediaPrefixes.contains(where: message.content.hasPrefix)
-        }
-        let isFromMe: (BitchatMessage) -> Bool = { [nickname = request.nickname] message in
-            if let senderPeerID = message.senderPeerID {
-                return senderPeerID.toShort() == localPeerID
-            }
-            return message.sender == nickname
-                || message.sender.hasPrefix(nickname + "#")
-        }
-
-        let outgoingMedia = request.outgoingMedia
-
-        let capturedExclusiveIDs =
-            capturedMessageIDs.subtracting(survivingMessageIDs)
-        let capturedIncomingMedia = messagesToClear.filter {
-            isMedia($0) && !isFromMe($0)
-        }
-        let capturedStableMediaIDs = Set(
-            capturedIncomingMedia.compactMap { message in
-                PrivateMediaMessageIdentity.isStableID(message.id)
-                    ? message.id
-                    : nil
-            }
-        )
-
-        func currentRemovalPlan() -> [ConversationID: Set<String>] {
-            // Identity handoff removes the source conversation and inserts its
-            // rows elsewhere. The old source may then be recreated by a new
-            // arrival before journal I/O finishes, so always scan all direct
-            // conversations. Only IDs exclusive at command time may follow a
-            // migration; shared aliases remain outside the source.
-            var plan: [ConversationID: Set<String>] = [:]
-            for (conversationID, conversation) in
-                conversations.conversationsByID {
-                guard case .direct = conversationID else { continue }
-                let eligibleIDs = conversationID == selectedConversationID
-                    ? capturedMessageIDs
-                    : capturedExclusiveIDs
-                let matchingIDs = Set(conversation.messages.map(\.id))
-                    .intersection(eligibleIDs)
-                if !matchingIDs.isEmpty {
-                    plan[conversationID] = matchingIDs
-                }
-            }
-            return plan
-        }
-
-        func hasRemainingCopy(
-            of messageID: String,
-            after plan: [ConversationID: Set<String>]
-        ) -> Bool {
-            conversations.conversationsByID.contains { conversationID, conversation in
-                guard case .direct = conversationID else { return false }
-                return conversation.messages.contains { message in
-                    message.id == messageID
-                        && plan[conversationID]?.contains(messageID) != true
-                }
-            }
-        }
-
-        @MainActor
-        func continueClear(
-            persisted: Bool,
-            durableStableIDs: Set<String>
-        ) {
-            guard privateChatClearGeneration == generation else {
-                completion()
-                return
-            }
-            guard persisted else {
-                SecureLogger.error(
-                    "Refusing to clear private chat without durable media tombstones peer=\(peerID.id.prefix(8))…",
-                    category: .session
-                )
-                notifyPrivateMediaDeletionRefused(peerID: peerID)
-                completion()
-                return
-            }
-
-            let plan = currentRemovalPlan()
-            let newlyLastStableIDs = Set(
-                capturedStableMediaIDs.filter {
-                    !durableStableIDs.contains($0)
-                        && !hasRemainingCopy(of: $0, after: plan)
-                }
-            )
-            if !newlyLastStableIDs.isEmpty {
-                persistDeletedPrivateMedia(
-                    messageIDs: Array(newlyLastStableIDs).sorted()
-                ) { persisted in
-                    continueClear(
-                        persisted: persisted,
-                        durableStableIDs:
-                            durableStableIDs.union(newlyLastStableIDs)
-                    )
-                }
-                return
-            }
-
-            // A stable receiver tombstone is global for that message ID.
-            // Remove any alias that arrived while journal I/O was in flight.
-            if !durableStableIDs.isEmpty {
-                let directConversationIDs = conversations
-                    .conversationsByID.keys.filter {
-                        if case .direct = $0 { return true }
-                        return false
-                    }
-                for conversationID in directConversationIDs {
-                    conversations.removeMessages(from: conversationID) {
-                        durableStableIDs.contains($0.id)
-                    }
-                }
-            }
-
-            // Outgoing media mirrors the incoming alias protection: an ID
-            // whose copy survives in a conversation this clear does not
-            // touch (identity-alias handoff) keeps that bubble and its local
-            // file. Only IDs with no surviving copy are removed from every
-            // direct conversation and have their payload unlinked.
-            let outgoingPlan = currentRemovalPlan()
-            let removableOutgoingMedia = outgoingMedia.filter {
-                !hasRemainingCopy(of: $0.id, after: outgoingPlan)
-            }
-            for message in removableOutgoingMedia {
-                mediaTransferCoordinator.cleanupOutgoingLocalFile(
-                    forMessage: message
-                )
-            }
-            let removableOutgoingIDs = Set(
-                removableOutgoingMedia.map(\.id)
-            )
-            if !removableOutgoingIDs.isEmpty {
-                let directConversationIDs = conversations
-                    .conversationsByID.keys.filter {
-                        if case .direct = $0 { return true }
-                        return false
-                    }
-                for conversationID in directConversationIDs {
-                    conversations.removeMessages(from: conversationID) {
-                        removableOutgoingIDs.contains($0.id)
-                    }
-                }
-            }
-
-            // Stable payload cleanup belongs entirely to the durable receiver
-            // journal. Legacy/raw incoming payloads have no durable identity,
-            // so once their bubbles are gone the transport's gated cleanup
-            // decides per basename: unlink when unreferenced, or leave any
-            // pending/reserved path for bounded quota cleanup.
-            let finalPlan = currentRemovalPlan()
-
-            for (conversationID, messageIDs) in finalPlan {
-                conversations.removeMessages(from: conversationID) {
-                    messageIDs.contains($0.id)
-                }
-            }
-            cleanupLegacyIncomingMediaPayloads(for: capturedIncomingMedia)
-            completion()
-        }
-
-        let initialPlan = currentRemovalPlan()
-        let initialStableIDs = Set(
-            capturedStableMediaIDs.filter {
-                !hasRemainingCopy(of: $0, after: initialPlan)
-            }
-        )
-        persistDeletedPrivateMedia(
-            messageIDs: Array(initialStableIDs).sorted()
-        ) { persisted in
-            continueClear(
-                persisted: persisted,
-                durableStableIDs: initialStableIDs
-            )
-        }
+        conversations.clear(.directPeer(peerID))
     }
 
     /// Removes the peer's chat entirely, including unread state.
@@ -1042,15 +732,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func bridgeInjectedPublicMessageIsPresent(withID messageID: String) -> Bool {
         publicMessagePipeline.containsMessage(withID: messageID) ||
             publicConversationContainsMessage(withID: messageID, in: .mesh)
-    }
-
-    /// Removes a message by ID from whichever public conversation contains
-    /// it. Returns the removed message, if any.
-    @MainActor
-    @discardableResult
-    func removePublicMessage(withID messageID: String) -> BitchatMessage? {
-        publicMessagePipeline.removeMessage(withID: messageID)
-        return conversations.removePublicMessage(withID: messageID)
     }
 
     /// Replaces an unauthenticated bridge alias with a later authenticated
@@ -1636,11 +1317,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         peerIdentityCoordinator.nicknameForPeer(peerID)
     }
 
-    @MainActor
-    func removeMessage(withID messageID: String, cleanupFile: Bool = false) {
-        publicConversationCoordinator.removeMessage(withID: messageID, cleanupFile: cleanupFile)
-    }
-
     /// Add a local system message to a private chat (no network send)
     @MainActor
     func addLocalPrivateSystemMessage(_ content: String, to peerID: PeerID) {
@@ -1761,17 +1437,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         } else {
             meshService.emergencyDisconnectAll()
         }
-
-        // Invalidate detached media preparation before clearing state or
-        // removing the media directory.
-        mediaTransferCoordinator.resetForPanic()
-        privateChatClearGeneration &+= 1
-        queuedPrivateChatClears.removeAll(keepingCapacity: false)
-        privateChatClearInFlight = false
-
-        // Deny and release any clear-media confirmations before identities,
-        // message state, and local files are wiped.
-        cancelAllLegacyPrivateMediaConsents()
 
         // Clear all messages (public timelines and private chats live in the
         // single-writer ConversationStore; the derived `messages` view and
@@ -2280,11 +1945,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         case .peerConnected(let peerID):
             transportEventCoordinator.didConnectToPeerSynchronously(peerID)
-            mediaTransferCoordinator.peerDidReconnect(peerID)
 
         case .peerDisconnected(let peerID):
             transportEventCoordinator.didDisconnectFromPeerSynchronously(peerID)
-            mediaTransferCoordinator.peerDidDisconnect(peerID)
 
         case .peerListUpdated(let peers):
             peerListCoordinator.didUpdatePeerListSynchronously(peers)
@@ -2357,16 +2020,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func didConnectToPeer(_ peerID: PeerID) {
         transportEventCoordinator.didConnectToPeer(peerID)
-        Task { @MainActor [weak self] in
-            self?.mediaTransferCoordinator.peerDidReconnect(peerID)
-        }
     }
 
     func didDisconnectFromPeer(_ peerID: PeerID) {
         transportEventCoordinator.didDisconnectFromPeer(peerID)
-        Task { @MainActor [weak self] in
-            self?.mediaTransferCoordinator.peerDidDisconnect(peerID)
-        }
     }
 
     func didUpdatePeerList(_ peers: [PeerID]) {
@@ -2525,90 +2182,4 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     }
 }
 
-@MainActor
-extension ChatViewModel {
-    func enqueueLegacyPrivateMediaConsent(
-        for peerID: PeerID,
-        transferId: String,
-        messageID: String,
-        completion: @escaping @MainActor (Bool) -> Void
-    ) {
-        let request = LegacyPrivateMediaConsentRequest(
-            id: UUID(),
-            peerID: peerID,
-            peerName: nicknameForPeer(peerID),
-            transferId: transferId,
-            messageID: messageID
-        )
-        pendingLegacyPrivateMediaConsents.append(PendingLegacyPrivateMediaConsent(
-            request: request,
-            completion: completion
-        ))
-        if legacyPrivateMediaConsentRequest == nil {
-            legacyPrivateMediaConsentRequest = request
-        }
-    }
-
-    func resolveLegacyPrivateMediaConsent(requestID: UUID, approved: Bool) {
-        // SwiftUI may report both the selected button and the presentation
-        // binding's dismissal. Resolve only the exact request that was shown;
-        // a duplicate callback for it must not consume the next queued send.
-        guard legacyPrivateMediaConsentRequest?.id == requestID,
-              pendingLegacyPrivateMediaConsents.first?.request.id == requestID else {
-            return
-        }
-        let resolved = pendingLegacyPrivateMediaConsents.removeFirst()
-        // Drive the boolean presentation state through false before showing
-        // the next queued per-send warning. Otherwise SwiftUI sees true→true,
-        // closes the first dialog, and never presents the second.
-        legacyPrivateMediaConsentRequest = nil
-        resolved.completion(approved)
-        presentNextLegacyPrivateMediaConsentDeferred()
-    }
-
-    func invalidateLegacyPrivateMediaConsent(transferId: String, messageID: String) {
-        let invalidatedIDs = Set(
-            pendingLegacyPrivateMediaConsents.compactMap { pending -> UUID? in
-                let request = pending.request
-                return request.transferId == transferId && request.messageID == messageID
-                    ? request.id
-                    : nil
-            }
-        )
-        guard !invalidatedIDs.isEmpty else { return }
-
-        pendingLegacyPrivateMediaConsents.removeAll {
-            invalidatedIDs.contains($0.request.id)
-        }
-        if let currentID = legacyPrivateMediaConsentRequest?.id,
-           invalidatedIDs.contains(currentID) {
-            legacyPrivateMediaConsentRequest = nil
-            presentNextLegacyPrivateMediaConsentDeferred()
-        }
-    }
-
-    func cancelAllLegacyPrivateMediaConsents() {
-        let pending = pendingLegacyPrivateMediaConsents
-        pendingLegacyPrivateMediaConsents.removeAll()
-        legacyPrivateMediaConsentRequest = nil
-        for item in pending {
-            item.completion(false)
-        }
-    }
-
-    private func presentNextLegacyPrivateMediaConsentDeferred() {
-        guard legacyPrivateMediaConsentRequest == nil,
-              let nextRequestID = pendingLegacyPrivateMediaConsents.first?.request.id else {
-            return
-        }
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  self.legacyPrivateMediaConsentRequest == nil,
-                  self.pendingLegacyPrivateMediaConsents.first?.request.id == nextRequestID else {
-                return
-            }
-            self.legacyPrivateMediaConsentRequest = self.pendingLegacyPrivateMediaConsents[0].request
-        }
-    }
-}
 // End of ChatViewModel class

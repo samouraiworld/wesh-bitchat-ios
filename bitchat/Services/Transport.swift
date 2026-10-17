@@ -78,41 +78,6 @@ enum TransportEvent: @unchecked Sendable {
     case noiseIdentityAvailabilityUpdated(NoiseIdentityAvailability)
 }
 
-/// Downgrade-safe decision for a private-media recipient. Callers ask before
-/// prompting, and BLEService checks again when it consumes any one-shot
-/// legacy consent.
-enum PrivateMediaSendPolicy: Equatable {
-    case encrypted
-    /// A public announce hinted at encrypted media (or a prior authenticated
-    /// pin exists), but this exact Noise session has not yet supplied its
-    /// authenticated peer-state proof. Callers wait boundedly; they must not
-    /// pre-queue encrypted bytes or silently select the legacy path.
-    case awaitingCapabilityProof
-    case legacyRequiresConsent
-    case blockedDowngrade
-}
-
-/// Receiver-only persistence surface for explicit private-media deletion.
-/// Kept separate from `Transport` so sender retry branches can rebase without
-/// inheriting or implementing receiver storage concerns.
-protocol PrivateMediaDeletionPersisting: AnyObject {
-    @MainActor
-    func persistDeletedPrivateMedia(
-        messageIDs: [String],
-        payloadRelativePaths: [String: String],
-        protectedPayloadRelativePaths: Set<String>,
-        completion: @escaping @MainActor (Bool) -> Void
-    )
-
-    /// Gated unlink for a LEGACY (non-stable-ID) incoming payload whose
-    /// bubble was explicitly removed. Implementations delete the file only
-    /// when its path is not pending delivery and not reserved by any receipt
-    /// or in-flight deletion transaction; otherwise the file stays for
-    /// bounded quota cleanup.
-    @MainActor
-    func removeLegacyPrivateMediaPayload(relativePath: String)
-}
-
 protocol TransportEventDelegate: AnyObject {
     @MainActor func didReceiveTransportEvent(_ event: TransportEvent)
 }
@@ -298,7 +263,6 @@ extension BitchatDelegate {
 }
 
 extension BLEService: Transport {}
-extension BLEService: MeshFileTransferring {}
 extension BLEService: MeshCourierTransporting {}
 extension BLEService: MeshBoardBroadcasting {}
 extension BLEService: MeshDiagnosing {}

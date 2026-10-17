@@ -10,7 +10,6 @@ struct BLEOutboundWritePriority: Comparable {
         BLEOutboundWritePriority(level: 1, suborder: max(1, min(totalFragments, Int(UInt16.max))))
     }
 
-    static let fileTransfer = BLEOutboundWritePriority(level: 2, suborder: Int.max - 1)
     static let low = BLEOutboundWritePriority(level: 2, suborder: Int.max)
 
     static func < (lhs: BLEOutboundWritePriority, rhs: BLEOutboundWritePriority) -> Bool {

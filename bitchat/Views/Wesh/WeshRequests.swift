@@ -10,21 +10,6 @@ enum WeshLinks {
     static let reportEmail = "support@samourai.coop"
 }
 
-/// Inbound media from BitChat peers is never written to disk in Wesh.
-/// Fixed, not a switch: the transport reads it through its own injectable
-/// hook, which only upstream media tests override.
-enum WeshIncomingMediaPolicy {
-    static let acceptsMedia = false
-
-    static let placeholder = "Média non pris en charge"
-
-    /// Media references kept by older builds render as the same placeholder.
-    static func displayText(_ content: String) -> String {
-        let prefixes = [MimeType.Category.audio, .image, .file].map(\.messagePrefix)
-        return prefixes.contains(where: { content.hasPrefix($0) }) ? placeholder : content
-    }
-}
-
 /// Messages from senders who are not QR-verified contacts. RAM only, bounded,
 /// never notified or acknowledged. They can be read, verified, blocked or deleted.
 @MainActor
