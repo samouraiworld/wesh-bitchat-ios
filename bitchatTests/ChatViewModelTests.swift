@@ -2345,8 +2345,10 @@ struct ChatViewModelLifecycleTests {
 
     @Test @MainActor
     func startServices_calledOnInit() async {
+        // In Wesh (the iOS test host) the mesh waits for the welcome.
+        let expectedStarts = WeshWelcome.meshMayStart() ? 1 : 0
         let (_, transport) = makeTestableViewModel()
 
-        #expect(transport.startServicesCallCount == 1)
+        #expect(transport.startServicesCallCount == expectedStarts)
     }
 }
