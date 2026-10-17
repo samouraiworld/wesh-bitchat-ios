@@ -462,6 +462,40 @@ struct BLEServiceCoreTests {
     }
 
     @Test
+    func voiceFrameFromABitChatPeerIsNotRelayed() async throws {
+        // Wesh has no live voice: a BitChat public voice frame (0x29) used to
+        // be relayed once its signature checked out. Even a correctly signed
+        // one from a known sender must now stop at this node.
+        let ble = makeService()
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let packet = BitchatPacket(
+            type: MessageType.voiceFrame.rawValue,
+            senderID: Data(hexString: alicePeerID.id) ?? Data(),
+            recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: Data(repeating: 0x71, count: 210),
+            signature: nil,
+            ttl: 7
+        )
+        let signed = try #require(alice.signPacket(packet))
+
+        ble._test_handlePacket(
+            signed,
+            fromPeerID: alicePeerID,
+            signingPublicKey: alice.getSigningPublicKeyData()!
+        )
+
+        let relayed = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .voiceFrame) > 0 },
+            timeout: TestConstants.negativeWaitWindow
+        )
+        #expect(!relayed)
+    }
+
+    @Test
     func validSignedLeaveEvictsSessionAndRelays() async throws {
         let ble = makeService()
         let alice = NoiseEncryptionService(keychain: MockKeychain())

@@ -55,67 +55,6 @@ extension ChatViewModel {
         mediaTransferCoordinator.sendVoiceNote(at: url)
     }
 
-    /// Where a live burst would stream right now, or nil when the hold would
-    /// fall back to a classic voice note.
-    private enum LiveVoiceTarget {
-        case peer(PeerID)
-        case publicMesh
-    }
-
-    @MainActor
-    private func liveVoiceTarget() -> LiveVoiceTarget? {
-        guard PTTSettings.liveVoiceEnabled else { return nil }
-
-        if let selectedPeer = selectedPrivateChatPeer {
-            guard !selectedPeer.isGeoDM, !selectedPeer.isGeoChat else { return nil }
-            // A conversation can be selected under the stable 64-hex Noise key
-            // (e.g. after migration on disconnect), but Noise sessions are keyed
-            // by the 16-hex routing ID — normalize once and send to that same
-            // short ID, like the private-message/file paths do.
-            let peerID = selectedPeer.toShort()
-            guard meshService.isPeerReachable(peerID),
-                  case .established = meshService.getNoiseSessionState(for: peerID)
-            else { return nil }
-            return .peer(peerID)
-        }
-
-        // Public mesh timeline: signed live broadcast. Geohash channels never
-        // reach here (the composer hides media affordances there).
-        return activeChannel == .mesh ? .publicMesh : nil
-    }
-
-    /// Picks the capture backend for the composer's hold-to-record gesture:
-    /// live push-to-talk when the audience can hear it now — a DM peer that
-    /// is mesh-reachable with an established Noise session, or the public
-    /// mesh channel — otherwise the classic record-then-send voice note.
-    /// Either way the release delivers a normal voice note through
-    /// `sendVoiceNote(at:)`, which live receivers absorb into the live bubble.
-    @MainActor
-    func makeVoiceCaptureSession() -> VoiceCaptureSession {
-        // Live voice rides the mesh only; frames are useful now or never,
-        // so a transport without the capability just drops them.
-        let voiceTransport = meshService as? MeshVoiceStreaming
-        switch liveVoiceTarget() {
-        case .peer(let peerID):
-            return PTTLiveVoiceSession(sendPacket: { packet in
-                voiceTransport?.sendVoiceFrame(packet, to: peerID)
-            })
-        case .publicMesh:
-            return PTTLiveVoiceSession(sendPacket: { packet in
-                voiceTransport?.sendVoiceFrameBroadcast(packet)
-            })
-        case nil:
-            SecureLogger.info("PTT: hold uses classic voice note (liveVoiceEnabled=\(PTTSettings.liveVoiceEnabled), dmSelected=\(selectedPrivateChatPeer != nil))", category: .session)
-            return VoiceNoteCaptureSession()
-        }
-    }
-
-    /// Inbound handler for `NoisePayloadType.voiceFrame`.
-    @MainActor
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date) {
-        liveVoiceCoordinator.handleVoiceFramePayload(from: peerID, payload: payload, timestamp: timestamp)
-    }
-
     #if os(iOS)
     func processThenSendImage(_ image: UIImage?) {
         mediaTransferCoordinator.processThenSendImage(image)
@@ -171,9 +110,6 @@ extension ChatViewModel {
 
     @MainActor
     func handlePrivateMessage(_ message: BitchatMessage) {
-        // A finalized voice note whose burst already streamed in live swaps
-        // into the existing bubble instead of appearing (and notifying) twice.
-        if liveVoiceCoordinator.absorbFinalizedVoiceNote(message) { return }
         privateConversationCoordinator.handlePrivateMessage(message)
     }
 

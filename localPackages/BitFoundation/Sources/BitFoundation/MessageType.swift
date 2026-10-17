@@ -36,8 +36,9 @@ public enum MessageType: UInt8 {
     // an internet gateway peer.
     case nostrCarrier = 0x28
 
-    // Live voice: one signed push-to-talk burst packet (ephemeral broadcast,
-    // never gossip-synced). Private bursts ride noiseEncrypted instead.
+    // BitChat live voice: one signed push-to-talk burst packet (ephemeral
+    // broadcast, never gossip-synced). Wesh sends none and drops received
+    // ones without relaying; the value stays reserved for compatibility.
     case voiceFrame = 0x29
 
     /// Identity-free presence for rotating peer IDs. Carries an epoch, a fixed

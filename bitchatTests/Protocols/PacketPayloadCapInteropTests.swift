@@ -92,7 +92,7 @@ struct PacketPayloadCapInteropTests {
             (.requestSync, maxRequestSync(), false),
             (.courierEnvelope, try maxCourierEnvelope(), false),
             (.prekeyBundle, try maxPrekeyBundle(), false),
-            (.voiceFrame, try maxVoiceFrame(), false)
+            (.voiceFrame, maxVoiceFrame(), false)
             // announceV2's largest payload is checked in BitFoundation's
             // PacketPayloadLimitsTests: nothing in the app emits it yet, and a
             // reference here would make it look used to the dead-code scan.
@@ -196,11 +196,11 @@ struct PacketPayloadCapInteropTests {
         ).encode())
     }
 
-    private func maxVoiceFrame() throws -> Data {
-        // 11-byte header + 2-byte length + frame = the 210-byte burst budget.
-        let frame = randomBytes(TransportConfig.pttMaxBurstContentBytes - 13)
-        let burst = try #require(VoiceBurstPacket(burstID: Data(repeating: 0x71, count: 8), seq: 1, kind: .frames([frame])))
-        return burst.encode()
+    private func maxVoiceFrame() -> Data {
+        // Wesh no longer builds live-voice bursts, but BitChat peers still
+        // send them: keep the 210-byte burst budget as raw bytes so the
+        // decode-time cap on 0x29 stays covered.
+        randomBytes(210)
     }
 
     // MARK: - Helpers

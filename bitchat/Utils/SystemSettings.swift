@@ -19,7 +19,6 @@ enum SystemSettings {
     /// switched off can't fix anything from the privacy pane.
     case bluetoothPower
     case location
-    case microphone
 
     #if os(macOS)
     private static let baseURL = "x-apple.systempreferences:com.apple.preference.security"
@@ -29,7 +28,6 @@ enum SystemSettings {
         case .bluetooth: "\(Self.baseURL)?Privacy_Bluetooth"
         case .bluetoothPower: "x-apple.systempreferences:com.apple.BluetoothSettings"
         case .location: "\(Self.baseURL)?Privacy_LocationServices"
-        case .microphone: "\(Self.baseURL)?Privacy_Microphone"
         }
     }
     #endif

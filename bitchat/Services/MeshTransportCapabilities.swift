@@ -65,15 +65,6 @@ protocol MeshFileTransferring: AnyObject {
     )
 }
 
-/// Live voice / push-to-talk: one encoded `VoiceBurstPacket`,
-/// fire-and-forget inside the Noise session (private) or as a signed
-/// ephemeral broadcast (public). Frames are only useful now — the
-/// transport drops them (never queues) without an established session.
-protocol MeshVoiceStreaming: AnyObject {
-    func sendVoiceFrame(_ burstContent: Data, to peerID: PeerID)
-    func sendVoiceFrameBroadcast(_ burstContent: Data)
-}
-
 /// Courier store-and-forward: seal a message to the recipient's static
 /// key and hand it to connected couriers for physical delivery while the
 /// recipient is offline. Returns false when the transport cannot courier.

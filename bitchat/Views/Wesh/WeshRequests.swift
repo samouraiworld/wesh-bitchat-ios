@@ -11,8 +11,8 @@ enum WeshLinks {
 }
 
 /// Inbound media from BitChat peers is never written to disk in Wesh.
-/// Fixed, not a switch: the transport and live-voice receivers read it through
-/// their own injectable hook, which only upstream media tests override.
+/// Fixed, not a switch: the transport reads it through its own injectable
+/// hook, which only upstream media tests override.
 enum WeshIncomingMediaPolicy {
     static let acceptsMedia = false
 

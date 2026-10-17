@@ -16,7 +16,7 @@ import BitFoundation
 /// Records all method calls and allows test code to verify interactions.
 final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeletionPersisting,
     MeshFileTransferring, MeshVerifying, MeshCourierTransporting,
-    MeshDiagnosing, MeshPublicArchiving, MeshVoiceStreaming,
+    MeshDiagnosing, MeshPublicArchiving,
     MeshBoardBroadcasting {
 
     // MARK: - Protocol Properties
@@ -360,15 +360,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
     }
     func purgeAllArchivedPublicMessages() {
         purgedAllArchived = true
-    }
-
-    private(set) var sentVoiceFrames: [(Data, PeerID)] = []
-    private(set) var sentVoiceBroadcasts: [Data] = []
-    func sendVoiceFrame(_ burstContent: Data, to peerID: PeerID) {
-        sentVoiceFrames.append((burstContent, peerID))
-    }
-    func sendVoiceFrameBroadcast(_ burstContent: Data) {
-        sentVoiceBroadcasts.append(burstContent)
     }
 
     private(set) var sentBoardPayloads: [Data] = []

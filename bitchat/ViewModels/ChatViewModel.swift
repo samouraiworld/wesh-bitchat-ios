@@ -213,10 +213,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     lazy var privateConversationCoordinator = ChatPrivateConversationCoordinator(context: self)
     lazy var nostrCoordinator = ChatNostrCoordinator(context: self)
     lazy var mediaTransferCoordinator = ChatMediaTransferCoordinator(context: self)
-    lazy var liveVoiceCoordinator = ChatLiveVoiceCoordinator(
-        context: self,
-        sweepsOnInit: !TestEnvironment.isRunningTests
-    )
     let weshPrivatePolicyEnabled: Bool
     /// Wesh Internet mode is On (Tor ready, a pinned relay connected). Injectable for tests.
     var weshInternetIsOn: @MainActor () -> Bool = { WeshInternetMode.shared.state == .on }
@@ -229,9 +225,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     var connectedPeers: Set<PeerID> { unifiedPeerService.connectedPeerIDs }
     @Published var allPeers: [BitchatPeer] = []
-    /// Nickname of whoever is talking live in the public mesh channel right
-    /// now (floor-courtesy indicator on the composer mic), nil when nobody.
-    @Published var activePublicVoiceTalker: String?
 
     /// Read-only derived view of all direct conversations in the
     /// `ConversationStore`, keyed by routing peer ID. Serves the coordinator
@@ -682,12 +675,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     func clearPrivateChat(_ peerID: PeerID) {
         let sourceConversationID = ConversationID.directPeer(peerID)
-        // An active live-voice row owns an open FileHandle and may be
-        // republished as frames/final media arrive. Treat it like an in-flight
-        // arrival rather than unlinking its capture or removing its bubble.
-        let messages = privateMessages(for: peerID).filter {
-            !liveVoiceCoordinator.isLiveVoiceMessage($0)
-        }
+        let messages = privateMessages(for: peerID)
         let localPeerID = meshService.myPeerID.toShort()
         let currentNickname = nickname
         let mediaPrefixes = [
@@ -1774,10 +1762,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             meshService.emergencyDisconnectAll()
         }
 
-        // Invalidate detached media preparation and close live capture file
-        // handles before clearing state or removing the media directory.
+        // Invalidate detached media preparation before clearing state or
+        // removing the media directory.
         mediaTransferCoordinator.resetForPanic()
-        liveVoiceCoordinator.resetForPanic()
         privateChatClearGeneration &+= 1
         queuedPrivateChatClears.removeAll(keepingCapacity: false)
         privateChatClearInFlight = false
@@ -2291,19 +2278,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 timestamp: timestamp
             )
 
-        case let .publicVoiceFrameReceived(
-            peerID,
-            nickname,
-            payload,
-            timestamp
-        ):
-            liveVoiceCoordinator.handlePublicVoiceFramePayload(
-                from: peerID,
-                nickname: nickname,
-                payload: payload,
-                timestamp: timestamp
-            )
-
         case .peerConnected(let peerID):
             transportEventCoordinator.didConnectToPeerSynchronously(peerID)
             mediaTransferCoordinator.peerDidReconnect(peerID)
@@ -2362,17 +2336,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             timestamp: timestamp,
             messageID: messageID
         )
-    }
-
-    func didReceivePublicVoiceFrame(from peerID: PeerID, nickname: String, payload: Data, timestamp: Date) {
-        Task { @MainActor [weak self] in
-            self?.liveVoiceCoordinator.handlePublicVoiceFramePayload(
-                from: peerID,
-                nickname: nickname,
-                payload: payload,
-                timestamp: timestamp
-            )
-        }
     }
 
     // MARK: - QR Verification API
@@ -2541,9 +2504,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
            !senderPeerID.isGeoChat {
             BridgeService.shared.handleAuthenticatedRadioMessage(messageID: message.id)
         }
-        // A finalized voice note whose burst already streamed in live swaps
-        // into the existing bubble instead of appearing twice.
-        if liveVoiceCoordinator.absorbFinalizedVoiceNote(message) { return }
         publicConversationCoordinator.handlePublicMessage(message)
     }
 
