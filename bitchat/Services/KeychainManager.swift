@@ -80,9 +80,8 @@ final class KeychainManager: KeychainManagerProtocol {
     #if DEBUG
     /// One store per process, mirroring the real keychain: separate
     /// default-constructed components (e.g. two NostrIdentityBridge
-    /// instances in BoardManager's publish and delete paths) must see each
-    /// other's writes, or they would derive different Nostr identities
-    /// under test.
+    /// instances) must see each other's writes, or they would derive
+    /// different Nostr identities under test.
     private static let sharedTestKeychain = PreviewKeychainManager()
     #endif
 

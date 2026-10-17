@@ -12,21 +12,9 @@ final class VoiceNotePlaybackController: NSObject, ObservableObject, AVAudioPlay
     /// Internal lifecycle visibility for deterministic acquisition tests.
     var isPlaybackStartPending: Bool { sessionAcquireInFlight }
 
-    /// rounded so 4.9s shows "00:05"
-    var roundedDuration: Int {
-        guard duration.isFinite else { return 0 }
-        return Int(duration.rounded())
-    }
-
-    /// ceil so "00:01" stays visible until playback ends, capped to rounded duration
-    var remainingSeconds: Int {
-        let remaining = max(0, duration - currentTime)
-        return min(roundedDuration, Int(ceil(remaining)))
-    }
-
     private var player: AVAudioPlayer?
     private var timer: Timer?
-    private var url: URL
+    private let url: URL
     /// Test seam; `AudioSessionCoordinator.shared` when nil.
     private let sessionCoordinatorOverride: AudioSessionCoordinator?
     /// Injectable so tests don't fight over the app-wide exclusive-playback
@@ -49,24 +37,6 @@ final class VoiceNotePlaybackController: NSObject, ObservableObject, AVAudioPlay
         // Don't load anything eagerly - wait until user interaction or view is fully displayed
     }
 
-    func loadDuration() {
-        guard duration == 0 else { return }
-
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            do {
-                let player = try AVAudioPlayer(contentsOf: self.url)
-                let loadedDuration = player.duration
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, self.duration == 0 else { return }
-                    self.duration = loadedDuration
-                }
-            } catch {
-                SecureLogger.error("Failed to load audio duration: \(error)", category: .session)
-            }
-        }
-    }
-
     deinit {
         timer?.invalidate()
         player?.stop()
@@ -79,19 +49,6 @@ final class VoiceNotePlaybackController: NSObject, ObservableObject, AVAudioPlay
             sessionToken = nil
             (sessionCoordinatorOverride ?? .shared).release(token)
         }
-    }
-
-    func replaceURL(_ url: URL) {
-        guard url != self.url else { return }
-        stop()
-        self.url = url
-        player = nil
-        duration = 0
-        // Duration will be loaded on demand when needed
-    }
-
-    func togglePlayback() {
-        isPlaying ? pause() : play()
     }
 
     func play() {
@@ -113,16 +70,6 @@ final class VoiceNotePlaybackController: NSObject, ObservableObject, AVAudioPlay
         updateProgress()
         isPlaying = false
         releaseSession()
-    }
-
-    func stop() {
-        player?.stop()
-        player?.currentTime = 0
-        stopTimer()
-        updateProgress()
-        isPlaying = false
-        releaseSession()
-        exclusivity.deactivate(self)
     }
 
     func seek(to fraction: Double) {

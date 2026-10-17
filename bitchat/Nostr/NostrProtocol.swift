@@ -454,24 +454,6 @@ struct NostrProtocol {
         return try event.sign(with: schnorrKey)
     }
 
-    /// Create a NIP-09 deletion request for one of our own events. Relays that
-    /// honor NIP-09 drop the referenced event; it must be signed by the same
-    /// key that signed the original.
-    static func createDeleteEvent(
-        ofEventID eventID: String,
-        senderIdentity: NostrIdentity
-    ) throws -> NostrEvent {
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .deletion,
-            tags: [["e", eventID]],
-            content: ""
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
-
     // MARK: - Private Methods
     
     private static func createSeal(

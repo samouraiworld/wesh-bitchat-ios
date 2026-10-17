@@ -34,12 +34,6 @@ final class AppChromeModel: ObservableObject {
     private let chatViewModel: ChatViewModel
     private let onPanicWipe: () -> Void
     private var cancellables = Set<AnyCancellable>()
-    /// The composer owns capture state above ChatViewModel. ContentView
-    /// installs this hook so both panic entry points synchronously stop it.
-    private var prepareForPanic: (@MainActor () -> Void)?
-
-    /// Bulletin-board coordinator, created on first use of the board sheet.
-    private(set) lazy var boardManager = BoardManager(transport: chatViewModel.meshService)
 
     init(
         chatViewModel: ChatViewModel,
@@ -76,10 +70,6 @@ final class AppChromeModel: ObservableObject {
         }
     }
 
-    func openMostRelevantPrivateChat() {
-        chatViewModel.openMostRelevantPrivateChat()
-    }
-
     func showFingerprint(for peerID: PeerID) {
         showingFingerprintFor = peerID
     }
@@ -99,10 +89,6 @@ final class AppChromeModel: ObservableObject {
 
     func triggerScreenshotPrivacyWarning() {
         showScreenshotPrivacyWarning = true
-    }
-
-    func setPanicPreparation(_ preparation: (@MainActor () -> Void)?) {
-        prepareForPanic = preparation
     }
 
     /// Entry point for the header triple-tap: confirm before destroying.
@@ -125,7 +111,6 @@ final class AppChromeModel: ObservableObject {
         isNoticesSheetPresented = false
         showingFingerprintFor = nil
 
-        prepareForPanic?()
         onPanicWipe()
         return chatViewModel.panicClearAllData()
     }

@@ -152,10 +152,7 @@ enum TransportConfig {
     // UI sleeps/delays
     static let uiStartupInitialDelaySeconds: TimeInterval = 1.0
     static let uiStartupPhaseDurationSeconds: TimeInterval = 2.0
-    static let uiReadReceiptRetryShortSeconds: TimeInterval = 0.1
-    static let uiReadReceiptRetryLongSeconds: TimeInterval = 0.5
     static let uiBatchDispatchStaggerSeconds: TimeInterval = 0.15
-    static let uiScrollThrottleSeconds: TimeInterval = 0.5
     static let uiAnimationMediumSeconds: TimeInterval = 0.2
     static let uiRecentCutoffFiveMinutesSeconds: TimeInterval = 5 * 60
     static let uiMeshEmptyConfirmationSeconds: TimeInterval = 30.0
@@ -357,7 +354,6 @@ enum TransportConfig {
     static let contentKeyPrefixLength: Int = 256
     static let uiLongMessageLengthThreshold: Int = 2000
     static let uiVeryLongTokenThreshold: Int = 512
-    static let uiLongMessageLineLimit: Int = 30
     static let uiFingerprintSampleCount: Int = 3
 
     // UI color tuning
@@ -367,11 +363,6 @@ enum TransportConfig {
     static let uiPeerPaletteSlots: Int = 36
     static let uiPeerPaletteRingBrightnessDeltaLight: Double = 0.07
     static let uiPeerPaletteRingBrightnessDeltaDark: Double = -0.07
-
-    // UI windowing (infinite scroll)
-    static let uiWindowInitialCountPublic: Int = 300
-    static let uiWindowInitialCountPrivate: Int = 300
-    static let uiWindowStepCount: Int = 200
 
     // Share extension
     static let uiShareExtensionDismissDelaySeconds: TimeInterval = 2.0

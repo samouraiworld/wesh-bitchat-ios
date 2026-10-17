@@ -75,9 +75,6 @@ final class BoardStore {
 
     static let shared = BoardStore()
 
-    /// Live posts, published on the main thread for the board UI.
-    @Published private(set) var postsSnapshot: [BoardPostPacket] = []
-
     /// Fires on the main thread for each post newly accepted from the wire
     /// (radio, sync, or local echo) — not for disk restores. Drives the
     /// local new-pin chat alerts; duplicates never fire twice because the
@@ -158,7 +155,6 @@ final class BoardStore {
             posts.removeAll()
             tombstones.removeAll()
             let removed = PanicFileRemoval.remove(fileURL, required: persistenceRequired, fileManager: wipeFileManager)
-            publishSnapshotLocked()
             return removed
         }
         DispatchQueue.main.async { [weak self] in
@@ -210,7 +206,6 @@ final class BoardStore {
         if posts.count > Limits.maxPosts {
             evictOldestLocked(from: posts, keep: Limits.maxPosts)
         }
-        publishSnapshotLocked()
         // Even when the new post itself was the eviction victim it stays
         // valid mesh-wide; peers with room should still receive it.
         return .accepted
@@ -244,7 +239,6 @@ final class BoardStore {
             retainUntil = target.expiresAt
             isOrphan = false
             posts.remove(at: index)
-            publishSnapshotLocked()
         } else if let retainUntilOverride {
             // Restored from disk: the post is long gone, so trust the
             // retention deadline recorded when the delete was first applied.
@@ -296,19 +290,8 @@ final class BoardStore {
     }
 
     private func pruneExpiredLocked(nowMs: UInt64) {
-        let postsBefore = posts.count
         posts.removeAll { $0.post.expiresAt <= nowMs }
         tombstones.removeAll { $0.retainUntil <= nowMs }
-        if posts.count != postsBefore {
-            publishSnapshotLocked()
-        }
-    }
-
-    private func publishSnapshotLocked() {
-        let snapshot = posts.map(\.post)
-        DispatchQueue.main.async { [weak self] in
-            self?.postsSnapshot = snapshot
-        }
     }
 
     private func currentMs() -> UInt64 {
@@ -348,7 +331,6 @@ final class BoardStore {
                       wire.verifySignature() else { continue }
                 _ = ingestLocked(wire, packet: packet, rawPacket: entry.packet, nowMs: nowMs, retainUntilOverride: entry.retainUntil)
             }
-            publishSnapshotLocked()
         }
     }
 

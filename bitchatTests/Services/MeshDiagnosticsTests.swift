@@ -222,15 +222,6 @@ struct MeshDiagnosticsTests {
             Issue.record("Expected success result")
         }
     }
-
-    // MARK: - Topology snapshot types
-
-    @Test func topologyEdgeNormalizesEndpointOrder() {
-        let a = PeerID(str: "aaaa000000000000")
-        let b = PeerID(str: "bbbb000000000000")
-        #expect(MeshTopologyEdge(a, b) == MeshTopologyEdge(b, a))
-        #expect(Set([MeshTopologyEdge(a, b), MeshTopologyEdge(b, a)]).count == 1)
-    }
 }
 
 /// Minimal CommandContextProvider for diagnostics tests; records deferred

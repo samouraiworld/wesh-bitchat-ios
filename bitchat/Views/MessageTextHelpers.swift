@@ -60,30 +60,4 @@ extension String {
         }
         return found
     }
-
-    // Extract Lightning payloads (scheme, BOLT11, LNURL). Returned as lightning:<payload>
-    func extractLightningLinks(max: Int = 3) -> [String] {
-        var results: [String] = []
-        let ns = self as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        // lightning: scheme
-        for m in MessageFormattingEngine.Patterns.lightningScheme.matches(in: self, range: full) {
-            let s = ns.substring(with: m.range(at: 0))
-            results.append(s)
-            if results.count >= max { return results }
-        }
-        // BOLT11
-        for m in MessageFormattingEngine.Patterns.bolt11.matches(in: self, range: full) {
-            let s = ns.substring(with: m.range(at: 0))
-            results.append("lightning:\(s)")
-            if results.count >= max { return results }
-        }
-        // LNURL bech32
-        for m in MessageFormattingEngine.Patterns.lnurl.matches(in: self, range: full) {
-            let s = ns.substring(with: m.range(at: 0))
-            results.append("lightning:\(s)")
-            if results.count >= max { return results }
-        }
-        return results
-    }
 }

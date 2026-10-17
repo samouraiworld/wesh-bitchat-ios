@@ -3060,55 +3060,6 @@ final class BLEService: NSObject {
         sendNoisePayload(NoisePayload(type: .vouch, data: payload).encode(), to: peerID)
     }
 
-    // MARK: Live Voice (PTT)
-
-    /// Sends one live voice-burst packet inside the Noise session. Unlike
-    /// `sendNoisePayload` this never queues behind a handshake: live audio is
-    /// only useful now, so without an established session frames are dropped.
-    func sendVoiceFrame(_ burstContent: Data, to peerID: PeerID) {
-        messageQueue.async { [weak self] in
-            guard let self else { return }
-            guard self.noiseService.hasEstablishedSession(with: peerID) else {
-                SecureLogger.debug("PTT: dropping voice frame — no established session with \(peerID.id.prefix(8))…", category: .session)
-                return
-            }
-            do {
-                let typedPayload = NoisePayload(type: .voiceFrame, data: burstContent).encode()
-                self.broadcastPacket(try self.makeEncryptedNoisePacket(typedPayload, to: peerID))
-            } catch {
-                SecureLogger.error("Failed to send voice frame: \(error)", category: .session)
-            }
-        }
-    }
-
-    /// Broadcasts one live voice-burst packet to the public mesh, signed like
-    /// a public message so receivers can authenticate the talker. Ephemeral:
-    /// never tracked for gossip sync (stale audio is worthless to replay).
-    func sendVoiceFrameBroadcast(_ burstContent: Data) {
-        guard !burstContent.isEmpty else { return }
-        messageQueue.async { [weak self] in
-            guard let self else { return }
-            let packet = BitchatPacket(
-                type: MessageType.voiceFrame.rawValue,
-                senderID: self.myPeerIDData,
-                recipientID: nil,
-                timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-                payload: burstContent,
-                signature: nil,
-                ttl: self.messageTTL
-            )
-            guard let signedPacket = self.noiseService.signPacket(packet) else {
-                SecureLogger.error("❌ Failed to sign voice frame", category: .security)
-                return
-            }
-            // Pre-mark our own broadcast as processed to avoid handling a
-            // relayed self copy.
-            let dedupID = BLESelfBroadcastTracker.dedupID(for: signedPacket)
-            self.messageDeduplicator.markProcessed(dedupID)
-            self.broadcastPacket(signedPacket)
-        }
-    }
-
     func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void) {
         // Appends to the encryption service's handler array, so this never
         // displaces the callbacks installed by installNoiseSessionCallbacks.
@@ -4089,31 +4040,6 @@ extension BLEService {
         // Confirmed claims can lag a brand-new link (the peer's next announce
         // hasn't arrived yet); a live direct connection is still a known path.
         return isPeerConnected(peerID) ? [] : nil
-    }
-
-    /// Mesh graph for the topology map. Edges are advisory: announces cap
-    /// neighbor lists at 10, so an edge claimed by either endpoint counts.
-    func currentMeshTopology() -> MeshTopologySnapshot? {
-        refreshLocalTopology()
-        let claims = meshTopology.adjacencySnapshot()
-        var nodes = Set<PeerID>()
-        var edges = Set<MeshTopologyEdge>()
-        for (source, neighbors) in claims {
-            guard let sourcePeer = PeerID(routingData: source) else { continue }
-            nodes.insert(sourcePeer)
-            for neighborData in neighbors {
-                guard let neighborPeer = PeerID(routingData: neighborData),
-                      neighborPeer != sourcePeer else { continue }
-                nodes.insert(neighborPeer)
-                edges.insert(MeshTopologyEdge(sourcePeer, neighborPeer))
-            }
-        }
-        nodes.insert(myPeerID)
-        return MeshTopologySnapshot(
-            localPeerID: myPeerID,
-            nodes: nodes.sorted(),
-            edges: edges.sorted { ($0.a, $0.b) < ($1.a, $1.b) }
-        )
     }
 
     private func forwardAlongRouteIfNeeded(_ packet: BitchatPacket) -> Bool {
@@ -6824,37 +6750,6 @@ extension BLEService {
             return true
         case .rejected:
             return false
-        }
-    }
-
-    /// Broadcasts a pre-signed board payload (post or tombstone) built by the
-    /// board manager, and ingests it locally so it shows up on our own board
-    /// and joins gossip sync immediately.
-    func sendBoardPayload(_ payload: Data) {
-        guard let wire = BoardWire.decode(from: payload), wire.verifySignature() else {
-            SecureLogger.error("❌ Refusing to send invalid board payload", category: .session)
-            return
-        }
-        messageQueue.async { [weak self] in
-            guard let self = self else { return }
-            let basePacket = BitchatPacket(
-                type: MessageType.boardPost.rawValue,
-                senderID: Data(hexString: self.myPeerID.id) ?? Data(),
-                recipientID: nil,
-                timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-                payload: payload,
-                signature: nil,
-                ttl: self.messageTTL
-            )
-            guard let signedPacket = self.noiseService.signPacket(basePacket) else {
-                SecureLogger.error("❌ Failed to sign board packet", category: .security)
-                return
-            }
-            // Pre-mark our own broadcast as processed to avoid handling a relayed self copy
-            let dedupID = BLESelfBroadcastTracker.dedupID(for: signedPacket)
-            self.messageDeduplicator.markProcessed(dedupID)
-            self.boardStore.ingest(wire, packet: signedPacket)
-            self.broadcastPacket(signedPacket)
         }
     }
 
