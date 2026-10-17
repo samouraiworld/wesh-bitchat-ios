@@ -671,6 +671,8 @@ private extension ChatViewModelBootstrapper {
     }
 
     func requestNotifications() {
+        // In Wesh the prompt waits for the end of the welcome (`AppRuntime.welcomeFinished`).
+        guard !WeshMode.isActive || WeshWelcome.isDone() else { return }
         NotificationService.shared.requestAuthorization()
     }
 

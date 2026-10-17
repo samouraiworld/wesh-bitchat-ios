@@ -6,8 +6,6 @@ struct PaveOnboardingFlow: View {
         case welcome, bluetooth
     }
 
-    static let termsURL = URL(string: "https://wesh.samourai.app/conditions")
-
     /// Triggers the system Bluetooth prompt.
     let onRequestBluetooth: () -> Void
     /// Receives the chosen nickname once onboarding ends.
@@ -105,15 +103,13 @@ struct PaveOnboardingFlow: View {
                     .paveText(.caption)
                     .foregroundStyle(theme[.inkMuted])
                     .multilineTextAlignment(.center)
-                if let termsURL = Self.termsURL {
-                    Link(destination: termsURL) {
-                        Text(PaveCopy.text("pave.onboarding.readTerms"))
-                            .paveText(.caption)
-                            .underline()
-                            .frame(minHeight: PaveTouch.minimum)
-                    }
-                    .foregroundStyle(theme[.ink])
+                Link(destination: WeshLinks.terms) {
+                    Text(PaveCopy.text("pave.onboarding.readTerms"))
+                        .paveText(.caption)
+                        .underline()
+                        .frame(minHeight: PaveTouch.minimum)
                 }
+                .foregroundStyle(theme[.ink])
             }
         }
     }

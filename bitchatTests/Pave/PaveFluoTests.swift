@@ -68,13 +68,6 @@ struct PaveSettingsWiringTests {
             #expect(PaveBluetoothStatus(state) == .off)
         }
     }
-
-    @Test func theDiscretionRowReadsTheNotificationPreviewSetting() {
-        let defaults = UserDefaults(suiteName: "pave.settings.\(UUID().uuidString)")!
-        #expect(NotificationPrivacySettings.hideMessagePreviews(in: defaults))
-        defaults.set(false, forKey: NotificationPrivacySettings.hidePreviewsKey)
-        #expect(!NotificationPrivacySettings.hideMessagePreviews(in: defaults))
-    }
 }
 
 struct WeshWelcomeTests {

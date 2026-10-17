@@ -17,6 +17,28 @@ enum WeshWelcome {
     static func isDone(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: key)
     }
+
+    /// The welcome keeps a nickname someone chose in an earlier build; the « anon1234 » stand-in
+    /// set before any choice gives way to a suggested one.
+    static func keptNickname(_ current: String) -> String? {
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.range(of: #"^anon\d{4}$"#, options: .regularExpression) == nil else { return nil }
+        return trimmed
+    }
+}
+
+extension PaveSettingsSummary {
+    /// The Settings rows as Wesh stores them: notification previews (hidden by default) and the
+    /// appearance from `defaults`, the meeting note's place or else its title.
+    static func wesh(nickname: String, meetingNote: WeshMeetingNoteStore.Content, blockedCount: Int,
+                     defaults: UserDefaults = .standard) -> PaveSettingsSummary {
+        let appearance = defaults.string(forKey: "wesh.appearance.v1").flatMap(WeshAppearance.init(rawValue:)) ?? .night
+        return PaveSettingsSummary(nickname: nickname,
+                                   previewsHidden: NotificationPrivacySettings.hideMessagePreviews(in: defaults),
+                                   meetingNote: meetingNote.place.isEmpty ? meetingNote.title : meetingNote.place,
+                                   blockedCount: blockedCount,
+                                   theme: appearance.paveTheme)
+    }
 }
 
 /// What the root shows: an unfinished erase first, then the first-launch welcome, then the app.
