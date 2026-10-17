@@ -1130,6 +1130,23 @@
         }
       }
     },
+    "pave.exchange.inPerson" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A photo or a forwarded link does not prove who you are meeting. Only your own scan of the code on their screen verifies them, on this phone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une photo ou un lien transféré ne prouve pas qui vous rencontrez. Seul votre propre scan du code affiché sur son écran le vérifie, sur ce téléphone."
+          }
+        }
+      }
+    },
     "pave.exchange.intro" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1160,6 +1177,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ouvrir la discussion"
+          }
+        }
+      }
+    },
+    "pave.exchange.otherMethod" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other method"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autre méthode"
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare the link on the screen of the person in front of you before pasting it."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comparez le lien sur l’écran de la personne devant vous avant de le coller."
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your contact’s QR link"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lien du QR de votre contact"
+          }
+        }
+      }
+    },
+    "pave.exchange.pasteVerify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check this code"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérifier ce code"
           }
         }
       }
