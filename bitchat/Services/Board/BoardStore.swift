@@ -326,16 +326,8 @@ final class BoardStore {
                 try? FileManager.default.removeItem(at: fileURL)
                 return
             }
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
             let data = try JSONEncoder().encode(payloads)
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(.completeFileProtection)
-            #endif
-            try data.write(to: fileURL, options: options)
+            try LocalFileProtection.write(data, to: fileURL, level: .complete)
         } catch {
             SecureLogger.error("Failed to persist board store: \(error)", category: .session)
         }

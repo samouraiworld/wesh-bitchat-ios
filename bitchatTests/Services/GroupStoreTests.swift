@@ -164,6 +164,7 @@ struct GroupStoreTests {
             let store = GroupStore(keychain: keychain, fileURL: fileURL)
             group = try #require(store.createGroup(named: "hike", creator: creator))
         }
+        #expect(LocalFileProtection.isExcludedFromBackup(fileURL))
 
         let reloaded = GroupStore(keychain: keychain, fileURL: fileURL)
         #expect(reloaded.groups == [group])

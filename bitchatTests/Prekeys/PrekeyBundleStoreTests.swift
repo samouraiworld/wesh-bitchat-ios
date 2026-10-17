@@ -128,6 +128,7 @@ struct PrekeyBundleStoreTests {
         let first = PrekeyBundleStore(fileURL: fileURL)
         #expect(first.ingest(makeBundle(noiseKey: noiseKey, ids: [1, 2])))
         #expect(first.assignPrekey(messageID: "m1", recipientNoiseKey: noiseKey)?.id == 1)
+        #expect(LocalFileProtection.isExcludedFromBackup(fileURL))
 
         // Consumption state survives a relaunch, so a restart can't reuse a prekey.
         let second = PrekeyBundleStore(fileURL: fileURL)

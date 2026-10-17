@@ -1894,12 +1894,6 @@ private extension ChatMediaTransferCoordinator {
             appropriateFor: nil,
             create: true
         )
-        let filesDirectory = base.appendingPathComponent("files", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: filesDirectory,
-            withIntermediateDirectories: true,
-            attributes: BLEIncomingFileStore.mediaProtectionAttributes
-        )
-        return filesDirectory
+        return try LocalFileProtection.createDirectory(base.appendingPathComponent("files", isDirectory: true))
     }
 }

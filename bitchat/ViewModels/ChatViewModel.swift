@@ -345,7 +345,13 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private var isPanicResetting = false
     /// Private group membership: keys in the keychain, metadata on disk.
     let groupStore: GroupStore
-    private let nicknameKey = "bitchat.nickname"
+    private var nicknameStore: LocalNicknameStore {
+        LocalNicknameStore(keychain: keychain, defaults: userDefaults)
+    }
+    private var provisionalNickname: String?
+    #if os(iOS)
+    private var nicknameProtectedDataObserver: AnyCancellable?
+    #endif
     // Location channel state (macOS supports manual geohash selection)
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
@@ -1309,17 +1315,60 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // MARK: - Nickname Management
 
     func loadNickname() {
-        if let savedNickname = userDefaults.string(forKey: nicknameKey) {
+        provisionalNickname = nil
+        switch nicknameStore.load() {
+        case .stored(let savedNickname):
             nickname = savedNickname.trimmed
-        } else {
+        case .absent:
             nickname = "anon\(Int.random(in: 1000...9999))"
             saveNickname()
+        case .unavailable:
+            // Keychain locked (background launch before first unlock): use a
+            // stand-in that is never saved, and read again after unlock.
+            nickname = "anon\(Int.random(in: 1000...9999))"
+            provisionalNickname = nickname
+            observeProtectedDataForNickname()
         }
     }
 
+    /// True while the name is the stand-in chosen with a locked Keychain and
+    /// the user has not typed another one.
+    var isNicknameProvisional: Bool {
+        provisionalNickname != nil && provisionalNickname == nickname
+    }
+
+    func reloadProvisionalNickname() {
+        guard isNicknameProvisional else { return }
+        switch nicknameStore.load() {
+        case .stored(let savedNickname):
+            provisionalNickname = nil
+            nickname = savedNickname.trimmed
+            meshService.sendBroadcastAnnounce()
+        case .absent:
+            provisionalNickname = nil
+            saveNickname()
+        case .unavailable:
+            break
+        }
+    }
+
+    private func observeProtectedDataForNickname() {
+        #if os(iOS)
+        guard nicknameProtectedDataObserver == nil else { return }
+        nicknameProtectedDataObserver = NotificationCenter.default
+            .publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reloadProvisionalNickname() }
+        #endif
+    }
+
     func saveNickname() {
-        userDefaults.set(nickname, forKey: nicknameKey)
-        // Persist nickname; no need to force synchronize
+        if let provisional = provisionalNickname {
+            // Saving on focus loss must not make the stand-in permanent.
+            guard nickname != provisional else { return }
+            provisionalNickname = nil
+        }
+        nicknameStore.save(nickname)
 
         // Send announce with new nickname to all peers
         meshService.sendBroadcastAnnounce()
@@ -1769,9 +1818,11 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // exactly the data an adversary inspecting the device wants.
         LocationStateManager.shared.panicWipe()
 
-        // Reset nickname to anonymous
+        // Reset nickname to anonymous; the previous one must be gone from
+        // the Keychain and from the legacy UserDefaults key.
+        provisionalNickname = nil
         nickname = "anon\(Int.random(in: 1000...9999))"
-        userDefaults.set(nickname, forKey: nicknameKey)
+        let nicknameWipeCompleted = nicknameStore.replaceForPanic(with: nickname)
 
         // Clear favorites and peer mappings
         // Clear through SecureIdentityStateManager instead of directly
@@ -1889,7 +1940,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, meetingNoteWipeCompleted,
+            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
+                meetingNoteWipeCompleted,
                 qrContactsWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
                 groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,

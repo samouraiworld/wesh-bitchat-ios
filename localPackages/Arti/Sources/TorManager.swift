@@ -226,6 +226,11 @@ public final class TorManager: ObservableObject {
         guard let dir = dataDirectoryURL() else { return }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // Tor state and guard choices stay on this device, out of backups.
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var excluded = dir
+            try excluded.setResourceValues(values)
         } catch {
             // Non-fatal; Arti will surface errors during start if paths are missing
         }

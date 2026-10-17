@@ -43,19 +43,7 @@ final class ComposerDraftPersistence {
                 }
                 return result
             }, write: { data, url in
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-                    attributes: BLEIncomingFileStore.mediaProtectionAttributes
-                )
-                var options: Data.WritingOptions = [.atomic]
-                #if os(iOS)
-                options.insert(.completeFileProtectionUntilFirstUserAuthentication)
-                #endif
-                try data.write(to: url, options: options)
-                var values = URLResourceValues()
-                values.isExcludedFromBackup = true
-                var mutableURL = url
-                try mutableURL.setResourceValues(values)
+                try LocalFileProtection.write(data, to: url, level: .untilFirstUnlock)
             }, remove: { try FileManager.default.removeItem(at: $0) })
         }
     }

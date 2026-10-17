@@ -351,6 +351,7 @@ struct BoardStoreTests {
         first.ingest(deleted.wire, packet: deleted.packet)
         let tombstone = try makeTombstone(for: deleted.post, author: author, deletedAt: baseMs + 1000)
         first.ingest(tombstone.wire, packet: tombstone.packet)
+        #expect(LocalFileProtection.isExcludedFromBackup(fileURL))
 
         let second = makeStore(clock: clock, fileURL: fileURL)
         let restored = second.posts(forGeohash: "9q8yy")

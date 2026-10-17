@@ -180,9 +180,15 @@ final class AppRuntime: ObservableObject {
     /// one. Expiry runs first so the migration never touches files the
     /// sweep is about to delete. Detached because `AppRuntime` is
     /// main-actor and both passes go file by file through the media tree;
-    /// best-effort, nothing at launch depends on their results.
+    /// best-effort, nothing at launch depends on their results. Files older
+    /// builds left in backups are excluded first.
     private func performMediaMaintenance() {
         Task.detached(priority: .utility) {
+            #if os(iOS)
+            if !TestEnvironment.isRunningTests {
+                LocalFileProtection.excludeApplicationSupportFromBackup()
+            }
+            #endif
             let store = BLEIncomingFileStore()
             store.expireAgedMedia()
             store.migrateFileProtectionIfNeeded()
