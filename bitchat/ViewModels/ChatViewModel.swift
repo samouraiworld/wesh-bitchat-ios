@@ -669,23 +669,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.conversationsByID[.directPeer(peerID)]?.containsMessage(withID: messageID) ?? false
     }
 
-    /// Removes a message by ID from every private chat that contains it,
-    /// dropping chats that become empty. Returns the removed message, if any.
-    @MainActor
-    @discardableResult
-    func removePrivateMessage(withID messageID: String) -> BitchatMessage? {
-        var removed: BitchatMessage?
-        for (id, conversation) in conversations.conversationsByID {
-            guard case .direct = id, conversation.containsMessage(withID: messageID) else { continue }
-            let message = conversations.removeMessage(withID: messageID, from: id)
-            removed = removed ?? message
-            if conversation.messages.isEmpty {
-                conversations.removeConversation(id)
-            }
-        }
-        return removed
-    }
-
     // MARK: - Public Conversation Store Intents
     // The sole mutation paths for public (mesh/geohash) message state,
     // mirroring the private intents above. The store's per-conversation cap
@@ -1288,15 +1271,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func displayNameForNostrPubkey(_ pubkeyHex: String) -> String {
         publicConversationCoordinator.displayNameForNostrPubkey(pubkeyHex)
-    }
-
-    func currentPublicSender() -> (name: String, peerID: PeerID) {
-        publicConversationCoordinator.currentPublicSender()
-    }
-
-    @MainActor
-    func nicknameForPeer(_ peerID: PeerID) -> String {
-        peerIdentityCoordinator.nicknameForPeer(peerID)
     }
 
     /// Add a local system message to a private chat (no network send)
@@ -2056,12 +2030,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func didUpdateMessageDeliveryStatus(_ messageID: String, status: DeliveryStatus) {
         performDeliveryUpdate { coordinator in
             coordinator.didUpdateMessageDeliveryStatus(messageID, status: status)
-        }
-    }
-
-    func updateMessageDeliveryStatus(_ messageID: String, status: DeliveryStatus) {
-        performDeliveryUpdate { coordinator in
-            coordinator.updateMessageDeliveryStatus(messageID, status: status)
         }
     }
 

@@ -28,8 +28,6 @@ protocol ChatPublicConversationContext: AnyObject {
     /// (Single mutation path for the owner's `isBatchingPublic`; this
     /// coordinator never reads it.)
     func setPublicBatching(_ isBatching: Bool)
-    /// Signals that message state changed so observers refresh (e.g. `objectWillChange.send()`).
-    func notifyUIChanged()
 
     // MARK: Public conversation store (single-writer intents)
     /// Appends a public message in timestamp order. Returns `false` when a
@@ -97,7 +95,7 @@ protocol ChatPublicConversationContext: AnyObject {
 extension ChatViewModel: ChatPublicConversationContext {
     // `unreadPrivateMessages`, `nostrKeyMapping`,
     // `nickname`, `activeChannel`, `currentGeohash`, `geoNicknames`,
-    // `myPeerID`, `isTeleported`, `notifyUIChanged()`,
+    // `myPeerID`, `isTeleported`,
     // `geoParticipantCount(for:)`, `isNostrBlocked(pubkeyHexLowercased:)`,
     // `deriveNostrIdentity(forGeohash:)`, the public conversation store
     // intents (`appendPublicMessage(_:to:)`,

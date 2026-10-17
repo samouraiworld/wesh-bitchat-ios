@@ -997,20 +997,6 @@ private func isRead(status: DeliveryStatus?) -> Bool {
     return false
 }
 
-private func isSent(status: DeliveryStatus?) -> Bool {
-    if case .sent = status {
-        return true
-    }
-    return false
-}
-
-private func isPartiallyDelivered(status: DeliveryStatus?, reached: Int, total: Int) -> Bool {
-    if case .partiallyDelivered(let actualReached, let actualTotal) = status {
-        return actualReached == reached && actualTotal == total
-    }
-    return false
-}
-
 private enum ChatViewModelExtensionsTestError: Error {
     case invalidAckContent
     case invalidPrivateMessageContent

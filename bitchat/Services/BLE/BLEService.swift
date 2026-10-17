@@ -2376,25 +2376,16 @@ extension BLEService {
                   let generation = self.noiseService.sessionGeneration(
                     for: normalizedPeerID
                   ),
-                  let fingerprint = self.noiseService.getPeerFingerprint(
+                  self.noiseService.getPeerFingerprint(
                     normalizedPeerID
-                  ) else {
+                  ) != nil else {
                 return
             }
             self.handleNoisePeerAuthenticated(
                 peerID: normalizedPeerID,
-                fingerprint: fingerprint,
                 sessionGeneration: generation
             )
         }
-    }
-
-    /// Builds an authenticated-session packet from an exact typed plaintext.
-    /// Compatibility tests use this to model Android's deployed 0x20 file
-    /// payload and the short-lived 0x09 prerelease payload without exposing a
-    /// production API that can emit the old value.
-    func _test_makeEncryptedNoisePacket(_ typedPayload: Data, to peerID: PeerID) throws -> BitchatPacket {
-        try makeEncryptedNoisePacket(typedPayload, to: peerID)
     }
 
     static func _test_shouldRediscoverBitChatService(
@@ -2856,7 +2847,6 @@ extension BLEService {
             self?.messageQueue.async { [weak self] in
                 self?.handleNoisePeerAuthenticated(
                     peerID: peerID,
-                    fingerprint: fingerprint,
                     sessionGeneration: generation
                 )
             }
@@ -2933,7 +2923,7 @@ extension BLEService {
                 guard let self,
                       let service,
                       self.noiseService === service,
-                      let fingerprint = service.getPeerFingerprint(peerID) else {
+                      service.getPeerFingerprint(peerID) != nil else {
                     return
                 }
                 SecureLogger.debug(
@@ -2951,7 +2941,6 @@ extension BLEService {
                 // under the new session instead (any establishment does).
                 self.handleNoisePeerAuthenticated(
                     peerID: peerID,
-                    fingerprint: fingerprint,
                     sessionGeneration: generation,
                     deferOutboundUntilConvergence: reason == .pendingConvergence
                 )
@@ -2961,7 +2950,6 @@ extension BLEService {
 
     private func handleNoisePeerAuthenticated(
         peerID: PeerID,
-        fingerprint: String,
         sessionGeneration generation: UUID,
         deferOutboundUntilConvergence: Bool = false
     ) {
