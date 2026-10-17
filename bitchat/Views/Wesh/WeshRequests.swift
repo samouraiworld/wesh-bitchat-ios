@@ -144,6 +144,14 @@ extension ChatViewModel {
         return true
     }
 
+    var ignoresFavoriteNotices: Bool { weshPrivatePolicyEnabled }
+
+    @MainActor
+    func qrContactNickname(forNoiseKey noiseKey: Data) -> String? {
+        guard weshPrivatePolicyEnabled else { return nil }
+        return WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex) == noiseKey })?.nickname
+    }
+
     /// Private traffic other than a plain message (favorite markers, Nostr
     /// DMs) is admitted only from a QR-verified contact, else dropped.
     @MainActor

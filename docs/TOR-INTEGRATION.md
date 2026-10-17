@@ -12,7 +12,9 @@ Tor is provided by **Arti, in-process**, vendored as a Swift package under `loca
   - `torEnforced` is compile-time: true unless `BITCHAT_DEV_ALLOW_CLEARNET` is defined. It is not set anywhere in `Configs/` or the project file, so release builds enforce.
   - `isStarting`, `bootstrapProgress`, and `bootstrapSummary` describe an attempt in flight.
   - `bootstrapDidStall` becomes true when an attempt spends its whole 75-second deadline without completing, and posts `.TorBootstrapDidStall`. This is the state a network that blocks Tor produces, and it is deliberately distinct from `isStarting`: without it the UI says "starting tor…" indefinitely. It is cleared on each new start or restart.
-- **`TorURLSession`** — a shared `URLSession` with the SOCKS proxy configured when proxying is on, and an unproxied session when it is off. `setProxyMode(useTor:)` is the switch, driven by `NetworkActivationService`.
+  - After bootstrap, a liveness loop checks every 5 seconds that Arti is still running and that its SOCKS port still accepts connections. If Arti exits without a stop request, or the port fails two probes in a row, `isReady` drops at once, `didStopUnexpectedly` becomes true and `.TorDidStopUnexpectedly` is posted. Arti is not restarted behind the app's back. Wesh Internet mode then moves to Error and switches the network off until the user retries.
+  - The app starts in the background state. Only a scene that became active (`setAppForeground(true)`) lets Arti start, so a background relaunch, such as a BLE restoration, never boots it.
+- **`TorURLSession`** — a shared `URLSession` that always has the SOCKS proxy configured. There is no unproxied session: `setProxyMode(useTor:)` remains for `NetworkActivationService` but changes nothing. When Tor is down, requests fail instead of going direct. The proxy receives relay hostnames as domain names (SOCKS5 ATYP 0x03) for the exit to resolve; a test against a fake SOCKS server checks this. Through Tor, `NostrRelayManager` refuses relays addressed by IP literal.
 - **`NetworkActivationService`** — decides whether Tor may run at all. Tor starts when the activation policy permits it *and* the Tor preference is on. `persistedTorPreference(in:)` is a `nonisolated` read of that preference for callers off the main actor.
 
 Both network call sites go through `TorURLSession`: `NostrRelayManager` (relay websockets) and `GeoRelayDirectory` (directory CSV refresh). There is no other outbound network in the app or the share extension.
@@ -27,6 +29,10 @@ Turning it off is a real change in exposure, not a performance tweak. Every fail
 - the geo-relay directory fetch also goes direct.
 
 The settings UI states this while the toggle is off.
+
+Wesh ignores and erases this preference: Tor is forced, and `TorURLSession` no longer has a direct session. The two bullets above describe the inherited BitChat behavior. In this codebase, with the preference off, requests still go to the SOCKS port and fail when Tor is not running.
+
+In Wesh, `GeoRelayDirectory` never fetches its remote CSV. Internet mode talks to its pinned relays only.
 
 `GeoRelayDirectory` keys its Tor wait on the *preference*, not on live readiness, and this distinction is load-bearing. With Tor off, waiting for a client that has been shut down would spend the full bootstrap timeout on every refresh and freeze the directory on its cached copy. With Tor on but not ready, the wait must still fail so the fetch is skipped rather than silently leaking the IP.
 

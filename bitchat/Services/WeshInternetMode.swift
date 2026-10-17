@@ -27,6 +27,13 @@ enum WeshInternetState: Equatable {
         /// Tor could not be forced, or a relay was connected while Tor was
         /// not ready: the network is switched off until an explicit retry.
         case routeFault
+        /// Arti exited mid-session without being asked to: the network is
+        /// switched off until an explicit retry.
+        case torStopped
+
+        /// Faults that switch the network off and survive input changes and
+        /// resume until an explicit retry.
+        var isHard: Bool { self == .routeFault || self == .torStopped }
     }
     case off
     case connecting(torProgress: Int)
@@ -52,6 +59,8 @@ struct WeshInternetStateMachine: Equatable {
         case inputs(Inputs)
         case stallTimeout
         case routeFault
+        /// Arti exited without a stop request.
+        case torStopped
         case retry
         case background
         case foreground
@@ -81,7 +90,9 @@ struct WeshInternetStateMachine: Equatable {
             let networkChanged = new.networkReachable != inputs.networkReachable
             inputs = new
             switch state {
-            case .off, .paused, .error(.routeFault):
+            case .off, .paused:
+                break
+            case .error(let failure) where failure.isHard:
                 break
             case .connecting, .on, .error:
                 if inputs.relayConnected && !inputs.torReady {
@@ -98,14 +109,27 @@ struct WeshInternetStateMachine: Equatable {
             }
         case .routeFault:
             if state != .off { state = .error(.routeFault) }
+        case .torStopped:
+            // Also replaces a route fault: TorManager drops readiness before
+            // it posts the exit, so a connected relay can be seen as a route
+            // fault a moment earlier. The cause is the Arti exit.
+            switch state {
+            case .connecting, .on, .error: state = .error(.torStopped)
+            case .off, .paused: break
+            }
         case .retry:
             if case .error = state { state = connecting() }
         case .background:
-            // A route fault stays until an explicit retry, even across resume.
-            if state != .off && state != .error(.routeFault) { state = .paused }
+            // A hard fault stays until an explicit retry, even across resume.
+            if state != .off && !isInHardFault { state = .paused }
         case .foreground:
             if state == .paused { state = connecting() }
         }
+    }
+
+    private var isInHardFault: Bool {
+        if case .error(let failure) = state { return failure.isHard }
+        return false
     }
 
     private var isOnline: Bool { inputs.networkReachable && inputs.torReady && inputs.relayConnected }
@@ -152,6 +176,8 @@ final class WeshInternetMode: ObservableObject {
         var deleteArtiDirectory: () -> Bool
         var inputs: AnyPublisher<WeshInternetStateMachine.Inputs, Never>
         var scheduleAfter: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+        /// Fires when Arti exits without a stop request.
+        var torStoppedUnexpectedly: AnyPublisher<Void, Never> = Empty().eraseToAnyPublisher()
     }
 
     private var machine: WeshInternetStateMachine
@@ -191,7 +217,10 @@ final class WeshInternetMode: ObservableObject {
             .eraseToAnyPublisher(),
             scheduleAfter: { delay, action in
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { Task { @MainActor in action() } }
-            }
+            },
+            torStoppedUnexpectedly: NotificationCenter.default.publisher(for: .TorDidStopUnexpectedly)
+                .map { _ in () }
+                .eraseToAnyPublisher()
         ))
     }
 
@@ -224,6 +253,10 @@ final class WeshInternetMode: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.apply(.inputs($0)) }
             .store(in: &cancellables)
+        dependencies.torStoppedUnexpectedly
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.apply(.torStopped) }
+            .store(in: &cancellables)
         armStallTimer()
     }
 
@@ -242,6 +275,16 @@ final class WeshInternetMode: ObservableObject {
         defaults.set(enabled, forKey: WeshInternetSettings.enabledKey)
         apply(.toggle(enabled))
         dependencies.setNetworkEnabled(enabled)
+        if !enabled {
+            // Arti keeps nothing while Off. Deleted only once Arti is
+            // confirmed stopped; otherwise the next launch (toggle off)
+            // deletes it.
+            if dependencies.stopTorAndWait() {
+                _ = deleteArtiDirectory()
+            } else {
+                SecureLogger.warning("Internet off: Arti did not stop in time; its directory is deleted at next launch", category: .session)
+            }
+        }
         return true
     }
 
@@ -252,7 +295,7 @@ final class WeshInternetMode: ObservableObject {
         }
         apply(.retry)
         guard state != .error(.routeFault) else { return }
-        if failure == .routeFault { dependencies.setNetworkEnabled(true) }
+        if failure.isHard { dependencies.setNetworkEnabled(true) }
         dependencies.retryConnections()
     }
 
@@ -293,7 +336,7 @@ final class WeshInternetMode: ObservableObject {
         machine.handle(event)
         guard machine.state != previous else { return }
         state = machine.state
-        if machine.state == .error(.routeFault) {
+        if case .error(let failure) = machine.state, failure.isHard {
             // Hard fault: nothing may stay connected outside a ready Tor.
             dependencies.setNetworkEnabled(false)
         }

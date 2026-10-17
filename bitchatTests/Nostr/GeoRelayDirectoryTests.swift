@@ -432,6 +432,33 @@ final class GeoRelayDirectoryTests: XCTestCase {
         XCTAssertEqual(harness.fileStore.dataByURL[harness.cacheURL], Data(recovered.utf8))
     }
 
+    func test_weshMode_neverFetchesTheRemoteDirectory() async {
+        let activeNotification = Notification.Name("GeoRelayDirectoryTests.weshDidBecomeActive")
+        let harness = makeHarness(
+            bundleCSV: """
+            relay url,lat,lon
+            bundled.example,1,1
+            """,
+            autoStart: true,
+            activeNotificationName: activeNotification
+        )
+        var dependencies = harness.dependencies
+        dependencies.remoteFetchAllowed = { false }
+        let directory = GeoRelayDirectory(dependencies: dependencies)
+
+        directory.prefetchIfNeeded()
+        directory.prefetchIfNeeded(force: true)
+        harness.notificationCenter.post(name: .TorDidBecomeReady, object: nil)
+        harness.notificationCenter.post(name: activeNotification, object: nil)
+        // Negative check: give a wrongly spawned fetch a chance to run.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let requestCount = await harness.fetcher.recordedRequestCount()
+        XCTAssertEqual(requestCount, 0, "Wesh must not contact the directory host, even through Tor")
+        XCTAssertFalse(directory.debugHasRetryTask)
+        XCTAssertEqual(directory.entries, [GeoRelayDirectory.Entry(host: "bundled.example", lat: 1, lon: 1)])
+    }
+
     func test_observers_triggerPrefetchesForTorReadyAndAppActivation() async {
         let activeNotification = Notification.Name("GeoRelayDirectoryTests.didBecomeActive")
         let harness = makeHarness(

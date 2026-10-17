@@ -476,6 +476,115 @@ struct NostrTransportTests {
         withExtendedLifetime(transport) {}
     }
 
+    @Test("Wesh: only QR contacts with a bound npub, only while Internet is On, never favorites")
+    @MainActor
+    func weshReachabilityFollowsQRContactsAndInternetState() async throws {
+        let keychain = MockKeychain()
+        let sender = try NostrIdentity.generate()
+        let contactNpub = try NostrIdentity.generate()
+        let favoriteNpub = try NostrIdentity.generate()
+        let contactKey = Data(repeating: 0x11, count: 32)
+        let favoriteKey = Data(repeating: 0x22, count: 32)
+        let contactPeer = PeerID(hexData: contactKey)
+        let favoritePeer = PeerID(hexData: favoriteKey)
+        let favorite = makeRelationship(peerNoisePublicKey: favoriteKey, peerNostrPublicKey: favoriteNpub.npub, peerNickname: "Fav")
+        let recipients = CurrentValueSubject<[PeerID: String], Never>([contactPeer: contactNpub.npub])
+        let online = CurrentValueSubject<Bool, Never>(false)
+        final class Blocked { var keys: Set<Data> = [] }
+        let blocked = Blocked()
+        let probe = NostrTransportProbe()
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                loadFavorites: { [favoriteKey: favorite] },
+                favoriteStatusForNoiseKey: { $0 == favoriteKey ? favorite : nil },
+                currentIdentity: { sender },
+                sendEvent: probe.record(event:),
+                relayConnectivity: { Just(true).eraseToAnyPublisher() },
+                weshRecipients: { recipients.eraseToAnyPublisher() },
+                weshOnline: { online.eraseToAnyPublisher() },
+                weshIsBlocked: { blocked.keys.contains($0) }
+            )
+        )
+        transport.senderPeerID = PeerID(str: "0123456789abcdef")
+
+        // Fail closed while Internet mode is not On: nothing is reachable or sent.
+        #expect(await TestHelpers.waitUntil({ !transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+        transport.sendPrivateMessage("too early", to: contactPeer, recipientNickname: "QR", messageID: "early")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.isEmpty)
+
+        online.send(true)
+        #expect(await TestHelpers.waitUntil({ transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+        #expect(transport.isPeerReachable(contactPeer.toShort()))
+        #expect(!transport.isPeerReachable(favoritePeer))
+
+        transport.sendPrivateMessage("salut", to: contactPeer, recipientNickname: "QR", messageID: "pm-wesh")
+        transport.sendPrivateMessage("nope", to: favoritePeer, recipientNickname: "Fav", messageID: "pm-fav")
+        transport.sendFavoriteNotification(to: contactPeer, isFavorite: true)
+        #expect(await TestHelpers.waitUntil({ probe.sentEvents.count == 1 }, timeout: TestConstants.settleTimeout))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.count == 1)
+        let result = try decodeEmbeddedPayload(from: probe.sentEvents[0], recipient: contactNpub)
+        #expect(try decodePrivateMessage(from: result.payload).messageID == "pm-wesh")
+
+        // A blocked contact is never sent anything, even if still in the map.
+        blocked.keys = [contactKey]
+        transport.sendPrivateMessage("blocked", to: contactPeer, recipientNickname: "QR", messageID: "pm-blocked")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.count == 1)
+
+        // A contact losing its npub (rescan, conflict) is no longer reachable.
+        recipients.send([:])
+        #expect(await TestHelpers.waitUntil({ !transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+    }
+
+    @Test("Wesh: the flush on On runs after the state really is On (Published emits in willSet)")
+    @MainActor
+    func weshFlushWhenOnSeesTheNewState() async {
+        final class Mode: ObservableObject { @Published var state: WeshInternetState = .connecting(torProgress: 50) }
+        final class Observed { var states: [WeshInternetState] = [] }
+        let mode = Mode()
+        let flushes = Observed()
+        let cancellable = WeshInternetRoute.flushWhenOn(mode.$state) { flushes.states.append(mode.state) }
+        mode.state = .on
+        mode.state = .on
+        #expect(await TestHelpers.waitUntil({ !flushes.states.isEmpty }, timeout: TestConstants.settleTimeout))
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(flushes.states == [.on])
+        mode.state = .connecting(torProgress: 10)
+        mode.state = .on
+        #expect(await TestHelpers.waitUntil({ flushes.states.count == 2 }, timeout: TestConstants.settleTimeout))
+        withExtendedLifetime(cancellable) {}
+    }
+
+    @Test("Wesh route: conflicts, proof warnings, blocks and strangers never get an npub")
+    func weshInternetRouteBindings() throws {
+        let alice = try NostrIdentity.generate()
+        let bob = try NostrIdentity.generate()
+        let aliceKey = Data(repeating: 0x0a, count: 32)
+        let bobKey = Data(repeating: 0x0b, count: 32)
+        let contacts = [
+            WeshQRTrust.Contact(noiseKeyHex: aliceKey.hexEncodedString(), nickname: "Alice", npub: alice.npub, npubProven: true),
+            WeshQRTrust.Contact(noiseKeyHex: bobKey.hexEncodedString(), nickname: "Bob", npub: bob.npub, npubProofWarning: true)
+        ]
+        #expect(WeshInternetRoute.recipients(contacts: contacts, blockedFingerprints: []) == [PeerID(hexData: aliceKey): alice.npub])
+        #expect(WeshInternetRoute.recipients(contacts: contacts, blockedFingerprints: [aliceKey.sha256Fingerprint()]).isEmpty)
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: alice.publicKeyHex, contacts: contacts, blockedFingerprints: []) == aliceKey)
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: alice.npub, contacts: contacts, blockedFingerprints: []) == aliceKey)
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: bob.publicKeyHex, contacts: contacts, blockedFingerprints: []) == nil)
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: alice.publicKeyHex, contacts: contacts,
+                                                 blockedFingerprints: [aliceKey.sha256Fingerprint()]) == nil)
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: try NostrIdentity.generate().publicKeyHex,
+                                                 contacts: contacts, blockedFingerprints: []) == nil)
+        var conflicted = contacts[0]
+        conflicted.npubConflict = true
+        #expect(WeshInternetRoute.deliveryNpub(for: conflicted) == nil)
+        let twoHolders = [contacts[0], WeshQRTrust.Contact(noiseKeyHex: bobKey.hexEncodedString(), nickname: "Bob", npub: alice.npub)]
+        #expect(WeshInternetRoute.senderNoiseKey(forNostrPubkey: alice.publicKeyHex, contacts: twoHolders, blockedFingerprints: []) == nil)
+    }
+
     @MainActor
     private func makeDependencies(
         notificationCenter: NotificationCenter = NotificationCenter(),
@@ -486,7 +595,10 @@ struct NostrTransportTests {
         registerPendingGiftWrap: @escaping @MainActor (String) -> Void = { _ in },
         sendEvent: @escaping @MainActor (NostrEvent) -> Void = { _ in },
         scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { _, _ in },
-        relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() }
+        relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() },
+        weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
+        weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
+        weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
     ) -> NostrTransport.Dependencies {
         NostrTransport.Dependencies(
             notificationCenter: notificationCenter,
@@ -497,7 +609,10 @@ struct NostrTransportTests {
             registerPendingGiftWrap: registerPendingGiftWrap,
             sendEvent: sendEvent,
             scheduleAfter: scheduleAfter,
-            relayConnectivity: relayConnectivity
+            relayConnectivity: relayConnectivity,
+            weshRecipients: weshRecipients,
+            weshOnline: weshOnline,
+            weshIsBlocked: weshIsBlocked
         )
     }
 
