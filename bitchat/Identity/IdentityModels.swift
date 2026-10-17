@@ -202,12 +202,6 @@ struct IdentityCache: Codable {
     // entries verified before this field exists sort as oldest)
     var verifiedAt: [String: Date]? = nil
 
-    // Stable Noise fingerprints that proved encrypted private-media support
-    // inside an authenticated Noise session. Optional for decoding caches
-    // written before this migration. Entries are monotonic until a panic wipe
-    // so an old/replayed announce cannot silently downgrade a peer.
-    var privateMediaCapableFingerprints: Set<String>? = nil
-
     // Noise-fingerprint -> Ed25519 announcement key, learned only from the
     // authenticated peer-state payload. This prevents a self-signed announce
     // containing a copied public Noise key from replacing a previously bound
@@ -240,7 +234,6 @@ struct IdentityCache: Codable {
         vouchesByVouchee = try container.decodeIfPresent([String: [VouchRecord]].self, forKey: .vouchesByVouchee)
         vouchBatchSentAt = try container.decodeIfPresent([String: Date].self, forKey: .vouchBatchSentAt)
         verifiedAt = try container.decodeIfPresent([String: Date].self, forKey: .verifiedAt)
-        privateMediaCapableFingerprints = try container.decodeIfPresent(Set<String>.self, forKey: .privateMediaCapableFingerprints)
         authenticatedSigningKeysByFingerprint = try container.decodeIfPresent([String: Data].self, forKey: .authenticatedSigningKeysByFingerprint)
         cryptographicIdentities = try container.decodeIfPresent([String: CryptographicIdentity].self, forKey: .cryptographicIdentities) ?? [:]
         version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1

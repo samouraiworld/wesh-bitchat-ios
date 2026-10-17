@@ -152,9 +152,6 @@ struct NoiseEncryptionTests {
             try service.decrypt(Data(), from: peer)
         }
         #expect(throws: NoiseEncryptionError.identityUnavailable) {
-            try service.encryptPrivateFilePayload(Data(), for: peer)
-        }
-        #expect(throws: NoiseEncryptionError.identityUnavailable) {
             try service.sealPrekeyPayload(Data(), recipientPrekey: PrekeyBundle.Prekey(id: 1, publicKey: Data(repeating: 1, count: 32)))
         }
         storage.simulatedSaveError = nil

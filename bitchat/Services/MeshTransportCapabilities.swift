@@ -36,35 +36,6 @@ protocol PanicResettingTransport: AnyObject {
     func resetIdentityForPanic(currentNickname: String, restartServices: Bool)
 }
 
-/// File and private-media transfer over a mesh transport, including the
-/// capability-proof policy that gates encrypted private media.
-protocol MeshFileTransferring: AnyObject {
-    func sendFileBroadcast(_ packet: BitchatFilePacket, transferId: String)
-    func sendFilePrivate(
-        _ packet: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String,
-        allowLegacyFallback: Bool
-    )
-    /// Automatic whole-file retry is admitted only while this exact Noise
-    /// generation authenticates bit 9. It must never queue across a session
-    /// replacement or enter the signed raw legacy path.
-    func sendFilePrivateReceiptRetry(
-        _ packet: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String
-    )
-    func cancelTransfer(_ transferId: String)
-    func privateMediaSendPolicy(to peerID: PeerID) -> PrivateMediaSendPolicy
-    /// The exact current Noise generation that authenticated both encrypted
-    /// private media (bit 8) and durable receipts/retry (bit 9).
-    func authenticatedPrivateMediaReceiptSessionGeneration(to peerID: PeerID) -> UUID?
-    func resolvePrivateMediaSendPolicy(
-        to peerID: PeerID,
-        completion: @escaping @MainActor (PrivateMediaSendPolicy) -> Void
-    )
-}
-
 /// Courier store-and-forward: seal a message to the recipient's static
 /// key and hand it to connected couriers for physical delivery while the
 /// recipient is offline. Returns false when the transport cannot courier.

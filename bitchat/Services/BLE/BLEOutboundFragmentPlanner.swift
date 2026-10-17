@@ -1,6 +1,28 @@
 import BitFoundation
 import Foundation
 
+struct BLEOutboundFragmentTransferRequest {
+    let packet: BitchatPacket
+    let pad: Bool
+    let maxChunk: Int?
+    let directedPeer: PeerID?
+}
+
+/// Transactional admission for strict fragment trains. Durable callers may
+/// commit only when every fragment was accepted; the first rejection stops
+/// the train and reports failure so the original remains retryable.
+enum BLEStrictFragmentAdmission {
+    static func admitAll<Fragment>(
+        _ fragments: [Fragment],
+        accepting: (Fragment) -> Bool
+    ) -> Bool {
+        for fragment in fragments where !accepting(fragment) {
+            return false
+        }
+        return true
+    }
+}
+
 struct BLEOutboundFragmentPlan {
     let fragmentPackets: [BitchatPacket]
     let fragmentVersion: UInt8
@@ -17,9 +39,6 @@ struct BLEOutboundFragmentPlan {
 }
 
 enum BLEOutboundFragmentPlanner {
-    /// Current Android receivers reject fragment sets above 256. Private
-    /// media v1 treats that deployed ceiling as a cross-platform contract.
-    static let privateMediaV1MaxFragments = 256
     private static let minimumChunkSize = 64
     private static let fragmentIDLength = 8
 
@@ -72,10 +91,6 @@ enum BLEOutboundFragmentPlanner {
             chunkSize: sizing.chunkSize,
             spacingMs: spacingMs(for: request)
         )
-    }
-
-    static func isPrivateMediaV1Compatible(_ plan: BLEOutboundFragmentPlan) -> Bool {
-        plan.totalFragments <= privateMediaV1MaxFragments
     }
 
     private static func sizingPolicy(

@@ -92,7 +92,6 @@ struct ProtocolContractTests {
         #expect(probe.sentMessages.first?.content == "hello")
         // Mesh-only features are capability protocols now, not inert
         // defaults: a core-only transport simply doesn't have them.
-        #expect(!(probe as AnyObject is MeshFileTransferring))
         #expect(!(probe as AnyObject is MeshDiagnosing))
         #expect(probe.peerCapabilities(peerID).isEmpty)
         // Secure delivery defaults to prompt delivery (itself defaulting to

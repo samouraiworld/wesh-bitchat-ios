@@ -8,25 +8,11 @@ enum TransportConfig {
     static let messageTTLDefault: UInt8 = 7                 // Default TTL for mesh flooding
     static let bleMaxInFlightAssemblies: Int = 128          // Cap concurrent fragment assemblies
     static let bleHighDegreeThreshold: Int = 6              // For adaptive TTL/probabilistic relays
-    static let bleMaxConcurrentTransfers: Int = 2           // Limit simultaneous large media sends
     // Clock skew tolerated on received packet timestamps. Live packets must
     // sit within ± this of local time; sync replies may be arbitrarily old
     // but never further ahead than this, and the gossip store applies the
     // same future bound so nothing future-dated is stored, served or restored.
     static let bleMaxTimestampSkewMs: UInt64 = 120_000
-    // Bounded wait for the session-authenticated capability proof used by
-    // private-media migration. Expiry never auto-sends clear bytes; it only
-    // resolves to the existing one-shot consent or downgrade-blocked path.
-    static let privateMediaCapabilityProofTimeoutSeconds: TimeInterval = 5
-    static let privateMediaCapabilityProofPendingPeerCap: Int = 64
-    static let privateMediaCapabilityProofWaitersPerPeerCap: Int = 16
-    /// Accepted private-media receipts and explicit-deletion tombstones each
-    /// receive this independent capacity.
-    static let privateMediaReceivedLedgerCapacity: Int = 4_096
-    /// A bounded retry horizon prevents stable receipt state from growing into
-    /// permanent application history.
-    static let privateMediaReceivedLedgerTTLSeconds: TimeInterval =
-        7 * 24 * 60 * 60
     static let bleFragmentRelayMinDelayMs: Int = 8          // Faster forwarding for media fragments
     static let bleFragmentRelayMaxDelayMs: Int = 25         // Upper jitter bound for fragment relays
     // Fragment relay TTL in sparse graphs; matches messageTTLDefault so media
@@ -363,9 +349,7 @@ enum TransportConfig {
     static let syncStalePeerCleanupIntervalSeconds: TimeInterval = 60.0
     static let syncStalePeerTimeoutSeconds: TimeInterval = 60.0
     static let syncFragmentCapacity: Int = 600
-    static let syncFileTransferCapacity: Int = 200
     static let syncFragmentIntervalSeconds: TimeInterval = 30.0
-    static let syncFileTransferIntervalSeconds: TimeInterval = 60.0
     static let syncMessageIntervalSeconds: TimeInterval = 15.0
     static let syncResponseRateLimitMaxResponses: Int = 8
     static let syncResponseRateLimitWindowSeconds: TimeInterval = 30.0

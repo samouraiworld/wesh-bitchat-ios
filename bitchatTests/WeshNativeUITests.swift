@@ -932,6 +932,66 @@ struct WeshNativeUITests {
         }
     }
 
+    /// The media tree an older build wrote, if any: a private file must not
+    /// add anything to it. Only read, never written, by these tests.
+    private func legacyMediaListing() -> [String]? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let files = base.appendingPathComponent("files", isDirectory: true)
+        let items = FileManager.default.enumerator(at: files, includingPropertiesForKeys: nil)?
+            .compactMap { ($0 as? URL)?.path }
+        return items?.sorted()
+    }
+
+    @Test @MainActor func privateFileFromANonEnrolledSenderLeavesNoTrace() async throws {
+        WeshInboundRequests.shared.clear()
+        defer { WeshInboundRequests.shared.clear() }
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            // The chat is open: an admitted line would earn a READ receipt here.
+            fixture.vm.selectedPrivateChatPeer = fixture.shortID
+            let before = legacyMediaListing()
+            let payload = Data([0x01, 0x00, 0x09]) + Data("photo.jpg".utf8) + Data([0x04, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xD8])
+
+            fixture.vm.didReceiveTransportEvent(.noisePayloadReceived(
+                peerID: fixture.shortID, type: .privateFile, payload: payload, timestamp: Date()
+            ))
+
+            #expect(fixture.vm.privateMessages(for: fixture.shortID).isEmpty)
+            #expect(fixture.vm.privateMessages(for: fixture.peer).isEmpty)
+            #expect(WeshInboundRequests.shared.requests.isEmpty)
+            #expect(fixture.transport.sentDeliveryAcks.isEmpty)
+            #expect(fixture.transport.sentReadReceipts.isEmpty)
+            #expect(legacyMediaListing() == before)
+        }
+    }
+
+    @Test @MainActor func privateFileFromAQRContactIsExactlyOnePlaceholderAndNoFile() async throws {
+        WeshInboundRequests.shared.clear()
+        defer { WeshInboundRequests.shared.clear() }
+        try await withVerifiedPrivateFixture { fixture in
+            let before = legacyMediaListing()
+            let payload = Data([0x01, 0x00, 0x09]) + Data("photo.jpg".utf8) + Data([0x04, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xD8])
+
+            // A BitChat sender retries an unacknowledged file with the same bytes.
+            for _ in 0..<2 {
+                fixture.vm.didReceiveTransportEvent(.noisePayloadReceived(
+                    peerID: fixture.shortID, type: .privateFile, payload: payload, timestamp: Date()
+                ))
+            }
+
+            let lines = (fixture.vm.privateMessages(for: fixture.shortID) + fixture.vm.privateMessages(for: fixture.peer))
+                .filter { $0.content == WeshIncomingMediaPolicy.placeholder }
+            // Mirrored alias copies share the one ID.
+            #expect(Set(lines.map(\.id)).count == 1)
+            #expect(WeshInboundRequests.shared.requests.isEmpty)
+            // Not acknowledged as delivered: the sender never sees it arrive.
+            #expect(fixture.transport.sentDeliveryAcks.isEmpty)
+            #expect(legacyMediaListing() == before)
+        }
+    }
+
     @Test @MainActor func reportingAPublicAuthorBlocksAndHidesOnlyThatIdentityLocally() async throws {
         try await withVerifiedPrivateFixture { fixture in
             let other = PeerID(str: "0102030405060708")
@@ -970,7 +1030,7 @@ struct WeshNativeUITests {
         }
         #expect(requests.add(message("a", "[image] photo.jpg"), from: key))
         #expect(!requests.add(message("a"), from: key))
-        #expect(requests.requests.first?.messages.first?.content == "Média non pris en charge")
+        #expect(requests.requests.first?.messages.first?.content == WeshIncomingMediaPolicy.placeholder)
         for index in 0..<(WeshInboundRequests.maxMessagesPerRequest + 5) { requests.add(message("m\(index)"), from: key) }
         #expect(requests.requests.first?.messages.count == WeshInboundRequests.maxMessagesPerRequest)
         for index in 1..<WeshInboundRequests.maxRequests { requests.add(message("x"), from: Data(repeating: UInt8(index), count: 32)) }
@@ -1070,8 +1130,11 @@ struct WeshNativeUITests {
     }
 
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
-        #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
-        #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")
+        let placeholder = WeshIncomingMediaPolicy.placeholder
+        #expect(!placeholder.isEmpty && placeholder != "pave.media.unsupported")
+        #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == placeholder)
+        #expect(WeshIncomingMediaPolicy.displayText("[image] photo.jpg") == placeholder)
+        #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == placeholder)
         #expect(WeshIncomingMediaPolicy.displayText("Bonjour [image] ") == "Bonjour [image] ")
         #expect(WeshLinks.terms.absoluteString == "https://wesh.samourai.app/conditions")
     }

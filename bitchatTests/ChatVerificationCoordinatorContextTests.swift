@@ -102,7 +102,6 @@ private final class MockChatVerificationContext: ChatVerificationContext {
     var noiseSessionKeysByPeerID: [PeerID: Data] = [:]
     private(set) var installedCallbacks: (onPeerAuthenticated: (PeerID, String) -> Void, onHandshakeRequired: (PeerID) -> Void)?
     private(set) var triggeredHandshakes: [PeerID] = []
-    private(set) var privateMediaAuthenticatedPeers: [PeerID] = []
     private(set) var securePrivateMessageRetryAliases: [[PeerID]] = []
     private(set) var sentChallenges: [(peerID: PeerID, noiseKeyHex: String, nonceA: Data)] = []
     private(set) var sentResponses: [(peerID: PeerID, noiseKeyHex: String, nonceA: Data)] = []
@@ -120,9 +119,6 @@ private final class MockChatVerificationContext: ChatVerificationContext {
         establishedNoiseSessions.contains(peerID)
     }
     func triggerHandshake(with peerID: PeerID) { triggeredHandshakes.append(peerID) }
-    func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {
-        privateMediaAuthenticatedPeers.append(peerID)
-    }
 
     func retrySecurePrivateMessagesAfterAuthentication(for peerIDAliases: [PeerID]) {
         securePrivateMessageRetryAliases.append(peerIDAliases)
@@ -696,7 +692,6 @@ struct ChatVerificationCoordinatorContextTests {
         let stablePeerID = PeerID(hexData: noiseKey)
         #expect(context.stablePeerIDCache[peerID] == stablePeerID)
         #expect(context.invalidatedEncryptionCachePeers.contains(peerID))
-        #expect(context.privateMediaAuthenticatedPeers == [peerID])
         #expect(context.securePrivateMessageRetryAliases == [[peerID, stablePeerID]])
 
         // Handshake required -> handshaking status.

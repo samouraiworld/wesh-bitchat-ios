@@ -12,8 +12,8 @@ enum BLEOutboundPacketPolicy {
         switch MessageType(rawValue: packetType) {
         case .noiseEncrypted, .noiseHandshake:
             return true
-        // Wesh never sends voiceFrame (BitChat live voice); it is listed only
-        // because the switch is exhaustive.
+        // Wesh never sends fileTransfer or voiceFrame (BitChat media and live
+        // voice); they are listed only because the switch is exhaustive.
         //
         // announceV2 is unpadded, and it is worth revisiting: it is ~75 bytes,
         // so the smallest bucket would triple the airtime of the most
@@ -32,8 +32,6 @@ enum BLEOutboundPacketPolicy {
         switch messageType {
         case .fragment:
             return .fragment(totalFragments: fragmentTotalCount(from: packet.payload))
-        case .fileTransfer:
-            return .fileTransfer
         case .announceV2:
             // Stated rather than inherited from `default`. Presence is small,
             // time-bounded to its epoch, and useless once stale, so it belongs
