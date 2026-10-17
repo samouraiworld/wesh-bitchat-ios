@@ -127,6 +127,8 @@ struct PaveOnboardingFlow: View {
                 Text(PaveCopy.text("pave.onboarding.bluetoothWhy")).paveText(.body)
                 Text(PaveCopy.text("pave.onboarding.bluetoothPrompt")).paveText(.body)
                 Text(PaveCopy.text("pave.onboarding.noLocation")).paveText(.body)
+                // The notification prompt follows this one; say so before it appears.
+                Text(PaveCopy.text("pave.onboarding.notificationsNext")).paveText(.body)
             }
             Label(PaveCopy.text("pave.connexion.visibility"), systemImage: "exclamationmark.triangle.fill")
                 .paveText(.caption)

@@ -1380,7 +1380,7 @@ struct WeshContactSheet: View {
     /// Their check counts only from now: an older scan of my code is another meeting.
     @State private var openedAt = Date()
     @State private var myNoiseKey: Data?
-    @State private var notice: String?
+    @State private var notice: PaveExchangeNotice?
     @State private var scannedKey: Data?
     @State private var scannedAttemptNonce: Data?
     @State private var scannedName = ""
@@ -1443,11 +1443,11 @@ struct WeshContactSheet: View {
         progress = .unavailable
         theyScannedMe = false
         guard chrome.noiseIdentityAvailability == .available else {
-            notice = WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability)?.message ?? PaveCopy.text("pave.scanResult.identityUnavailable")
+            notice = PaveExchangeNotice(WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability)?.message ?? PaveCopy.text("pave.scanResult.identityUnavailable"))
             return
         }
         guard runtime.chatViewModel.identityManager.isPersistenceAvailable else {
-            notice = PaveCopy.text("pave.scanResult.contactsUnavailable")
+            notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.contactsUnavailable"))
             return
         }
         let own = URL(string: verification.myQRString()).flatMap(VerificationService.VerificationQR.fromURL)
@@ -1455,19 +1455,19 @@ struct WeshContactSheet: View {
            let parsed = VerificationService.VerificationQR.fromURL(scannedURL),
            let own, parsed.noiseKeyHex == own.noiseKeyHex,
            VerificationService.shared.verifyScannedQR(value) != nil {
-            notice = PaveCopy.text("pave.scanResult.ownCode")
+            notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.ownCode"))
             return
         }
         switch verification.verifyScannedPayload(value) {
-        case .invalid: notice = PaveCopy.text("pave.scanResult.invalid")
-        case .notFound: notice = PaveCopy.text("pave.scanResult.notFound")
+        case .invalid: notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.invalid"))
+        case .notFound: notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.notFound"))
         case .requested(let name):
             scannedName = name
             if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) {
                 scannedKey = Data(hexString: parsed.noiseKeyHex)
                 if let scannedKey { scannedAttemptNonce = runtime.chatViewModel.weshQRAttemptNonce(for: scannedKey) }
             }
-            notice = PaveCopy.text("pave.scanResult.pending", PaveDisplayName.safe(name))
+            notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.pending", PaveDisplayName.safe(name)))
             refreshProgress()
         }
     }
@@ -1481,11 +1481,11 @@ struct WeshContactSheet: View {
         progress = updated
         switch updated {
         case .verified:
-            notice = theyScannedMe ? nil : PaveCopy.text("pave.scanResult.verifiedWaiting")
+            notice = theyScannedMe ? nil : PaveExchangeNotice(PaveCopy.text("pave.scanResult.verifiedWaiting"))
         case .notSaved:
-            notice = String(localized: "wesh.verify.contact_not_saved", comment: "Shown after a QR scan when the verified contact could not be saved on this phone")
+            notice = PaveExchangeNotice(String(localized: "wesh.verify.contact_not_saved", comment: "Shown after a QR scan when the verified contact could not be saved on this phone"))
         case .expired, .unavailable:
-            notice = PaveCopy.text("pave.scanResult.noConfirmation")
+            notice = PaveExchangeNotice(PaveCopy.text("pave.scanResult.noConfirmation"))
         case .pending:
             break
         }
@@ -1920,9 +1920,9 @@ private struct WeshPrivacySettings: View {
                 }
             }.listRowBackground(theme.canvas)
             Section {
-                Toggle("Masquer les aperçus des notifications", isOn: $hidePreviews).frame(minHeight: 44)
+                Toggle(PaveCopy.text("pave.settings.previewsToggle"), isOn: $hidePreviews).frame(minHeight: 44)
             } footer: {
-                Text("Les notifications disent qu’un message est arrivé, sans le texte ni le surnom de la personne.")
+                Text(PaveCopy.text("pave.settings.previewsHelp"))
             }.listRowBackground(theme.canvas)
         }.scrollContentBackground(.hidden).navigationTitle(PaveSettingsDestination.discretion.title).weshCanvas(title: PaveSettingsDestination.discretion.title)
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
