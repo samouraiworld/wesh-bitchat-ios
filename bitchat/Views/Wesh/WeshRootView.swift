@@ -313,10 +313,12 @@ struct WeshRootView: View {
                 }
             case .welcome:
                 // Nickname and terms, then Bluetooth: the system prompt waits for that step.
-                PaveOnboardingFlow(onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
+                PaveOnboardingFlow(nickname: WeshWelcome.keptNickname(chrome.nickname),
+                                   onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
                     chrome.setNickname(nickname)
                     chrome.validateAndSaveNickname()
                     welcomed = true
+                    runtime.welcomeFinished()
                 })
             case .tabs:
                 if !panicFeedback.isEmpty {
@@ -1390,7 +1392,12 @@ struct WeshContactSheet: View {
     var body: some View {
         Group {
             if chrome.noiseIdentityAvailability != .available {
-                ScrollView { WeshNoiseIdentityRecoveryPanel().padding(16) }
+                VStack(alignment: .trailing, spacing: 0) {
+                    Button(PaveCopy.text("pave.action.close")) { dismiss() }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .padding(.horizontal, 16)
+                    ScrollView { WeshNoiseIdentityRecoveryPanel().padding(16) }
+                }
             } else {
                 PaveExchangeScreen(
                     nickname: chrome.nickname,
@@ -1436,11 +1443,11 @@ struct WeshContactSheet: View {
         progress = .unavailable
         theyScannedMe = false
         guard chrome.noiseIdentityAvailability == .available else {
-            notice = WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability)?.message ?? "Identité indisponible."
+            notice = WeshNoiseIdentityNotice(chrome.noiseIdentityAvailability)?.message ?? PaveCopy.text("pave.scanResult.identityUnavailable")
             return
         }
         guard runtime.chatViewModel.identityManager.isPersistenceAvailable else {
-            notice = "Contacts indisponibles, réessayez."
+            notice = PaveCopy.text("pave.scanResult.contactsUnavailable")
             return
         }
         let own = URL(string: verification.myQRString()).flatMap(VerificationService.VerificationQR.fromURL)
@@ -1448,19 +1455,19 @@ struct WeshContactSheet: View {
            let parsed = VerificationService.VerificationQR.fromURL(scannedURL),
            let own, parsed.noiseKeyHex == own.noiseKeyHex,
            VerificationService.shared.verifyScannedQR(value) != nil {
-            notice = "C’est votre code. Scannez celui de votre contact."
+            notice = PaveCopy.text("pave.scanResult.ownCode")
             return
         }
         switch verification.verifyScannedPayload(value) {
-        case .invalid: notice = "Code invalide ou expiré. Demandez à votre contact d’afficher son code."
-        case .notFound: notice = "Contact introuvable ou identité différente. Rapprochez les téléphones et réessayez."
+        case .invalid: notice = PaveCopy.text("pave.scanResult.invalid")
+        case .notFound: notice = PaveCopy.text("pave.scanResult.notFound")
         case .requested(let name):
             scannedName = name
             if let url = URL(string: value), let parsed = VerificationService.VerificationQR.fromURL(url) {
                 scannedKey = Data(hexString: parsed.noiseKeyHex)
                 if let scannedKey { scannedAttemptNonce = runtime.chatViewModel.weshQRAttemptNonce(for: scannedKey) }
             }
-            notice = "Vérification de \(PaveDisplayName.safe(name)) en cours… Gardez Wesh ouvert sur les deux téléphones."
+            notice = PaveCopy.text("pave.scanResult.pending", PaveDisplayName.safe(name))
             refreshProgress()
         }
     }
@@ -1474,11 +1481,11 @@ struct WeshContactSheet: View {
         progress = updated
         switch updated {
         case .verified:
-            notice = theyScannedMe ? nil : "Vous avez vérifié votre contact sur ce téléphone. Pour qu’il puisse vous écrire, il doit maintenant scanner votre code."
+            notice = theyScannedMe ? nil : PaveCopy.text("pave.scanResult.verifiedWaiting")
         case .notSaved:
             notice = String(localized: "wesh.verify.contact_not_saved", comment: "Shown after a QR scan when the verified contact could not be saved on this phone")
         case .expired, .unavailable:
-            notice = "Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis scannez à nouveau."
+            notice = PaveCopy.text("pave.scanResult.noConfirmation")
         case .pending:
             break
         }
@@ -1537,26 +1544,23 @@ private struct WeshSettings: View {
     }
 
     private var summary: PaveSettingsSummary {
-        let note = meetingNote.content
-        let _ = peers.renderID
-        return PaveSettingsSummary(nickname: chrome.nickname,
-                                   previewsHidden: hidePreviews,
-                                   meetingNote: note.place.isEmpty ? note.title : note.place,
-                                   blockedCount: runtime.chatViewModel.identityManager.getBlockedFingerprints().count,
-                                   theme: appearance.paveTheme)
+        // Read so the rows follow these settings; the values come from the same store below.
+        let _ = (peers.renderID, hidePreviews, appearance)
+        return PaveSettingsSummary.wesh(nickname: chrome.nickname, meetingNote: meetingNote.content,
+                                        blockedCount: runtime.chatViewModel.identityManager.getBlockedFingerprints().count)
     }
 
     var body: some View {
         // The hold is the confirmation: no alert after it. The wipe rebuilds the tabs, so its
         // outcome shows above the app, in the window the « Tout effacer » shortcut uses.
-        PaveSettingsScreen(summary: summary, onErase: {
+        PaveSettingsScreen(summary: summary, presentsOutcome: false, onErase: {
             let erased = chrome.panicClearAllData()
             PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
             return erased
         }, onSelect: { selected in
             if selected == .connexion { connexion = true } else { destination = selected }
         })
-        .navigationTitle("Réglages")
+        .navigationTitle(PaveCopy.text("pave.settings.title"))
         .weshHiddenNavigationBar()
         .navigationDestination(isPresented: Binding(get: { destination != nil },
                                                     set: { if !$0 { destination = nil } })) {
@@ -1920,7 +1924,7 @@ private struct WeshPrivacySettings: View {
             } footer: {
                 Text("Les notifications disent qu’un message est arrivé, sans le texte ni le surnom de la personne.")
             }.listRowBackground(theme.canvas)
-        }.scrollContentBackground(.hidden).navigationTitle("Discrétion").weshCanvas(title: "Discrétion")
+        }.scrollContentBackground(.hidden).navigationTitle(PaveSettingsDestination.discretion.title).weshCanvas(title: PaveSettingsDestination.discretion.title)
             .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
                 Button("Annuler", role: .cancel) {}
                 Button("Retirer", role: .destructive) {

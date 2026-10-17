@@ -2,18 +2,14 @@ import Foundation
 import Testing
 @testable import bitchat
 
-/// The store screens are the ones the app mounts: welcome and terms at first launch, Échanger,
-/// Connexion, Réglages and the « Tout effacer » shortcut.
+/// What a first launch, an update and an erase put on screen, and what waits for the welcome.
 struct WeshRootMountTests {
-    private static let root = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-
-    private static func source(_ path: String) throws -> String {
-        try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+    private static func freshDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "wesh.root.\(UUID().uuidString)")!
     }
 
     @Test func aFirstLaunchOpensOnTheWelcome() {
-        let fresh = UserDefaults(suiteName: "wesh.root.\(UUID().uuidString)")!
+        let fresh = Self.freshDefaults()
         #expect(WeshRootScreen(panicRecoveryBlocked: false, welcomed: WeshWelcome.isDone(in: fresh)) == .welcome)
         fresh.set(true, forKey: WeshWelcome.key)
         #expect(WeshRootScreen(panicRecoveryBlocked: false, welcomed: WeshWelcome.isDone(in: fresh)) == .tabs)
@@ -21,18 +17,56 @@ struct WeshRootMountTests {
         #expect(WeshRootScreen(panicRecoveryBlocked: true, welcomed: false) == .eraseRecovery)
     }
 
-    @Test func theRootMountsTheWelcomeAndEveryStoreScreen() throws {
-        let rootView = try Self.source("bitchat/Views/Wesh/WeshRootView.swift")
-        #expect(rootView.contains("@AppStorage(WeshWelcome.key) private var welcomed"))
-        let welcome = try #require(rootView.range(of: "case .welcome:"))
-        let tabs = try #require(rootView.range(of: "case .tabs:"))
-        #expect(rootView[welcome.upperBound..<tabs.lowerBound].contains("PaveOnboardingFlow("))
-        for screen in ["PaveSettingsScreen(", "PaveConnexionSheet(", "PaveExchangeScreen(", "WeshInternetMode.shared"] {
-            #expect(rootView.contains(screen), "WeshRootView never mounts \(screen)")
-        }
-        #expect(try Self.source("bitchat/BitchatApp.swift").contains(".paveEraseShortcut"))
-        // The Bluetooth prompt waits for the welcome's step.
-        #expect(try Self.source("bitchat/ViewModels/ChatViewModel.swift")
-            .contains("deferBluetoothPrompt: WeshMode.isActive && !WeshWelcome.isDone()"))
+    @Test func anUpdateKeepsANicknameSomeoneChose() {
+        #expect(WeshWelcome.keptNickname(" Renard 42 ") == "Renard 42")
+        // The stand-in set before any choice, or nothing, gives way to a suggested name.
+        #expect(WeshWelcome.keptNickname("anon1234") == nil)
+        #expect(WeshWelcome.keptNickname("   ") == nil)
+        #expect(WeshWelcome.keptNickname("anon12345") == "anon12345")
+    }
+
+    @Test func noBluetoothManagerExistsBeforeTheWelcomeStep() {
+        let keychain = MockKeychain()
+        let service = BLEService(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                 identityManager: MockIdentityManager(keychain),
+                                 initializeBluetoothManagers: true, deferBluetoothPrompt: true)
+        defer { service.stopServices() }
+        #expect(service.holdsBluetoothPrompt)
+        #expect(service.centralManager == nil && service.peripheralManager == nil)
+    }
+
+    @Test func theWelcomeStepReleasesTheBluetoothPromptOnce() {
+        let keychain = MockKeychain()
+        let service = BLEService(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                 identityManager: MockIdentityManager(keychain),
+                                 initializeBluetoothManagers: false, deferBluetoothPrompt: true)
+        defer { service.stopServices() }
+        #expect(service.holdsBluetoothPrompt)
+        service.allowBluetoothPrompt()
+        #expect(!service.holdsBluetoothPrompt)
+        service.allowBluetoothPrompt()
+        #expect(!service.holdsBluetoothPrompt)
+    }
+
+    @Test func aServiceBuiltWithoutTheWelcomeNeverHoldsThePrompt() {
+        let keychain = MockKeychain()
+        let service = BLEService(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                                 identityManager: MockIdentityManager(keychain), initializeBluetoothManagers: false)
+        defer { service.stopServices() }
+        #expect(!service.holdsBluetoothPrompt)
+    }
+
+    @Test func theDiscretionRowFollowsTheNotificationPreviewSetting() {
+        let defaults = Self.freshDefaults()
+        let note = WeshMeetingNoteStore.Content()
+        // Hidden by default.
+        #expect(PaveSettingsSummary.wesh(nickname: "Renard", meetingNote: note, blockedCount: 0, defaults: defaults)
+            .value(for: .discretion) == PaveCopy.text("pave.settings.previewsHidden"))
+        defaults.set(false, forKey: NotificationPrivacySettings.hidePreviewsKey)
+        #expect(PaveSettingsSummary.wesh(nickname: "Renard", meetingNote: note, blockedCount: 0, defaults: defaults)
+            .value(for: .discretion) == PaveCopy.text("pave.settings.previewsShown"))
+        defaults.set("day", forKey: "wesh.appearance.v1")
+        #expect(PaveSettingsSummary.wesh(nickname: "Renard", meetingNote: note, blockedCount: 2, defaults: defaults)
+            .value(for: .appearance) == PaveCopy.text("pave.theme.jour"))
     }
 }

@@ -32,6 +32,7 @@ final class AppRuntime: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var started = false
+    private var weshInternetStarted = false
     private var lastNostrRelayConnectedState = false
     private var didHandleInitialNostrConnection = false
 
@@ -139,6 +140,26 @@ final class AppRuntime: ObservableObject {
         (chatViewModel.meshService as? BLEService)?.allowBluetoothPrompt()
     }
 
+    /// The welcome ended with the terms accepted: the notification prompt, then the Internet mode
+    /// (still off unless the person had turned it on).
+    func welcomeFinished() {
+        NotificationService.shared.requestAuthorization()
+        guard WeshMode.isActive, started else { return }
+        NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled())
+        startWeshInternet()
+    }
+
+    private func startWeshInternet() {
+        guard !weshInternetStarted else { return }
+        weshInternetStarted = true
+        WeshInternetMode.shared.start()
+        // Queued private messages to QR contacts leave as soon as Internet is On.
+        WeshInternetRoute.flushWhenOn(WeshInternetMode.shared.$state) { [weak self] in
+            self?.chatViewModel.messageRouter.flushAllOutbox()
+        }
+        .store(in: &cancellables)
+    }
+
     func start() {
         guard chatViewModel.networkActivationAllowed else { return }
         guard !started else {
@@ -164,12 +185,8 @@ final class AppRuntime: ObservableObject {
         #endif
         NetworkActivationService.shared.start()
         if WeshMode.isActive {
-            WeshInternetMode.shared.start()
-            // Queued private messages to QR contacts leave as soon as Internet is On.
-            WeshInternetRoute.flushWhenOn(WeshInternetMode.shared.$state) { [weak self] in
-                self?.chatViewModel.messageRouter.flushAllOutbox()
-            }
-            .store(in: &cancellables)
+            // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
+            if WeshWelcome.isDone() { startWeshInternet() }
         } else if NetworkActivationService.shared.userInternetEnabled {
             GeohashPresenceService.shared.start()
         }

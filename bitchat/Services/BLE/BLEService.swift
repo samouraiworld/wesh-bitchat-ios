@@ -353,6 +353,8 @@ final class BLEService: NSObject {
     private let bluetoothPromptLock = NSLock()
     private var _bluetoothPromptDeferred: Bool
     private var isBluetoothPromptDeferred: Bool { bluetoothPromptLock.withLock { _bluetoothPromptDeferred } }
+    /// True until `allowBluetoothPrompt()`; no CoreBluetooth manager exists meanwhile.
+    var holdsBluetoothPrompt: Bool { isBluetoothPromptDeferred }
     private let panicLifecycleLock = NSLock()
     private var _isPanicSuspended: Bool
     private var panicLifecycleGeneration: UInt64 = 0

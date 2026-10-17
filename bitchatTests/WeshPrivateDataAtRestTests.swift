@@ -453,6 +453,7 @@ struct WeshPrivateDataAtRestTests {
         wipes.pasteboard = { pasteboardClears += 1 }
         UserDefaults.standard.set(true, forKey: "wesh.publicMuted")
         UserDefaults.standard.set("day", forKey: "wesh.appearance.v1")
+        UserDefaults.standard.set(true, forKey: WeshWelcome.key)
         var committed = 0
         let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
@@ -468,6 +469,10 @@ struct WeshPrivateDataAtRestTests {
         #expect(pasteboardClears == 1)
         #expect(UserDefaults.standard.object(forKey: "wesh.publicMuted") == nil)
         #expect(UserDefaults.standard.object(forKey: "wesh.appearance.v1") == nil)
+        // The welcome and its terms come back, like on a new phone.
+        #expect(!WeshWelcome.isDone())
+        #expect(WeshRootScreen(panicRecoveryBlocked: vm.panicRecoveryBlocked, welcomed: WeshWelcome.isDone())
+                == (failContacts ? .eraseRecovery : .welcome))
         #expect(committed == (failContacts ? 0 : 1))
         #expect(vm.panicRecoveryBlocked == failContacts)
     }

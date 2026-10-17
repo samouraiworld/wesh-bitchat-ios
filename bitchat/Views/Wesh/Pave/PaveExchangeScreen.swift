@@ -93,6 +93,16 @@ struct PaveExchangeScreen: View {
         .onChange(of: progress.isComplete) { complete in
             if complete { PaveHaptics.play(.scanSuccess) }
         }
+        // VoiceOver hears every scan outcome and every check as it fills.
+        .onChange(of: notice) { notice in
+            if let notice { PaveAccessibility.announce(notice) }
+        }
+        .onChange(of: progress.theyScannedMe) { done in
+            if done { PaveAccessibility.announce(PaveExchangeCheck.yourCode.label(done: true)) }
+        }
+        .onChange(of: progress.iScannedThem) { done in
+            if done { PaveAccessibility.announce(PaveExchangeCheck.theirCode.label(done: true)) }
+        }
     }
 
     private var fingerprints: PaveExchangeFingerprints {

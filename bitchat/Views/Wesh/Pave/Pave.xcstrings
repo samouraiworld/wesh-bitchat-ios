@@ -1289,13 +1289,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Exchange done"
+            "value" : "Verified on this phone"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Échange réussi"
+            "value" : "Vérifié sur ce téléphone"
           }
         }
       }
@@ -1323,13 +1323,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your code was scanned"
+            "value" : "Their phone answered"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Votre code est scanné"
+            "value" : "Son téléphone a répondu"
           }
         }
       }
@@ -2616,6 +2616,142 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Demande de message privé"
+          }
+        }
+      }
+    },
+    "pave.scanResult.contactsUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts unavailable, try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts indisponibles, réessayez."
+          }
+        }
+      }
+    },
+    "pave.scanResult.identityUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your identity is unavailable."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité indisponible."
+          }
+        }
+      }
+    },
+    "pave.scanResult.invalid" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid or expired code. Ask your contact to show their code."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code invalide ou expiré. Demandez à votre contact d’afficher son code."
+          }
+        }
+      }
+    },
+    "pave.scanResult.noConfirmation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No confirmation. Keep Wesh open on both phones, then scan again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de confirmation. Gardez Wesh ouvert sur les deux téléphones, puis scannez à nouveau."
+          }
+        }
+      }
+    },
+    "pave.scanResult.notFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact not found or a different identity. Bring the phones closer and try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact introuvable ou identité différente. Rapprochez les téléphones et réessayez."
+          }
+        }
+      }
+    },
+    "pave.scanResult.ownCode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That is your code. Scan your contact’s."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "C’est votre code. Scannez celui de votre contact."
+          }
+        }
+      }
+    },
+    "pave.scanResult.pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking %@… Keep Wesh open on both phones."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérification de %@ en cours… Gardez Wesh ouvert sur les deux téléphones."
+          }
+        }
+      }
+    },
+    "pave.scanResult.verifiedWaiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You verified your contact on this phone. For them to write to you, they now need to scan your code."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous avez vérifié votre contact sur ce téléphone. Pour qu’il puisse vous écrire, il doit maintenant scanner votre code."
           }
         }
       }

@@ -1840,7 +1840,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // identity and re-enroll the contact that was just erased.
         verificationCoordinator.cancelAllQRVerifications()
         let qrContactsWipeCompleted = panicPersistentStoreWipes.qrContacts()
-        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1"] {
+        // The welcome and its terms come back after a wipe, like on a new phone.
+        for key in ["wesh.publicDisclosureAccepted.v1", "wesh.publicMuted", "wesh.appearance.v1", WeshWelcome.key] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
