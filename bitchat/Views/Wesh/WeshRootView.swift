@@ -877,6 +877,7 @@ private struct WeshConversation: View {
     @State private var blockName = ""
     @State private var reportTarget: PeerID?
     @State private var reportName = ""
+    @State private var reportMessage: BitchatMessage?
     @State private var reportDone = false
     @State private var showingParticipants = false
     @AppStorage("wesh.publicMuted") private var publicMuted = false
@@ -1108,7 +1109,7 @@ private struct WeshConversation: View {
             }
             .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
-        .modifier(WeshReportAlerts(target: $reportTarget, name: reportName, done: $reportDone) { target, name in
+        .modifier(WeshReportAlerts(target: $reportTarget, name: reportName, message: reportMessage, done: $reportDone) { target, name in
             runtime.chatViewModel.reportWeshPublicAuthor(target, displayName: name)
         })
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
@@ -1195,6 +1196,7 @@ private struct WeshConversation: View {
                 Button("Signaler", role: .destructive) {
                     reportTarget = identity
                     reportName = name
+                    reportMessage = message
                 }
                 .accessibilityLabel("Signaler " + summary)
                 .accessibilityHint("Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone")
@@ -1784,6 +1786,7 @@ private struct WeshContactDetails: View {
     @State private var removing = false
     @State private var blocking = false
     @State private var feedback = ""
+    @State private var reportOffer: PaveReportTarget?
 
     init(runtime: AppRuntime, contact: WeshQRTrust.Contact, inSheet: Bool = false) {
         self.runtime = runtime
@@ -1834,11 +1837,16 @@ private struct WeshContactDetails: View {
             .alert("Bloquer ce contact ?", isPresented: $blocking) {
                 Button("Annuler", role: .cancel) {}
                 Button("Bloquer", role: .destructive) {
-                    runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: contact.nickname)
+                    let reported = PaveReportTarget(rawNickname: contact.nickname, fingerprint: PaveFingerprint.short(contact.peerID.noiseKey), source: .contact)
+                    reportOffer = PaveReportMail.blockThenOffer(reported) {
+                        runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: contact.nickname)
+                        return true
+                    }.offer
                     feedback = "Contact bloqué sur ce téléphone."
                 }
                 .accessibilityLabel("Bloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
             } message: { Text("Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion.") }
+            .paveReportSendFlow($reportOffer)
             .alert("Retirer ce contact ?", isPresented: $removing) {
                 Button("Annuler", role: .cancel) {}
                 Button("Retirer", role: .destructive) {

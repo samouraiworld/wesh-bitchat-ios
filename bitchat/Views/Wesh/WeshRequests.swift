@@ -3,9 +3,11 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Public pages referenced from the app. One place, so a domain change is one line.
+/// Public pages and the report address referenced from the app. One place, so a domain change is one line.
 enum WeshLinks {
     static let terms = URL(string: "https://wesh.samourai.app/conditions")!
+    /// Reports the user chooses to send reach the publisher here, by an e-mail they write and send.
+    static let reportEmail = "support@samourai.coop"
 }
 
 /// Inbound media from BitChat peers is never written to disk in Wesh.
@@ -170,8 +172,9 @@ extension ChatViewModel {
         WeshQRTrust.shared.fingerprints.contains(fingerprint) && peerIdentityStore.isVerified(fingerprint)
     }
 
-    /// Reporting stays on this phone: it blocks the author and removes their
-    /// public messages from this timeline. Nothing is sent anywhere.
+    /// The local part of a report: it blocks the author and removes their public
+    /// messages from this timeline. Sending the report to the Wesh team is a
+    /// separate, optional e-mail the user writes (`PaveReportSendFlow`).
     @MainActor @discardableResult
     func reportWeshPublicAuthor(_ author: PeerID, displayName: String) -> Bool {
         guard let key = author.noiseKey, key.count == 32 else { return false }
@@ -185,14 +188,19 @@ extension ChatViewModel {
     }
 }
 
-/// Confirmation, then outcome, for a local report. Kept out of the
-/// conversation body so its builder stays cheap to type-check.
+/// Confirmation, then outcome, for a report: the local block first, then the
+/// optional e-mail to the Wesh team. Kept out of the conversation body so its
+/// builder stays cheap to type-check.
 struct WeshReportAlerts: ViewModifier {
     @Binding var target: PeerID?
     let name: String
+    /// The reported public message: its sender as received and its text.
+    let message: BitchatMessage?
     @Binding var done: Bool
     let report: (PeerID, String) -> Bool
     @State private var failed = false
+    @State private var offer: PaveReportTarget?
+    @State private var sending: PaveReportTarget?
 
     func body(content: Content) -> some View {
         content
@@ -200,7 +208,11 @@ struct WeshReportAlerts: ViewModifier {
                 Button("Annuler", role: .cancel) { target = nil }
                 Button("Signaler et bloquer", role: .destructive) {
                     if let target {
-                        let reported = report(target, name)
+                        let mailTarget = PaveReportTarget(
+                            rawNickname: message?.sender ?? name, fingerprint: PaveFingerprint.short(target.noiseKey),
+                            source: .publicMessage(WeshIncomingMediaPolicy.displayText(message?.content ?? "")))
+                        let (reported, next) = PaveReportMail.blockThenOffer(mailTarget) { report(target, name) }
+                        offer = next
                         done = reported
                         failed = !reported
                     }
@@ -208,18 +220,21 @@ struct WeshReportAlerts: ViewModifier {
                 }
             } message: {
                 // The nickname is chosen by the sender: it never leads the sentence.
-                Text("Le signalement reste sur ce téléphone : rien n’est envoyé. Cette personne sera bloquée ici et ses messages seront masqués.")
+                Text(PaveReportCopy.localBlock)
             }
             .alert("Signalement enregistré", isPresented: $done) {
-                Button("OK", role: .cancel) {}
+                Button(PaveReportCopy.sendAction) { sending = offer; offer = nil }
+                Button("OK", role: .cancel) { offer = nil }
             } message: {
                 Text("Cette personne est bloquée sur ce téléphone et ses messages sont masqués. Vous pourrez la débloquer dans Réglages → Contacts bloqués.")
             }
             .alert("Signalement impossible", isPresented: $failed) {
-                Button("OK", role: .cancel) {}
+                Button(PaveReportCopy.sendAction) { sending = offer; offer = nil }
+                Button("OK", role: .cancel) { offer = nil }
             } message: {
                 Text("Le blocage n’a pas pu être enregistré sur ce téléphone. Ses messages restent visibles. Réessayez.")
             }
+            .paveReportSendFlow($sending)
     }
 }
 
@@ -262,6 +277,7 @@ private struct WeshRequestDetail: View {
     @State private var scanning = false
     @State private var confirmBlock = false
     @State private var confirmDelete = false
+    @State private var reportOffer: PaveReportTarget?
 
     private var request: WeshInboundRequests.Request? { requests.requests.first { $0.id == requestID } }
 
@@ -305,13 +321,16 @@ private struct WeshRequestDetail: View {
         .alert("Bloquer cette personne ?", isPresented: $confirmBlock) {
             Button("Annuler", role: .cancel) {}
             Button("Bloquer", role: .destructive) {
-                if let request {
+                guard let request else { return dismiss() }
+                // Nickname and fingerprint only: the request's private messages never leave.
+                reportOffer = PaveReportMail.blockThenOffer(.request(request)) {
                     runtime.chatViewModel.blockMeshPeer(peerID: request.peerID, displayName: request.nickname)
                     requests.remove(request.id)
-                }
-                dismiss()
+                    return true
+                }.offer
             }
         } message: { Text("Ses prochains messages seront ignorés sur ce téléphone et cette demande sera supprimée.") }
+        .paveReportSendFlow($reportOffer) { dismiss() }
         .alert("Supprimer cette demande ?", isPresented: $confirmDelete) {
             Button("Annuler", role: .cancel) {}
             Button("Supprimer", role: .destructive) {
