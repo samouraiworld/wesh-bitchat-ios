@@ -19,6 +19,15 @@ enum WeshWelcome {
     }
 }
 
+/// What the root shows: an unfinished erase first, then the first-launch welcome, then the app.
+enum WeshRootScreen: Equatable {
+    case eraseRecovery, welcome, tabs
+
+    init(panicRecoveryBlocked: Bool, welcomed: Bool) {
+        if panicRecoveryBlocked { self = .eraseRecovery } else { self = welcomed ? .tabs : .welcome }
+    }
+}
+
 /// `WeshMode.isActive` for code off the main actor (BLE and Nostr queues).
 enum WeshModeFlag {
     private static let lock = NSLock()
