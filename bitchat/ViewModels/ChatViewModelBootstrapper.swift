@@ -190,7 +190,8 @@ private extension ChatViewModelBootstrapper {
     }
 
     func startRuntimeServices() {
-        viewModel.meshService.startServices()
+        // Checked after any wipe resumed at launch, which brings the welcome back.
+        if WeshWelcome.meshMayStart() { viewModel.meshService.startServices() }
 
         viewModel.publicMessagePipeline.delegate = viewModel.publicConversationCoordinator
 
