@@ -123,14 +123,8 @@ final class BridgeService: ObservableObject {
     /// to the local island), for the people sheet.
     struct BridgedParticipant: Identifiable, Equatable {
         let pubkey: String
-        let nickname: String?
         let lastSeen: Date
         var id: String { pubkey }
-        /// Geohash-chat convention: nickname#last-4-of-pubkey, so two remote
-        /// "anon"s stay distinguishable.
-        var displayName: String {
-            (nickname?.trimmedOrNilIfEmpty ?? "anon") + "#" + String(pubkey.suffix(4))
-        }
     }
 
     static let shared = BridgeService()
@@ -815,7 +809,7 @@ final class BridgeService: ObservableObject {
         let cutoff = now().addingTimeInterval(-Limits.participantFreshnessSeconds)
         let visible = participants
             .filter { $0.value.lastSeen >= cutoff }
-            .map { BridgedParticipant(pubkey: $0.key, nickname: $0.value.nickname, lastSeen: $0.value.lastSeen) }
+            .map { BridgedParticipant(pubkey: $0.key, lastSeen: $0.value.lastSeen) }
             .sorted { $0.lastSeen > $1.lastSeen }
         if visible.count != bridgedPeerCount {
             bridgedPeerCount = visible.count

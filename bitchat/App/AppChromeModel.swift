@@ -34,12 +34,6 @@ final class AppChromeModel: ObservableObject {
     private let chatViewModel: ChatViewModel
     private let onPanicWipe: () -> Void
     private var cancellables = Set<AnyCancellable>()
-    /// The composer owns capture state above ChatViewModel. ContentView
-    /// installs this hook so both panic entry points synchronously stop it.
-    private var prepareForPanic: (@MainActor () -> Void)?
-
-    /// Bulletin-board coordinator, created on first use of the board sheet.
-    private(set) lazy var boardManager = BoardManager(transport: chatViewModel.meshService)
 
     init(
         chatViewModel: ChatViewModel,
@@ -76,10 +70,6 @@ final class AppChromeModel: ObservableObject {
         }
     }
 
-    func openMostRelevantPrivateChat() {
-        chatViewModel.openMostRelevantPrivateChat()
-    }
-
     func showFingerprint(for peerID: PeerID) {
         showingFingerprintFor = peerID
     }
@@ -97,35 +87,8 @@ final class AppChromeModel: ObservableObject {
         isNoticesSheetPresented = true
     }
 
-    /// Builds the mesh topology map model from the transport's gossiped
-    /// graph plus the live nickname table. Unknown nodes (heard about via a
-    /// neighbor claim but never announced to us) fall back to a short ID.
-    func meshTopologyDisplayModel() -> MeshTopologyDisplayModel {
-        let mesh = chatViewModel.meshService
-        guard let diagnostics = mesh as? MeshDiagnosing,
-              let snapshot = diagnostics.currentMeshTopology() else { return .empty }
-        let nicknames = mesh.getPeerNicknames()
-
-        let nodes = snapshot.nodes.map { peerID -> MeshTopologyDisplayModel.Node in
-            let isSelf = peerID == snapshot.localPeerID
-            let label: String
-            if isSelf {
-                label = chatViewModel.nickname
-            } else {
-                label = nicknames[peerID] ?? "\(peerID.id.prefix(8))…"
-            }
-            return MeshTopologyDisplayModel.Node(id: peerID.id, label: label, isSelf: isSelf)
-        }
-        let edges = snapshot.edges.map { ($0.a.id, $0.b.id) }
-        return MeshTopologyDisplayModel(nodes: nodes, edges: edges)
-    }
-
     func triggerScreenshotPrivacyWarning() {
         showScreenshotPrivacyWarning = true
-    }
-
-    func setPanicPreparation(_ preparation: (@MainActor () -> Void)?) {
-        prepareForPanic = preparation
     }
 
     /// Entry point for the header triple-tap: confirm before destroying.
@@ -148,7 +111,6 @@ final class AppChromeModel: ObservableObject {
         isNoticesSheetPresented = false
         showingFingerprintFor = nil
 
-        prepareForPanic?()
         onPanicWipe()
         // Wesh: Bluetooth stays off until the welcome and its terms are accepted again, so the new
         // identity announces nothing before (`AppRuntime.welcomeFinished`).

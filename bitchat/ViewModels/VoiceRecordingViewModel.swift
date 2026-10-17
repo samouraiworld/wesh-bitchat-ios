@@ -18,40 +18,6 @@ final class VoiceRecordingViewModel: ObservableObject {
         case preparing
         case recording(startDate: Date)
         case error(message: String)
-
-        var isActive: Bool {
-            switch self {
-            case .preparing, .recording: true
-            case .idle, .requestingPermission, .permissionDenied, .error: false
-            }
-        }
-
-        var alertMessage: String {
-            switch self {
-            case .error(let message): message
-            case .permissionDenied: String(localized: "voice.error.mic_permission", defaultValue: "microphone access is required to record voice notes.", comment: "Alert message when the microphone permission is denied")
-            case .idle, .requestingPermission, .preparing, .recording: ""
-            }
-        }
-
-        fileprivate func duration(for date: Date) -> TimeInterval {
-            switch self {
-            case .idle, .requestingPermission, .preparing, .permissionDenied, .error: 0
-            case .recording(let startDate): date.timeIntervalSince(startDate)
-            }
-        }
-    }
-
-    var showAlert: Bool {
-        get {
-            switch state {
-            case .permissionDenied, .error:   true
-            case .idle, .requestingPermission, .preparing, .recording: false
-            }
-        }
-        set {
-            if !newValue { state = .idle }
-        }
     }
 
     @Published private(set) var state = State.idle
@@ -67,15 +33,6 @@ final class VoiceRecordingViewModel: ObservableObject {
     /// older hold may still deliver its file, but it must never mutate the UI
     /// state of a newer hold.
     private var holdGeneration: UInt64 = 0
-
-    func formattedDuration(for date: Date) -> String {
-        let clamped = max(0, state.duration(for: date))
-        let totalMilliseconds = Int(clamped * 1000)
-        let minutes = totalMilliseconds / 60_000
-        let seconds = (totalMilliseconds % 60_000) / 1_000
-        let centiseconds = (totalMilliseconds % 1_000) / 10
-        return String(format: "%02d:%02d.%02d", minutes, seconds, centiseconds)
-    }
 
     func start(shouldShow: Bool) {
         guard shouldShow, state == .idle else { return }
@@ -217,10 +174,6 @@ final class VoiceRecordingViewModel: ObservableObject {
                 )
             }
         }
-    }
-
-    func cancel() {
-        finish(completion: nil)
     }
 
     /// Invalidates in-flight permission/start/finalize callbacks and tears

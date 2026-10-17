@@ -41,9 +41,3 @@ enum ChannelShare {
         )
     }
 }
-
-/// Identifiable wrapper so `.sheet(item:)` can present the system share UI.
-struct ChannelSharePayload: Identifiable {
-    let id = UUID()
-    let text: String
-}

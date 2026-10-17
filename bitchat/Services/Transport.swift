@@ -40,31 +40,6 @@ struct MeshPingResult: Equatable {
     let hops: Int?
 }
 
-/// Undirected mesh link between two peers, normalized so `(a, b)` and
-/// `(b, a)` collapse to one edge.
-struct MeshTopologyEdge: Hashable {
-    let a: PeerID
-    let b: PeerID
-
-    init(_ first: PeerID, _ second: PeerID) {
-        if first < second {
-            a = first
-            b = second
-        } else {
-            a = second
-            b = first
-        }
-    }
-}
-
-/// Point-in-time view of the mesh graph learned from gossiped announces
-/// (each announce carries up to 10 `directNeighbors`).
-struct MeshTopologySnapshot: Equatable {
-    let localPeerID: PeerID
-    let nodes: [PeerID]
-    let edges: [MeshTopologyEdge]
-}
-
 enum TransportEvent: @unchecked Sendable {
     case messageReceived(BitchatMessage)
     case publicMessageReceived(peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?)
@@ -309,10 +284,8 @@ extension BitchatDelegate {
 
 extension BLEService: Transport {}
 extension BLEService: MeshFileTransferring {}
-extension BLEService: MeshVoiceStreaming {}
 extension BLEService: MeshCourierTransporting {}
 extension BLEService: MeshGroupMessaging {}
-extension BLEService: MeshBoardBroadcasting {}
 extension BLEService: MeshDiagnosing {}
 extension BLEService: MeshVerifying {}
 extension BLEService: MeshPublicArchiving {}

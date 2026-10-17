@@ -100,22 +100,10 @@ enum PrivateConversationAvailability: Equatable {
 }
 
 struct PrivateConversationHeaderState: Equatable {
-    let conversationPeerID: PeerID
     let headerPeerID: PeerID
     let displayName: String
     let availability: PrivateConversationAvailability
-    let isFavorite: Bool
     let encryptionStatus: EncryptionStatus?
-
-    var supportsFavoriteToggle: Bool {
-        !conversationPeerID.isGeoDM && !conversationPeerID.isGroup
-    }
-
-    /// Group chats have no single peer identity behind the header: no
-    /// fingerprint screen, no per-peer encryption badge.
-    var isGroupConversation: Bool {
-        conversationPeerID.isGroup
-    }
 }
 
 @MainActor
@@ -153,34 +141,9 @@ final class PrivateConversationModel: ObservableObject {
         refreshSelectedConversation()
     }
 
-    func openConversation(for peerID: PeerID) {
-        if peerID.isGeoChat {
-            guard let full = chatViewModel.fullNostrHex(forSenderPeerID: peerID) else { return }
-            chatViewModel.startGeohashDM(withPubkeyHex: full)
-        } else {
-            chatViewModel.startPrivateChat(with: peerID)
-        }
-
-        refreshSelectedConversation()
-    }
-
     func endConversation() {
         chatViewModel.endPrivateChat()
         refreshSelectedConversation()
-    }
-
-    func toggleFavorite(peerID: PeerID) {
-        chatViewModel.toggleFavorite(peerID: peerID)
-        refreshSelectedConversation()
-    }
-
-    func toggleFavoriteForSelectedConversation() {
-        guard let headerPeerID = selectedHeaderState?.headerPeerID else { return }
-        toggleFavorite(peerID: headerPeerID)
-    }
-
-    func markMessagesAsRead(from peerID: PeerID) {
-        chatViewModel.markPrivateMessagesAsRead(from: peerID)
     }
 
     private func bind() {
@@ -253,11 +216,9 @@ final class PrivateConversationModel: ObservableObject {
                 displayName = String(localized: "common.unknown", comment: "Fallback label for unknown peer")
             }
             return PrivateConversationHeaderState(
-                conversationPeerID: conversationPeerID,
                 headerPeerID: conversationPeerID,
                 displayName: displayName,
                 availability: .meshReachable,
-                isFavorite: false,
                 encryptionStatus: nil
             )
         }
@@ -277,11 +238,9 @@ final class PrivateConversationModel: ObservableObject {
             : chatViewModel.getEncryptionStatus(for: headerPeerID)
 
         return PrivateConversationHeaderState(
-            conversationPeerID: conversationPeerID,
             headerPeerID: headerPeerID,
             displayName: displayName,
             availability: availability,
-            isFavorite: chatViewModel.isFavorite(peerID: headerPeerID),
             encryptionStatus: encryptionStatus
         )
     }

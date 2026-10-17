@@ -140,8 +140,6 @@ protocol SecureIdentityStateManagerProtocol {
     // MARK: Vouching (transitive verification)
     @discardableResult
     func recordVouch(voucheeFingerprint: String, voucherFingerprint: String, timestamp: Date) -> Bool
-    func validVouchers(for fingerprint: String) -> [VouchRecord]
-    func isVouched(fingerprint: String) -> Bool
     func lastVouchBatchSent(to fingerprint: String) -> Date?
     func markVouchBatchSent(to fingerprint: String, at date: Date)
     func signingPublicKey(forFingerprint fingerprint: String) -> Data?

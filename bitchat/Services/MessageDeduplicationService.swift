@@ -324,7 +324,7 @@ final class MessageDeduplicationService {
     /// Clears only the in-memory Nostr caches (events and ACKs). Runs on
     /// every geohash channel switch, so the disk record deliberately
     /// survives — wiping it here would forfeit cross-launch private-envelope dedup
-    /// each time the user changes channels (flagged by Codex on #1398).
+    /// each time the user changes channels (upstream review on #1398).
     func clearNostrCaches() {
         nostrEventCache.clear()
         nostrAckCache.clear()

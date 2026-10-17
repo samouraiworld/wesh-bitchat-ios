@@ -16,8 +16,7 @@ import BitFoundation
 /// Records all method calls and allows test code to verify interactions.
 final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeletionPersisting,
     MeshFileTransferring, MeshVerifying, MeshCourierTransporting,
-    MeshDiagnosing, MeshPublicArchiving, MeshVoiceStreaming,
-    MeshGroupMessaging, MeshBoardBroadcasting {
+    MeshDiagnosing, MeshPublicArchiving, MeshGroupMessaging {
 
     // MARK: - Protocol Properties
 
@@ -329,7 +328,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
     private(set) var sentMeshPings: [PeerID] = []
     var meshPingResult: MeshPingResult?
     var meshPaths: [PeerID: [PeerID]] = [:]
-    var meshTopologySnapshot: MeshTopologySnapshot?
 
     func sendMeshPing(to peerID: PeerID, completion: @escaping @MainActor (MeshPingResult?) -> Void) {
         sentMeshPings.append(peerID)
@@ -339,10 +337,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
 
     func computeMeshPath(to peerID: PeerID) -> [PeerID]? {
         meshPaths[peerID]
-    }
-
-    func currentMeshTopology() -> MeshTopologySnapshot? {
-        meshTopologySnapshot
     }
 
     // MARK: - Remaining mesh capabilities (recording stubs)
@@ -362,15 +356,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
         purgedAllArchived = true
     }
 
-    private(set) var sentVoiceFrames: [(Data, PeerID)] = []
-    private(set) var sentVoiceBroadcasts: [Data] = []
-    func sendVoiceFrame(_ burstContent: Data, to peerID: PeerID) {
-        sentVoiceFrames.append((burstContent, peerID))
-    }
-    func sendVoiceFrameBroadcast(_ burstContent: Data) {
-        sentVoiceBroadcasts.append(burstContent)
-    }
-
     private(set) var sentGroupInvites: [(Data, PeerID)] = []
     private(set) var sentGroupKeyUpdates: [(Data, PeerID)] = []
     private(set) var broadcastGroupMessages: [Data] = []
@@ -382,11 +367,6 @@ final class MockTransport: Transport, MeshIdentityRecovering, PrivateMediaDeleti
     }
     func broadcastGroupMessage(_ envelope: Data) {
         broadcastGroupMessages.append(envelope)
-    }
-
-    private(set) var sentBoardPayloads: [Data] = []
-    func sendBoardPayload(_ payload: Data) {
-        sentBoardPayloads.append(payload)
     }
 
     // MARK: - Test Helpers

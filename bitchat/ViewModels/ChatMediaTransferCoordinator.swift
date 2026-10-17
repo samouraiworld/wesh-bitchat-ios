@@ -2,14 +2,9 @@ import BitFoundation
 import BitLogger
 import Foundation
 
-#if os(iOS)
-import UIKit
-#endif
-
 struct LegacyPrivateMediaConsentRequest: Identifiable, Equatable {
     let id: UUID
     let peerID: PeerID
-    let peerName: String
     let transferId: String
     let messageID: String
 }
@@ -625,70 +620,6 @@ final class ChatMediaTransferCoordinator {
             }
         }
     }
-
-    #if os(iOS)
-    func processThenSendImage(_ image: UIImage?) {
-        guard let image else { return }
-        let generation = imagePreparationBarrier.currentGeneration
-        let barrier = imagePreparationBarrier
-        Task.detached(priority: .userInitiated) { [weak self, barrier] in
-            do {
-                let processedURL = try await runBlockingMediaPreparation {
-                    try barrier.performIfCurrent(
-                        generation: generation,
-                        operation: {
-                            try ImageUtils.processImage(image)
-                        }
-                    )
-                }
-                guard let processedURL else {
-                    return
-                }
-                await MainActor.run { [weak self, barrier] in
-                    guard let self,
-                          barrier.isCurrent(generation) else {
-                        try? FileManager.default.removeItem(at: processedURL)
-                        return
-                    }
-                    self.sendImage(from: processedURL)
-                }
-            } catch {
-                SecureLogger.error("Image processing failed: \(error)", category: .session)
-            }
-        }
-    }
-    #elseif os(macOS)
-    func processThenSendImage(from url: URL?) {
-        guard let url else { return }
-        let generation = imagePreparationBarrier.currentGeneration
-        let barrier = imagePreparationBarrier
-        Task.detached(priority: .userInitiated) { [weak self, barrier] in
-            do {
-                let processedURL = try await runBlockingMediaPreparation {
-                    try barrier.performIfCurrent(
-                        generation: generation,
-                        operation: {
-                            try ImageUtils.processImage(at: url)
-                        }
-                    )
-                }
-                guard let processedURL else {
-                    return
-                }
-                await MainActor.run { [weak self, barrier] in
-                    guard let self,
-                          barrier.isCurrent(generation) else {
-                        try? FileManager.default.removeItem(at: processedURL)
-                        return
-                    }
-                    self.sendImage(from: processedURL)
-                }
-            } catch {
-                SecureLogger.error("Image processing failed: \(error)", category: .session)
-            }
-        }
-    }
-    #endif
 
     func sendImage(from sourceURL: URL, cleanup: (() -> Void)? = nil) {
         guard context.canSendMediaInCurrentContext else {

@@ -136,7 +136,7 @@ struct PeerIDRotationTests {
         #expect(emitted.count == PeerIDRotation.idLength)
     }
 
-    /// Regression, Codex #1487 P1: a symmetric tag means A and B broadcast the
+    /// Regression, upstream #1487 P1: a symmetric tag means A and B broadcast the
     /// identical 8 bytes, so an observer who sees one value in two announces
     /// learns those two are mutual favourites and can link their rotating IDs.
     /// Tags must therefore differ by direction.
@@ -153,7 +153,7 @@ struct PeerIDRotationTests {
         #expect(aToB != bToA)
     }
 
-    /// Regression, Codex #1487 P1: without the peer ID in the MAC, a tag lifted
+    /// Regression, upstream #1487 P1: without the peer ID in the MAC, a tag lifted
     /// from someone's announce could be replayed under an attacker-chosen ID and
     /// the recipient would accept that ID as the favourite.
     @Test func recognitionTagIsBoundToTheAnnouncedPeerID() {

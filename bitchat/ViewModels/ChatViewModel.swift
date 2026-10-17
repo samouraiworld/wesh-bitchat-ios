@@ -1393,11 +1393,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         peerIdentityCoordinator.toggleFavorite(peerID: peerID)
     }
 
-    @MainActor
-    func isFavorite(peerID: PeerID) -> Bool {
-        peerIdentityCoordinator.isFavorite(peerID: peerID)
-    }
-
     // MARK: - Public Key and Identity Management
 
     @MainActor
@@ -1597,13 +1592,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             displayName: displayName
         )
     }
-    @MainActor
-    func unblockGeohashUser(pubkeyHexLowercased: String, displayName: String) {
-        publicConversationCoordinator.unblockGeohashUser(
-            pubkeyHexLowercased: pubkeyHexLowercased,
-            displayName: displayName
-        )
-    }
 
     // Mesh (Noise identity) block helpers. Unlike the `/block <nickname>`
     // command, these resolve and persist the block by the peer's stable
@@ -1613,11 +1601,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     func blockMeshPeer(peerID: PeerID, displayName: String) {
         setMeshPeerBlocked(peerID, blocked: true, displayName: displayName)
-    }
-
-    @MainActor
-    func unblockMeshPeer(peerID: PeerID, displayName: String) {
-        setMeshPeerBlocked(peerID, blocked: false, displayName: displayName)
     }
 
     @MainActor
@@ -2144,17 +2127,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         messageFormatter.peerURL(for: peerID)
     }
 
-    // Public helpers for views to color peers consistently in lists
-    @MainActor
-    func colorForNostrPubkey(_ pubkeyHexLowercased: String, isDark: Bool) -> Color {
-        messageFormatter.colorForNostrPubkey(pubkeyHexLowercased, isDark: isDark)
-    }
-
-    @MainActor
-    func colorForMeshPeer(id peerID: PeerID, isDark: Bool) -> Color {
-        messageFormatter.colorForMeshPeer(id: peerID, isDark: isDark)
-    }
-
     // Clear the current public channel's timeline (visible + persistent buffer)
     @MainActor
     func clearCurrentPublicTimeline() {
@@ -2201,13 +2173,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func setupNoiseCallbacks() {
         verificationCoordinator.setupNoiseCallbacks()
         vouchCoordinator.setupNoiseCallbacks()
-    }
-
-    /// Whether the fingerprint currently counts as vouched (≥1 valid vouch
-    /// from a voucher I verified, and no explicit verification of mine).
-    @MainActor
-    func isVouchedFingerprint(_ fingerprint: String) -> Bool {
-        identityManager.isVouched(fingerprint: fingerprint)
     }
 
     // MARK: - BitchatDelegate Methods
@@ -2602,7 +2567,6 @@ extension ChatViewModel {
         let request = LegacyPrivateMediaConsentRequest(
             id: UUID(),
             peerID: peerID,
-            peerName: nicknameForPeer(peerID),
             transferId: transferId,
             messageID: messageID
         )

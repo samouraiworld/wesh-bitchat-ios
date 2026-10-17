@@ -478,14 +478,6 @@ private final class TestIdentityManager: SecureIdentityStateManagerProtocol {
         false
     }
 
-    func validVouchers(for fingerprint: String) -> [VouchRecord] {
-        []
-    }
-
-    func isVouched(fingerprint: String) -> Bool {
-        false
-    }
-
     func lastVouchBatchSent(to fingerprint: String) -> Date? {
         nil
     }

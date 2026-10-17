@@ -120,8 +120,6 @@ final class LocationNotesManager: ObservableObject {
     @Published private(set) var initialLoadComplete: Bool = false
     @Published private(set) var state: State = .loading
     @Published private(set) var errorMessage: String?
-    /// Public key of our per-geohash Nostr identity; identifies our own notes.
-    private var ownPubkey: String?
     private var subscriptionID: String?
     private var noteIDs = Set<String>() // O(1) duplicate detection
     private var directoryUpdateCancellable: AnyCancellable?
@@ -149,7 +147,6 @@ final class LocationNotesManager: ObservableObject {
         if !Geohash.isValidGeohash(norm) {
             SecureLogger.warning("LocationNotesManager: invalid geohash '\(norm)' (expected 1-12 valid base32 chars)", category: .session)
         }
-        ownPubkey = (try? dependencies.deriveIdentity(norm))?.publicKeyHex
         subscribe()
         // The relay directory may load after init (remote fetch over Tor);
         // retry automatically instead of staying stuck on "no relays".
@@ -367,36 +364,6 @@ final class LocationNotesManager: ObservableObject {
         } catch {
             SecureLogger.error("LocationNotesManager: failed to send note: \(error)", category: .session)
             errorMessage = Strings.failedToSend(error.localizedDescription)
-        }
-    }
-
-    /// Whether the note was published by this device's identity for the
-    /// current geohash (and can therefore be deleted with NIP-09).
-    func isOwnNote(_ note: Note) -> Bool {
-        guard let ownPubkey else { return false }
-        return note.pubkey == ownPubkey
-    }
-
-    /// Requests NIP-09 deletion of one of our own notes and removes it locally.
-    @discardableResult
-    func delete(note: Note) -> Bool {
-        guard isOwnNote(note) else { return false }
-        let relays = dependencies.relayLookup(geohash, TransportConfig.nostrGeoRelayCount)
-        guard !relays.isEmpty else {
-            state = .noRelays
-            errorMessage = Strings.noRelays
-            return false
-        }
-        do {
-            let identity = try dependencies.deriveIdentity(geohash)
-            let deletion = try NostrProtocol.createDeleteEvent(ofEventID: note.id, senderIdentity: identity)
-            dependencies.sendEvent(deletion, relays)
-            // Keep the id in noteIDs so a relay replay can't resurrect it.
-            notes.removeAll { $0.id == note.id }
-            return true
-        } catch {
-            SecureLogger.error("LocationNotesManager: failed to delete note: \(error)", category: .session)
-            return false
         }
     }
 

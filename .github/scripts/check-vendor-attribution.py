@@ -92,6 +92,10 @@ VENDOR = tuple(
     for h in (
         "616e7468726f706963",  # the company
         "636c61756465",  # the assistant
+        "636f646578",  # another coding assistant
+        "6f70656e6169",  # its company
+        "63686174677074",  # its chat product
+        "636f70696c6f74",  # a third coding assistant
     )
 )
 

@@ -27,17 +27,6 @@ enum SharedContentDestination: Sendable, Equatable {
             return .geohash(channel.geohash.lowercased())
         }
     }
-
-    var displayName: String {
-        switch self {
-        case .mesh:
-            return "#mesh"
-        case .geohash(let geohash):
-            return "#\(geohash)"
-        case .privateConversation(_, let displayName):
-            return displayName
-        }
-    }
 }
 
 struct SharedContentOffer: Identifiable, Sendable, Equatable {

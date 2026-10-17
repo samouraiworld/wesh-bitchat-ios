@@ -300,7 +300,7 @@ struct GroupProtocolTests {
         #expect(GroupStatePayload.decode(Data([0xFF, 0x00, 0x01])) == nil)
     }
 
-    // MARK: - Oversize / UTF-8 safety (Codex findings)
+    // MARK: - Oversize / UTF-8 safety (review findings)
 
     @Test func oversizeMessageContentFailsToSealInsteadOfTruncating() {
         // A content whose UTF-8 exceeds the 16-bit TLV length must fail to

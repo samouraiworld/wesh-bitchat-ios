@@ -338,7 +338,6 @@ final class ChatLiveVoiceCoordinator {
         }
 
         // The complete .m4a replaces the partial live capture.
-        WaveformCache.shared.purge(url: finished.fileURL)
         try? fileManager.removeItem(at: finished.fileURL)
         finishedBursts.removeValue(forKey: entry.key)
 
@@ -547,8 +546,6 @@ final class ChatLiveVoiceCoordinator {
             }
             player.finishAfterDrain()
         }
-        // The bubble's waveform may have been computed from a partial file.
-        WaveformCache.shared.purge(url: assembly.fileURL)
         // The capture is the bubble's replayable audio from here on (unless a
         // finalized note arrives to swap in): move it off its voice_live_
         // name so only genuinely in-flight files match the startup sweep and
@@ -635,7 +632,6 @@ final class ChatLiveVoiceCoordinator {
         assemblies.removeValue(forKey: assembly.key)
         updatePublicTalkerIndicator()
         removeBubble(of: assembly)
-        WaveformCache.shared.purge(url: assembly.fileURL)
         try? fileManager.removeItem(at: assembly.fileURL)
         context.notifyUIChanged()
     }
