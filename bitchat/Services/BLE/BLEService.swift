@@ -5383,8 +5383,9 @@ extension BLEService {
                 )
             },
             deliverNoisePayload: { [weak self] peerID, type, payload, timestamp in
-                // Single main-actor hop. A private file is not stored here:
-                // the app turns an admitted one into a placeholder line. delivering `.noisePayloadReceived`.
+                // Single main-actor hop delivering `.noisePayloadReceived`.
+                // A private file is not stored here: the app turns an
+                // admitted one into a placeholder line.
                 self?.notifyUI { [weak self] in
                     self?.deliverTransportEvent(.noisePayloadReceived(
                         peerID: peerID,
