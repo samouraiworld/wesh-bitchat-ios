@@ -330,11 +330,7 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
                 for dir in outgoingDirs {
                     if FileManager.default.fileExists(atPath: dir.path) {
                         try? FileManager.default.removeItem(at: dir)
-                        try? FileManager.default.createDirectory(
-                            at: dir,
-                            withIntermediateDirectories: true,
-                            attributes: nil
-                        )
+                        try? LocalFileProtection.createDirectory(dir)
                     }
                 }
             } catch {

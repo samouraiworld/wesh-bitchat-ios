@@ -867,6 +867,8 @@ final class NostrRelayManager: ObservableObject {
         var result: [String] = []
         for rawURL in urls {
             guard let url = NostrRelayURL.normalized(rawURL) else { continue }
+            // Through Tor, a relay is only ever named: never an IP literal.
+            if shouldUseTor && !NostrRelayURL.hasDomainNameHost(url) { continue }
             if !allowDefaultRelays && defaultRelaySet.contains(url) { continue }
             if dependencies.weshPinnedRelays != nil && !defaultRelaySet.contains(url) { continue }
             if seen.insert(url).inserted {
@@ -1155,6 +1157,10 @@ final class NostrRelayManager: ObservableObject {
         guard let url = URL(string: urlString) else { 
             SecureLogger.warning("Invalid relay URL: \(urlString)", category: .session)
             return 
+        }
+        if shouldUseTor && !NostrRelayURL.hasDomainNameHost(urlString) {
+            SecureLogger.warning("Refusing relay addressed by IP through Tor: \(urlString)", category: .session)
+            return
         }
 
         // Avoid initiating connections while app is backgrounded; we'll reconnect on foreground

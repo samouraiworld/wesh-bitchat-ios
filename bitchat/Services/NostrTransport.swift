@@ -21,6 +21,14 @@ final class NostrTransport: Transport, @unchecked Sendable {
         /// Paces outbound acks. Defaults to an isolated pacer so tests don't
         /// serialize behind each other; `live` passes the process-wide one.
         let ackPacer: AckPacer
+        /// Wesh: npub per QR contact (full Noise-key peer ID), from the signed
+        /// QR only. When set, favorites are never read. Nil outside Wesh.
+        let weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)?
+        /// Wesh: Internet mode is On (Tor ready, a pinned relay connected).
+        /// Anything else fails closed: the router keeps the message queued.
+        let weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)?
+        /// Wesh: a blocked contact's Noise key is never sent anything, whatever the map says.
+        let weshIsBlocked: (@MainActor (Data) -> Bool)?
 
         init(
             notificationCenter: NotificationCenter,
@@ -32,7 +40,10 @@ final class NostrTransport: Transport, @unchecked Sendable {
             sendEvent: @escaping @MainActor (NostrEvent) -> Void,
             scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void,
             relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never>,
-            ackPacer: AckPacer? = nil
+            ackPacer: AckPacer? = nil,
+            weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
+            weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
+            weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
         ) {
             self.notificationCenter = notificationCenter
             self.loadFavorites = loadFavorites
@@ -46,11 +57,28 @@ final class NostrTransport: Transport, @unchecked Sendable {
             // scheduler, so tests that step scheduleAfter manually keep
             // control of the ack cadence.
             self.ackPacer = ackPacer ?? AckPacer(scheduleAfter: scheduleAfter)
+            self.weshRecipients = weshRecipients
+            self.weshOnline = weshOnline
+            self.weshIsBlocked = weshIsBlocked
         }
 
         @MainActor
-        static func live(idBridge: NostrIdentityBridge) -> Dependencies {
-            Dependencies(
+        static func live(idBridge: NostrIdentityBridge,
+                         isBlocked: (@MainActor (Data) -> Bool)? = nil) -> Dependencies {
+            var weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)?
+            var weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)?
+            var weshIsBlocked: (@MainActor (Data) -> Bool)?
+            if WeshMode.isActive {
+                weshRecipients = {
+                    WeshQRTrust.shared.$contacts
+                        .map { WeshInternetRoute.recipients(contacts: $0, blockedFingerprints: []) }
+                        .eraseToAnyPublisher()
+                }
+                weshOnline = { WeshInternetMode.shared.$state.map { $0 == .on }.eraseToAnyPublisher() }
+                // Fail closed: without a block check, nothing is resolved in Wesh.
+                weshIsBlocked = isBlocked ?? { _ in true }
+            }
+            return Dependencies(
                 notificationCenter: .default,
                 loadFavorites: { FavoritesPersistenceService.shared.favorites },
                 favoriteStatusForNoiseKey: { FavoritesPersistenceService.shared.getFavoriteStatus(for: $0) },
@@ -62,7 +90,10 @@ final class NostrTransport: Transport, @unchecked Sendable {
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
                 },
                 relayConnectivity: { NostrRelayManager.shared.$isDMRelayConnected.eraseToAnyPublisher() },
-                ackPacer: NostrTransport.sharedAckPacer
+                ackPacer: NostrTransport.sharedAckPacer,
+                weshRecipients: weshRecipients,
+                weshOnline: weshOnline,
+                weshIsBlocked: weshIsBlocked
             )
         }
     }
@@ -85,7 +116,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
     /// Ack pacing shared across transport instances. Geohash acks are sent
     /// through short-lived transports created per ack
     /// (`makeGeohashNostrTransport()`), so a per-instance queue would only
-    /// ever hold one item and never pace a burst (flagged by Codex on
+    /// ever hold one item and never pace a burst (flagged in upstream review on
     /// #1398). Production wires `sharedAckPacer` via `Dependencies.live`;
     /// tests get an isolated instance per `Dependencies` by default.
     /// @unchecked Sendable: all mutable state (`pending`, `isSending`) is
@@ -138,6 +169,10 @@ final class NostrTransport: Transport, @unchecked Sendable {
     // canDeliverPromptly is called synchronously off the main actor.
     private var relaysConnected = false
     private var relayConnectivityCancellable: AnyCancellable?
+    /// Wesh: nil outside Wesh. Guarded by `queue`.
+    private var weshNpubs: [PeerID: String]?
+    private var weshIsOnline = false
+    private var weshCancellables: Set<AnyCancellable> = []
     private let queue = DispatchQueue(label: "nostr.transport.state", attributes: .concurrent)
 
     @MainActor
@@ -147,7 +182,30 @@ final class NostrTransport: Transport, @unchecked Sendable {
         dependencies: Dependencies? = nil
     ) {
         self.dependencies = dependencies ?? .live(idBridge: idBridge)
-        
+
+        if let weshRecipients = self.dependencies.weshRecipients {
+            // Wesh: QR contacts only; favorites are never consulted.
+            queue.sync(flags: .barrier) { self.weshNpubs = [:] }
+            weshRecipients()
+                .sink { [weak self] recipients in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.weshNpubs = recipients }
+                }
+                .store(in: &weshCancellables)
+            self.dependencies.weshOnline?()
+                .sink { [weak self] online in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.weshIsOnline = online }
+                }
+                .store(in: &weshCancellables)
+            relayConnectivityCancellable = self.dependencies.relayConnectivity()
+                .sink { [weak self] connected in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                }
+            return
+        }
+
         setupObservers()
         
         // Synchronously warm the cache to avoid startup race
@@ -219,6 +277,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
         // 64-hex noise key (offline favorites), so compare in short form.
         let short = peerID.toShort()
         return queue.sync {
+            if let weshNpubs {
+                return weshIsOnline && Self.weshNpub(for: peerID, short: short, in: weshNpubs) != nil
+            }
             if reachablePeers.contains(peerID) { return true }
             return reachablePeers.contains(where: { $0.toShort() == short })
         }
@@ -278,6 +339,8 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
+        // Wesh sends `[FAVORITED]:npub` only over a Noise session, never over a relay.
+        if queue.sync(execute: { weshNpubs != nil }) { return }
         Task { @MainActor in
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
@@ -394,8 +457,26 @@ extension NostrTransport {
         }
     }
 
+    /// Wesh lookup by full Noise-key peer ID, or by its short form.
+    private static func weshNpub(for peerID: PeerID, short: PeerID, in npubs: [PeerID: String]) -> String? {
+        weshEntry(for: peerID, short: short, in: npubs)?.npub
+    }
+
+    private static func weshEntry(for peerID: PeerID, short: PeerID, in npubs: [PeerID: String]) -> (peer: PeerID, npub: String)? {
+        if let npub = npubs[peerID] { return (peerID, npub) }
+        return npubs.first(where: { $0.key.toShort() == short }).map { ($0.key, $0.value) }
+    }
+
     @MainActor
     private func resolveRecipientNpub(for peerID: PeerID) -> String? {
+        if let weshNpubs = queue.sync(execute: { weshNpubs }) {
+            // Fail closed: nothing leaves while Internet mode is not On.
+            guard queue.sync(execute: { weshIsOnline }),
+                  let entry = Self.weshEntry(for: peerID, short: peerID.toShort(), in: weshNpubs),
+                  let key = entry.peer.noiseKey,
+                  dependencies.weshIsBlocked?(key) == false else { return nil }
+            return entry.npub
+        }
         if let noiseKey = Data(hexString: peerID.id),
            let fav = dependencies.favoriteStatusForNoiseKey(noiseKey),
            let npub = fav.peerNostrPublicKey {

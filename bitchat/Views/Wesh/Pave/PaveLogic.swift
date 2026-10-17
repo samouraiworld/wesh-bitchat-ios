@@ -13,10 +13,32 @@ enum PaveCopy {
     }
 
     static func text(_ key: String, _ arguments: CVarArg...) -> String {
-        let format = bundle.localizedString(forKey: key, value: nil, table: "Pave")
+        var format = bundle.localizedString(forKey: key, value: nil, table: "Pave")
+        #if SWIFT_PACKAGE
+        // A SwiftPM build copies Pave.xcstrings uncompiled: read the source language from it.
+        if format == key, let value = uncompiledSource[key] { format = value }
+        #endif
         guard !arguments.isEmpty else { return format }
         return String(format: format, locale: .current, arguments: arguments)
     }
+
+    #if SWIFT_PACKAGE
+    private static let uncompiledSource: [String: String] = {
+        guard let url = bundle.url(forResource: "Pave", withExtension: "xcstrings"),
+              let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = root["strings"] as? [String: [String: Any]] else { return [:] }
+        let language = root["sourceLanguage"] as? String ?? "en"
+        var values: [String: String] = [:]
+        for (key, entry) in entries {
+            let localizations = entry["localizations"] as? [String: [String: Any]]
+            if let value = (localizations?[language]?["stringUnit"] as? [String: Any])?["value"] as? String {
+                values[key] = value
+            }
+        }
+        return values
+    }()
+    #endif
 }
 
 /// The four delivery states shown under a bubble. Read receipts are never shown.

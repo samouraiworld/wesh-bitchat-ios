@@ -220,6 +220,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         sweepsOnInit: !TestEnvironment.isRunningTests
     )
     let weshPrivatePolicyEnabled: Bool
+    /// Wesh Internet mode is On (Tor ready, a pinned relay connected). Injectable for tests.
+    var weshInternetIsOn: @MainActor () -> Bool = { WeshInternetMode.shared.state == .on }
+    /// Noise key hex + npub pairs already sent `[FAVORITED]:npub` in this process.
+    var weshAnnouncedInternetKeys: Set<String> = []
     lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
     lazy var groupCoordinator = ChatGroupCoordinator(context: self)
     lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
@@ -341,7 +345,13 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private var isPanicResetting = false
     /// Private group membership: keys in the keychain, metadata on disk.
     let groupStore: GroupStore
-    private let nicknameKey = "bitchat.nickname"
+    private var nicknameStore: LocalNicknameStore {
+        LocalNicknameStore(keychain: keychain, defaults: userDefaults)
+    }
+    private var provisionalNickname: String?
+    #if os(iOS)
+    private var nicknameProtectedDataObserver: AnyCancellable?
+    #endif
     // Location channel state (macOS supports manual geohash selection)
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
@@ -1256,10 +1266,16 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 // only as the authenticated session key it resolves to now.
                 let target = recipient.noiseKey != nil ? recipient
                     : self.noiseSessionPublicKeyData(for: recipient).map { PeerID(hexData: $0) } ?? recipient
-                guard self.canSendWeshPrivate(to: target),
-                      let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)),
-                      pinnedKey == nil || pinnedKey == actualKey else { return nil }
-                return actualKey
+                if self.canSendWeshPrivate(to: target),
+                   let actualKey = self.noiseSessionPublicKeyData(for: self.getShortIDForNoiseKey(target)) {
+                    return pinnedKey == nil || pinnedKey == actualKey ? actualKey : nil
+                }
+                // Internet route: no session to read the key from, so the enrolled key itself.
+                if let enrolledKey = target.noiseKey, self.canSendWeshInternet(to: target),
+                   pinnedKey == nil || pinnedKey == enrolledKey {
+                    return enrolledKey
+                }
+                return nil
             }
         }
 
@@ -1299,17 +1315,60 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     // MARK: - Nickname Management
 
     func loadNickname() {
-        if let savedNickname = userDefaults.string(forKey: nicknameKey) {
+        provisionalNickname = nil
+        switch nicknameStore.load() {
+        case .stored(let savedNickname):
             nickname = savedNickname.trimmed
-        } else {
+        case .absent:
             nickname = "anon\(Int.random(in: 1000...9999))"
             saveNickname()
+        case .unavailable:
+            // Keychain locked (background launch before first unlock): use a
+            // stand-in that is never saved, and read again after unlock.
+            nickname = "anon\(Int.random(in: 1000...9999))"
+            provisionalNickname = nickname
+            observeProtectedDataForNickname()
         }
     }
 
+    /// True while the name is the stand-in chosen with a locked Keychain and
+    /// the user has not typed another one.
+    var isNicknameProvisional: Bool {
+        provisionalNickname != nil && provisionalNickname == nickname
+    }
+
+    func reloadProvisionalNickname() {
+        guard isNicknameProvisional else { return }
+        switch nicknameStore.load() {
+        case .stored(let savedNickname):
+            provisionalNickname = nil
+            nickname = savedNickname.trimmed
+            meshService.sendBroadcastAnnounce()
+        case .absent:
+            provisionalNickname = nil
+            saveNickname()
+        case .unavailable:
+            break
+        }
+    }
+
+    private func observeProtectedDataForNickname() {
+        #if os(iOS)
+        guard nicknameProtectedDataObserver == nil else { return }
+        nicknameProtectedDataObserver = NotificationCenter.default
+            .publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reloadProvisionalNickname() }
+        #endif
+    }
+
     func saveNickname() {
-        userDefaults.set(nickname, forKey: nicknameKey)
-        // Persist nickname; no need to force synchronize
+        if let provisional = provisionalNickname {
+            // Saving on focus loss must not make the stand-in permanent.
+            guard nickname != provisional else { return }
+            provisionalNickname = nil
+        }
+        nicknameStore.save(nickname)
 
         // Send announce with new nickname to all peers
         meshService.sendBroadcastAnnounce()
@@ -1363,7 +1422,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             if selectedPrivateChatPeer != nil {
                 guard let fingerprint = selectedPrivateChatFingerprint,
                       let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex)?.sha256Fingerprint() == fingerprint }),
-                      canSendWeshPrivate(to: contact.peerID) else { return }
+                      canSendWeshMessage(to: contact.peerID) else { return }
                 sendPrivateMessage(content, to: contact.peerID)
             } else {
                 _ = sendWeshText(content, to: nil)
@@ -1381,7 +1440,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
               content.utf8.count <= WeshTextLimits.maximumUTF8Bytes else { return false }
         if let peerID {
-            guard canSendWeshPrivate(to: peerID) else { return false }
+            guard canSendWeshMessage(to: peerID) else { return false }
             startPrivateChat(with: peerID)
             // Route to the checked full Noise-key identity, never mutable global selection.
             sendPrivateMessage(content, to: peerID)
@@ -1695,6 +1754,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func panicClearAllData(restartServices: Bool = true) -> Bool {
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
+        // A new npub after the wipe must be announced again; nothing from before is reused.
+        weshAnnouncedInternetKeys.removeAll()
         isPanicResetting = true
         defer { isPanicResetting = false }
         weshMeetingNote.suspendForPanic()
@@ -1757,9 +1818,11 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // exactly the data an adversary inspecting the device wants.
         LocationStateManager.shared.panicWipe()
 
-        // Reset nickname to anonymous
+        // Reset nickname to anonymous; the previous one must be gone from
+        // the Keychain and from the legacy UserDefaults key.
+        provisionalNickname = nil
         nickname = "anon\(Int.random(in: 1000...9999))"
-        userDefaults.set(nickname, forKey: nicknameKey)
+        let nicknameWipeCompleted = nicknameStore.replaceForPanic(with: nickname)
 
         // Clear favorites and peer mappings
         // Clear through SecureIdentityStateManager instead of directly
@@ -1877,7 +1940,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, meetingNoteWipeCompleted,
+            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
+                meetingNoteWipeCompleted,
                 qrContactsWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
                 groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,

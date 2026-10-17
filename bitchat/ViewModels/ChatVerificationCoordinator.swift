@@ -74,6 +74,12 @@ protocol ChatVerificationContext: AnyObject {
     // MARK: Notifications (shared with `ChatNostrContext`)
     /// Posts a generic local user notification.
     func postLocalNotification(title: String, body: String, identifier: String)
+    /// Wesh: tells an enrolled contact my npub over this Noise session.
+    func announceWeshInternetKey(to peerID: PeerID)
+}
+
+extension ChatVerificationContext {
+    func announceWeshInternetKey(to peerID: PeerID) {}
 }
 
 extension ChatViewModel: ChatVerificationContext {
@@ -334,6 +340,7 @@ final class ChatVerificationCoordinator {
                         peerIDAliases.append(stablePeerID)
                     }
                     self.context.retrySecurePrivateMessagesAfterAuthentication(for: peerIDAliases)
+                    if self.weshMode { self.context.announceWeshInternetKey(to: peerID) }
 
                     if var pending = self.pendingQRVerifications[peerID], pending.sent == false {
                         guard (0...60).contains(self.now().timeIntervalSince(pending.createdAt)) else {
@@ -491,6 +498,8 @@ final class ChatVerificationCoordinator {
                 pendingQRVerifications[peerID] = failed
                 return
             }
+            // BitChat peers learn my npub only from this notice (sent while Internet mode is on).
+            context.announceWeshInternetKey(to: peerID)
         }
         pendingQRVerifications.removeValue(forKey: peerID)
         completedQRNonces[pending.noiseKeyHex.lowercased()] = pending.nonceA

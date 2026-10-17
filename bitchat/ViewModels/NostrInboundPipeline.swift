@@ -53,10 +53,17 @@ protocol NostrInboundPipelineContext: AnyObject {
     /// False when this sender may not reach the device privately (Wesh: not a
     /// QR-verified contact). Checked once, before any payload is dispatched.
     func admitsPrivateSender(_ peerID: PeerID) -> Bool
+    /// Wesh: account DMs resolve their sender only through the npub bound by a
+    /// QR contact's signed QR, never through favorites.
+    var resolvesNostrSendersFromQRContacts: Bool { get }
+    /// The Noise key of the unblocked QR contact bound to this sender key; nil drops it.
+    func qrContactNoiseKey(forNostrPubkey pubkey: String) -> Data?
 }
 
 extension NostrInboundPipelineContext {
     func admitsPrivateSender(_ peerID: PeerID) -> Bool { true }
+    var resolvesNostrSendersFromQRContacts: Bool { false }
+    func qrContactNoiseKey(forNostrPubkey pubkey: String) -> Data? { nil }
 }
 
 extension ChatViewModel: NostrInboundPipelineContext {
@@ -74,6 +81,13 @@ extension ChatViewModel: NostrInboundPipelineContext {
 
     func recordProcessedNostrEvent(_ eventID: String) {
         deduplicationService.recordNostrEvent(eventID)
+    }
+
+    var resolvesNostrSendersFromQRContacts: Bool { weshPrivatePolicyEnabled }
+
+    func qrContactNoiseKey(forNostrPubkey pubkey: String) -> Data? {
+        WeshInternetRoute.senderNoiseKey(forNostrPubkey: pubkey, contacts: WeshQRTrust.shared.contacts,
+                                         blockedFingerprints: identityManager.getBlockedFingerprints())
     }
 
     func setGeoNickname(_ nickname: String, forPubkey pubkeyHex: String) {
@@ -530,6 +544,9 @@ final class NostrInboundPipeline {
     @MainActor
     func findNoiseKey(for nostrPubkey: String) -> Data? {
         guard let context else { return nil }
+        if context.resolvesNostrSendersFromQRContacts {
+            return context.qrContactNoiseKey(forNostrPubkey: nostrPubkey)
+        }
         let favorites = context.allFavoriteRelationships()
         var npubToMatch = nostrPubkey
 

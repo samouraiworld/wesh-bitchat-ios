@@ -110,6 +110,9 @@ private final class MockChatNostrContext: ChatNostrContext {
     var blockedNostrPubkeys: Set<String> = []
     var admitsSender: (PeerID) -> Bool = { _ in true }
     func admitsPrivateSender(_ peerID: PeerID) -> Bool { admitsSender(peerID) }
+    var qrResolver: ((String) -> Data?)?
+    var resolvesNostrSendersFromQRContacts: Bool { qrResolver != nil }
+    func qrContactNoiseKey(forNostrPubkey pubkey: String) -> Data? { qrResolver?(pubkey) }
     var displayNamesByPubkey: [String: String] = [:]
 
     private struct NoIdentity: Error {}
@@ -454,6 +457,41 @@ struct ChatNostrCoordinatorContextTests {
         context.admitsSender = { _ in true }
         await coordinator.inbound.processNostrMessage(try wrap(contents[0]))
         #expect(context.handledDelivered.count == 1)
+    }
+
+    @Test @MainActor
+    func weshInboundReachesHandlersOnlyFromTheUnblockedQRContactBoundToTheSender() async throws {
+        let context = MockChatNostrContext()
+        let coordinator = ChatNostrCoordinator(context: context)
+        let recipient = try NostrIdentity.generate()
+        context.nostrIdentity = recipient
+        let alice = try NostrIdentity.generate(), bob = try NostrIdentity.generate()
+        let mallory = try NostrIdentity.generate(), stranger = try NostrIdentity.generate()
+        let aliceKey = Data(repeating: 0xa1, count: 32), bobKey = Data(repeating: 0xb0, count: 32)
+        let malloryKey = Data(repeating: 0x3a, count: 32)
+        let contacts = [
+            WeshQRTrust.Contact(noiseKeyHex: aliceKey.hexEncodedString(), nickname: "Alice", npub: alice.npub, npubProven: true),
+            WeshQRTrust.Contact(noiseKeyHex: bobKey.hexEncodedString(), nickname: "Bob", npub: bob.npub, npubConflict: true),
+            WeshQRTrust.Contact(noiseKeyHex: malloryKey.hexEncodedString(), nickname: "Mallory", npub: mallory.npub)
+        ]
+        context.qrResolver = { WeshInternetRoute.senderNoiseKey(forNostrPubkey: $0, contacts: contacts,
+                                                                blockedFingerprints: [malloryKey.sha256Fingerprint()]) }
+        // Wesh admission: only a full Noise-key peer (a QR contact) is admitted.
+        context.admitsSender = { $0.noiseKey != nil }
+        let pm = try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: "Salut", messageID: "pm-qr"))
+        for sender in [stranger, bob, mallory] {
+            await coordinator.inbound.processNostrMessage(
+                try NostrProtocol.createPrivateMessage(content: pm, recipientPubkey: recipient.publicKeyHex, senderIdentity: sender))
+        }
+        await drainMainQueue()
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.handledDelivered.isEmpty)
+        #expect(context.nostrKeyMapping.isEmpty)
+
+        await coordinator.inbound.processNostrMessage(
+            try NostrProtocol.createPrivateMessage(content: pm, recipientPubkey: recipient.publicKeyHex, senderIdentity: alice))
+        await drainMainQueue()
+        #expect(context.handledPrivateMessages.map(\.convKey) == [PeerID(hexData: aliceKey)])
     }
 
     @Test @MainActor

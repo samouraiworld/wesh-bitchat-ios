@@ -94,7 +94,7 @@ final class BLEPrivateMediaReceiptStore: @unchecked Sendable {
         directoryReader: DirectoryReader? = nil,
         dataReader: DataReader? = nil,
         dataWriter: @escaping DataWriter = {
-            try $0.write(to: $1, options: $2)
+            try LocalFileProtection.write($0, to: $1, options: $2)
         },
         payloadRemover: PayloadRemover? = nil
     ) {
@@ -513,11 +513,7 @@ final class BLEPrivateMediaReceiptStore: @unchecked Sendable {
         }
 
         do {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
+            try LocalFileProtection.createDirectory(directory, fileManager: fileManager)
         } catch {
             SecureLogger.error(
                 "❌ Failed to create private-media receipt directory: \(error)",
@@ -812,21 +808,15 @@ final class BLEPrivateMediaReceiptStore: @unchecked Sendable {
         in directory: URL
     ) -> Bool {
         do {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
+            try LocalFileProtection.createDirectory(directory, fileManager: fileManager)
             let data = try JSONEncoder().encode(
                 DeletionJournal(version: 1, entries: entries)
             )
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(
-                .completeFileProtectionUntilFirstUserAuthentication
+            try dataWriter(
+                data,
+                deletionJournalURL(in: directory),
+                LocalFileProtection.writingOptions(.untilFirstUnlock)
             )
-            #endif
-            try dataWriter(data, deletionJournalURL(in: directory), options)
             return true
         } catch {
             SecureLogger.error(
@@ -963,18 +953,10 @@ final class BLEPrivateMediaReceiptStore: @unchecked Sendable {
         to directory: URL
     ) -> Bool {
         do {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
+            try LocalFileProtection.createDirectory(directory, fileManager: fileManager)
             let data = try JSONEncoder().encode(record)
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
-            #endif
             let url = recordURL(messageID: messageID, in: directory)
-            try dataWriter(data, url, options)
+            try dataWriter(data, url, LocalFileProtection.writingOptions(.untilFirstUnlock))
             return true
         } catch {
             SecureLogger.error(
@@ -1133,11 +1115,6 @@ final class BLEPrivateMediaReceiptStore: @unchecked Sendable {
             create: true
         )
         let files = root.appendingPathComponent("files", isDirectory: true)
-        try fileManager.createDirectory(
-            at: files,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-        return files
+        return try LocalFileProtection.createDirectory(files, fileManager: fileManager)
     }
 }
