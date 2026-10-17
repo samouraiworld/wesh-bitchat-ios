@@ -1400,10 +1400,10 @@ struct WeshContactSheet: View {
                     contactNoiseKey: progress == .verified ? scannedKey : nil,
                     progress: PaveExchangeProgress(theyScannedMe: theyScannedMe, iScannedThem: progress == .verified),
                     onScan: scan,
-                    onComplete: openChat,
-                    onClose: { dismiss() },
                     notice: notice,
-                    onPaste: { scan($0, pasted: true) })
+                    onPaste: { scan($0, pasted: true) },
+                    onComplete: openChat,
+                    onClose: { dismiss() })
             }
         }
         .onAppear {
