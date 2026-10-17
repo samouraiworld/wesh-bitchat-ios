@@ -36,7 +36,9 @@ struct WeshTheme {
         LinearGradient(colors: metallicStops, startPoint: .top, endPoint: .bottom)
     }
     var onAccent: Color { pave[.onPrivate] }
-    var line: Color { pave[.line] }
+    /// Field outlines, control strokes and separators: `lineStrong`, so every boundary meets 3:1
+    /// against the ground (the hairline `line` token reads 1.4:1 by day and 1.7:1 by night).
+    var line: Color { pave[.lineStrong] }
     var radius: CGFloat { PaveRadius.control }
     var messageRadius: CGFloat { PaveRadius.bubble }
     var contentInset: CGFloat { PaveSpace.s4 }
