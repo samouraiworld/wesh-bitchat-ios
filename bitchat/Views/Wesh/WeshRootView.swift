@@ -300,7 +300,8 @@ struct WeshRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.panicRecoveryBlocked {
+            switch WeshRootScreen(panicRecoveryBlocked: viewModel.panicRecoveryBlocked, welcomed: welcomed) {
+            case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Effacement local inachevé", systemImage: "exclamationmark.triangle")
@@ -310,14 +311,14 @@ struct WeshRootView: View {
                             .frame(minHeight: 44)
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else if !welcomed {
+            case .welcome:
                 // Nickname and terms, then Bluetooth: the system prompt waits for that step.
                 PaveOnboardingFlow(onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
                     chrome.setNickname(nickname)
                     chrome.validateAndSaveNickname()
                     welcomed = true
                 })
-            } else {
+            case .tabs:
                 if !panicFeedback.isEmpty {
                     Text(panicFeedback).font(.subheadline).padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
