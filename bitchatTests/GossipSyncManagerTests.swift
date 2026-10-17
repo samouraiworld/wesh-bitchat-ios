@@ -1059,6 +1059,99 @@ struct GossipSyncManagerTests {
         #expect(!delegate.packets.contains { $0.type == MessageType.groupMessage.rawValue })
     }
 
+    @Test func refusedFragmentsAreListedInOurFilterButNeverServed() async throws {
+        // A refused fragment (retired type) is "known": our sync filter lists
+        // it so peers stop re-offering it, yet it is never stored or served.
+        var config = GossipSyncManager.Config()
+        config.messageSyncIntervalSeconds = 0
+        config.fragmentSyncIntervalSeconds = 1
+        config.fileTransferSyncIntervalSeconds = 0
+        config.prekeyBundleSyncIntervalSeconds = 0
+        let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
+        let delegate = RecordingDelegate()
+        manager.delegate = delegate
+
+        let refused = retiredFragmentTestPacket(originalType: .groupMessage, recipient: nil)
+        manager.onRefusedFragmentSeen(refused)
+        #expect(manager._refusedFragmentCount() == 1)
+
+        // Served: nothing, even to a peer whose filter is empty.
+        let request = RequestSyncPacket(p: 4, m: 1, data: Data(), types: .fragment)
+        manager.handleRequestSync(from: PeerID(str: "FFFFFFFFFFFFFFFF"), request: request)
+        manager._performMaintenanceSynchronously(now: Date())
+        #expect(delegate.packets.isEmpty)
+
+        // Listed: our own fragment request covers its ID.
+        manager.scheduleInitialSyncToPeer(PeerID(str: "FFFFFFFFFFFFFFFF"), delaySeconds: 0.0)
+        try await TestHelpers.waitFor({ delegate.packets.count == 1 }, timeout: TestConstants.settleTimeout)
+        let sent = try #require(delegate.packets.first)
+        let sync = try #require(RequestSyncPacket.decode(from: sent.payload))
+        let sorted = GCSFilter.decodeToSortedSet(p: sync.p, m: sync.m, data: sync.data)
+        let bucket = GCSFilter.bucket(for: PacketIdUtil.computeId(refused), modulus: sync.m)
+        #expect(GCSFilter.contains(sortedValues: sorted, candidate: bucket))
+    }
+
+    @Test func floodOfRefusedFragmentsNeverPushesRealOnesOutOfTheFilter() async throws {
+        // Newer refused fragments from many senders must not take the slots
+        // or move the since-cursor that real fragments need.
+        var config = GossipSyncManager.Config()
+        config.messageSyncIntervalSeconds = 0
+        config.fragmentSyncIntervalSeconds = 1
+        config.fileTransferSyncIntervalSeconds = 0
+        config.prekeyBundleSyncIntervalSeconds = 0
+        config.fragmentCapacity = 5
+        // A tight filter (about 28 IDs) so the flood would overflow it.
+        config.gcsMaxBytes = 32
+        let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
+        let delegate = RecordingDelegate()
+        manager.delegate = delegate
+
+        let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
+        let real = (0..<5).map { index in
+            retiredFragmentTestPacket(originalType: .message, recipient: nil, timestamp: nowMs - 60_000 + UInt64(index))
+        }
+        for packet in real {
+            manager.onPublicPacketSeen(packet)
+        }
+        for senderByte in UInt8(1)...UInt8(20) {
+            for index in 0..<5 {
+                manager.onRefusedFragmentSeen(retiredFragmentTestPacket(
+                    originalType: .groupMessage,
+                    sender: Data(repeating: senderByte, count: 8),
+                    recipient: nil,
+                    timestamp: nowMs + UInt64(index)
+                ))
+            }
+        }
+
+        manager.scheduleInitialSyncToPeer(PeerID(str: "FFFFFFFFFFFFFFFF"), delaySeconds: 0.0)
+        try await TestHelpers.waitFor({ delegate.packets.count == 1 }, timeout: TestConstants.settleTimeout)
+        let sent = try #require(delegate.packets.first)
+        let sync = try #require(RequestSyncPacket.decode(from: sent.payload))
+        let sorted = GCSFilter.decodeToSortedSet(p: sync.p, m: sync.m, data: sync.data)
+        for packet in real {
+            let bucket = GCSFilter.bucket(for: PacketIdUtil.computeId(packet), modulus: sync.m)
+            #expect(GCSFilter.contains(sortedValues: sorted, candidate: bucket))
+        }
+        #expect(sync.sinceTimestamp == nil)
+    }
+
+    @Test func refusedFragmentsAreBoundedPerSender() {
+        var config = GossipSyncManager.Config()
+        config.refusedFragmentPerSenderCapacity = 4
+        config.refusedFragmentCapacity = 100
+        let manager = GossipSyncManager(myPeerID: myPeerID, config: config, requestSyncManager: RequestSyncManager())
+        let flooder = Data(repeating: 0x0A, count: 8)
+        for _ in 0..<50 {
+            manager.onRefusedFragmentSeen(retiredFragmentTestPacket(originalType: .voiceFrame, sender: flooder, recipient: nil))
+        }
+        #expect(manager._refusedFragmentCount() == 4)
+        manager.onRefusedFragmentSeen(retiredFragmentTestPacket(
+            originalType: .voiceFrame, sender: Data(repeating: 0x0B, count: 8), recipient: nil
+        ))
+        #expect(manager._refusedFragmentCount() == 5)
+    }
+
     @Test func archiveRestoreStopsAtTheByteBudgetKeepingTheNewest() throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("gossip-archive-\(UUID().uuidString).json")
