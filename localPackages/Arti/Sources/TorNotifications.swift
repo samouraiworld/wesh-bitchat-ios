@@ -8,4 +8,7 @@ public extension Notification.Name {
     /// A bootstrap attempt ran out its deadline without completing — the
     /// signature of a network that blocks Tor.
     static let TorBootstrapDidStall = Notification.Name("TorBootstrapDidStall")
+    /// Arti exited, or its SOCKS listener stopped answering, without a stop
+    /// request. Readiness is already false when this is posted.
+    static let TorDidStopUnexpectedly = Notification.Name("TorDidStopUnexpectedly")
 }

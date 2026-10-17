@@ -152,9 +152,19 @@ final class AppRuntime: ObservableObject {
             await MainActor.run { _ = self.verificationModel.myQRString() }
         }
 
+        #if os(macOS)
+        // No scene phases and no background relaunch on macOS: a started app
+        // is in the foreground. iOS reports it from `handleScenePhaseChange`.
+        TorManager.shared.setAppForeground(true)
+        #endif
         NetworkActivationService.shared.start()
         if WeshMode.isActive {
             WeshInternetMode.shared.start()
+            // Queued private messages to QR contacts leave as soon as Internet is On.
+            WeshInternetRoute.flushWhenOn(WeshInternetMode.shared.$state) { [weak self] in
+                self?.chatViewModel.messageRouter.flushAllOutbox()
+            }
+            .store(in: &cancellables)
         } else if NetworkActivationService.shared.userInternetEnabled {
             GeohashPresenceService.shared.start()
         }
@@ -170,9 +180,15 @@ final class AppRuntime: ObservableObject {
     /// one. Expiry runs first so the migration never touches files the
     /// sweep is about to delete. Detached because `AppRuntime` is
     /// main-actor and both passes go file by file through the media tree;
-    /// best-effort, nothing at launch depends on their results.
+    /// best-effort, nothing at launch depends on their results. Files older
+    /// builds left in backups are excluded first.
     private func performMediaMaintenance() {
         Task.detached(priority: .utility) {
+            #if os(iOS)
+            if !TestEnvironment.isRunningTests {
+                LocalFileProtection.excludeApplicationSupportFromBackup()
+            }
+            #endif
             let store = BLEIncomingFileStore()
             store.expireAgedMedia()
             store.migrateFileProtectionIfNeeded()

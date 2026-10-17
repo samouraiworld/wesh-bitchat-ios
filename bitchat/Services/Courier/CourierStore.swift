@@ -475,16 +475,8 @@ final class CourierStore {
                 try? FileManager.default.removeItem(at: fileURL)
                 return
             }
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
             let data = try JSONEncoder().encode(envelopes)
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
-            #endif
-            try data.write(to: fileURL, options: options)
+            try LocalFileProtection.write(data, to: fileURL, level: .untilFirstUnlock)
         } catch {
             SecureLogger.error("Failed to persist courier store: \(error)", category: .session)
         }

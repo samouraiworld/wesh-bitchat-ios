@@ -153,7 +153,7 @@ final class MessageOutboxStore {
         fileURL: URL? = nil,
         readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) },
         writeData: @escaping (Data, URL, Data.WritingOptions) throws -> Void = {
-            try $0.write(to: $1, options: $2)
+            try LocalFileProtection.write($0, to: $1, options: $2)
         },
         beforeRecoveryNotification: @escaping () -> Void = {},
         wipeFileManager: FileManager = .default
@@ -758,13 +758,10 @@ final class MessageOutboxStore {
             let sealed = try ChaChaPoly.seal(plaintext, using: key).combined
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+                withIntermediateDirectories: true,
+                attributes: LocalFileProtection.directoryAttributes
             )
-            var options: Data.WritingOptions = [.atomic]
-            #if os(iOS)
-            options.insert(.completeFileProtectionUntilFirstUserAuthentication)
-            #endif
-            try writeData(sealed, fileURL, options)
+            try writeData(sealed, fileURL, LocalFileProtection.writingOptions(.untilFirstUnlock))
             return true
         } catch {
             SecureLogger.error("Failed to persist outbox: \(error)", category: .session)

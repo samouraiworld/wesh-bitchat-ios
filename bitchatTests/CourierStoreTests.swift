@@ -215,6 +215,7 @@ struct CourierStoreTests {
         let recipientKey = Data(repeating: 0xE0, count: 32)
         let envelope = makeEnvelope(recipientKey: recipientKey)
         #expect(first.deposit(envelope, from: depositorA))
+        #expect(LocalFileProtection.isExcludedFromBackup(fileURL))
 
         let second = CourierStore(persistsToDisk: true, fileURL: fileURL, now: { Self.baseDate })
         #expect(second.takeEnvelopes(for: recipientKey) == [envelope])

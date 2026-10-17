@@ -192,7 +192,8 @@ enum PaveDisplayName {
         defaultIgnorable.contains { $0.contains(scalar.value) }
     }
 
-    private static func isInvisible(_ scalar: Unicode.Scalar) -> Bool {
+    /// Draws nothing or steers the text: controls, format (bidi, zero-width), unassigned and the like.
+    static func isInvisible(_ scalar: Unicode.Scalar) -> Bool {
         if isBlankGlyph(scalar.value) || isDefaultIgnorable(scalar) { return true }
         switch scalar.properties.generalCategory {
         case .control, .format, .surrogate, .privateUse, .unassigned: return true

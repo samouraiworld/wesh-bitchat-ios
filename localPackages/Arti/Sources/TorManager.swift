@@ -30,6 +30,33 @@ private func arti_bootstrap_progress() -> Int32
 @_silgen_name("arti_bootstrap_summary")
 private func arti_bootstrap_summary(_ buf: UnsafeMutablePointer<CChar>, _ len: Int32) -> Int32
 
+/// The Arti calls `TorManager` makes, injectable so tests can start, kill and
+/// probe a fake Arti without the Rust library touching the network.
+struct ArtiBackend: Sendable {
+    var start: @Sendable (_ dataDir: String, _ socksPort: UInt16) -> Int32
+    var stop: @Sendable () -> Int32
+    var isRunning: @Sendable () -> Bool
+    var bootstrapProgress: @Sendable () -> Int
+    var bootstrapSummary: @Sendable () -> String
+    /// One TCP connect to the local SOCKS port; true if it accepted.
+    var probeSocks: @Sendable (_ port: Int) async -> Bool
+
+    static let live = ArtiBackend(
+        start: { dataDir, socksPort in
+            dataDir.withCString { arti_start($0, socksPort) }
+        },
+        stop: { arti_stop() },
+        isRunning: { arti_is_running() != 0 },
+        bootstrapProgress: { Int(arti_bootstrap_progress()) },
+        bootstrapSummary: {
+            var buf = [CChar](repeating: 0, count: 256)
+            let len = arti_bootstrap_summary(&buf, Int32(buf.count))
+            return len > 0 ? String(cString: buf) : ""
+        },
+        probeSocks: { port in await TorManager.probeLocalSocks(port: port) }
+    )
+}
+
 /// Arti-based Tor integration for BitChat.
 /// - Boots a local Arti client and exposes a SOCKS5 proxy
 ///   on 127.0.0.1:socksPort. All app networking should await readiness and
@@ -57,6 +84,11 @@ public final class TorManager: ObservableObject {
     /// says "starting tor…" indefinitely while nothing is happening. Cleared on
     /// each new start attempt.
     @Published private(set) public var bootstrapDidStall: Bool = false
+    /// True once Arti has exited (or its SOCKS listener vanished) without
+    /// being asked to stop. Readiness drops with it, so nothing can be routed
+    /// until an explicit restart; `.TorDidStopUnexpectedly` is posted once.
+    /// Cleared on each new start attempt.
+    @Published private(set) public var didStopUnexpectedly: Bool = false
 
     // Internal readiness trackers
     private var socksReady: Bool = false { didSet { recomputeReady() } }
@@ -89,12 +121,37 @@ public final class TorManager: ObservableObject {
     // report a stall over state that a newer lifecycle event already owns.
     private var bootstrapGeneration = 0
     private var pathMonitor: NWPathMonitor?
-    private var isAppForeground: Bool = true
+    // Background until the app says otherwise: a background relaunch (BLE
+    // restoration) with Internet on must not start Arti, and only a scene
+    // that actually became active calls `setAppForeground(true)`.
+    private var isAppForeground: Bool = false
     private var lastRestartAt: Date? = nil
     private var startedAt: Date? = nil  // Tracks initial startup time for grace period
     private(set) var allowAutoStart: Bool = false
 
-    private init() {}
+    nonisolated private let backend: ArtiBackend
+    private let dataDirectory: () -> URL?
+    private let pollIntervalNanoseconds: UInt64
+    private let livenessIntervalNanoseconds: UInt64
+    private let usesPathMonitor: Bool
+
+    private convenience init() {
+        self.init(backend: .live)
+    }
+
+    init(
+        backend: ArtiBackend,
+        dataDirectory: @escaping () -> URL? = TorManager.defaultDataDirectory,
+        pollIntervalNanoseconds: UInt64 = 1_000_000_000,
+        livenessIntervalNanoseconds: UInt64 = 5_000_000_000,
+        usesPathMonitor: Bool = true
+    ) {
+        self.backend = backend
+        self.dataDirectory = dataDirectory
+        self.pollIntervalNanoseconds = pollIntervalNanoseconds
+        self.livenessIntervalNanoseconds = livenessIntervalNanoseconds
+        self.usesPathMonitor = usesPathMonitor
+    }
 
     // MARK: - Public API
 
@@ -110,6 +167,7 @@ public final class TorManager: ObservableObject {
         didStart = true
         isStarting = true
         bootstrapDidStall = false
+        didStopUnexpectedly = false
         startedAt = Date()  // Track startup time for grace period
         SecureLogger.debug("TorManager: startIfNeeded() - startedAt set", category: .session)
         lastError = nil
@@ -119,8 +177,12 @@ public final class TorManager: ObservableObject {
         startPathMonitorIfNeeded()
     }
 
+    /// A start requested while in the background was dropped, so becoming
+    /// foreground starts Arti if it is allowed and not already running.
     public func setAppForeground(_ foreground: Bool) {
+        let becameForeground = foreground && !isAppForeground
         isAppForeground = foreground
+        if becameForeground { startIfNeeded() }
     }
 
     public func isForeground() -> Bool { isAppForeground }
@@ -143,7 +205,9 @@ public final class TorManager: ObservableObject {
 
     // MARK: - Filesystem
 
-    func dataDirectoryURL() -> URL? {
+    func dataDirectoryURL() -> URL? { dataDirectory() }
+
+    nonisolated static func defaultDataDirectory() -> URL? {
         do {
             let base = try FileManager.default.url(
                 for: .applicationSupportDirectory,
@@ -162,6 +226,11 @@ public final class TorManager: ObservableObject {
         guard let dir = dataDirectoryURL() else { return }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // Tor state and guard choices stay on this device, out of backups.
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var excluded = dir
+            try excluded.setResourceValues(values)
         } catch {
             // Non-fatal; Arti will surface errors during start if paths are missing
         }
@@ -177,15 +246,13 @@ public final class TorManager: ObservableObject {
         }
 
         // Check if already running
-        if arti_is_running() != 0 {
+        if backend.isRunning() {
             SecureLogger.info("TorManager: Arti already running", category: .session)
             startBootstrapMonitor()
             return
         }
 
-        let result = dir.withCString { dptr in
-            arti_start(dptr, UInt16(socksPort))
-        }
+        let result = backend.start(dir, UInt16(socksPort))
 
         if result != 0 {
             SecureLogger.error("TorManager: arti_start failed rc=\(result)", category: .session)
@@ -198,10 +265,13 @@ public final class TorManager: ObservableObject {
         startBootstrapMonitor()
 
         // Start SOCKS readiness probe
+        let generation = bootstrapGeneration
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let ready = await self.waitForSocksReady(timeout: 60.0)
             await MainActor.run {
+                // A stop or an unexpected exit since this probe began owns the state now.
+                guard generation == self.bootstrapGeneration else { return }
                 self.socksReady = ready
                 if ready {
                     SecureLogger.info("TorManager: SOCKS ready at \(self.socksHost):\(self.socksPort)", category: .session)
@@ -216,13 +286,13 @@ public final class TorManager: ObservableObject {
     private func waitForSocksReady(timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if await probeSocksOnce() { return true }
+            if await backend.probeSocks(socksPort) { return true }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
         return false
     }
 
-    private func probeSocksOnce() async -> Bool {
+    nonisolated static func probeLocalSocks(port socksPort: Int) async -> Bool {
         #if canImport(Network)
         await withCheckedContinuation { cont in
             let params = NWParameters.tcp
@@ -284,8 +354,12 @@ public final class TorManager: ObservableObject {
         var didComplete = false
         while Date() < deadline {
             guard generation == bootstrapGeneration else { return }
-            let progress = Int(arti_bootstrap_progress())
-            let summary = getBootstrapSummary()
+            guard backend.isRunning() else {
+                handleUnexpectedStop(reason: "Arti exited during bootstrap")
+                return
+            }
+            let progress = backend.bootstrapProgress()
+            let summary = backend.bootstrapSummary()
 
             self.bootstrapProgress = progress
             self.bootstrapSummary = summary
@@ -296,7 +370,7 @@ public final class TorManager: ObservableObject {
                 didComplete = true
                 break
             }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         }
 
         // Running out the deadline is a reportable outcome, not silence. The
@@ -312,16 +386,54 @@ public final class TorManager: ObservableObject {
                 category: .session
             )
             NotificationCenter.default.post(name: .TorBootstrapDidStall, object: nil)
+            return
+        }
+
+        await livenessLoop(generation: generation)
+    }
+
+    /// Watches a bootstrapped Arti until a deliberate stop, dormancy or
+    /// restart bumps the generation. Arti exiting on its own, or its SOCKS
+    /// listener failing two probes in a row, drops readiness at once so no
+    /// caller keeps routing to a dead proxy.
+    private func livenessLoop(generation: Int) async {
+        var failedProbes = 0
+        while generation == bootstrapGeneration {
+            try? await Task.sleep(nanoseconds: livenessIntervalNanoseconds)
+            guard generation == bootstrapGeneration else { return }
+            guard backend.isRunning() else {
+                handleUnexpectedStop(reason: "Arti exited")
+                return
+            }
+            guard socksReady else { continue }
+            let socksAlive = await backend.probeSocks(socksPort)
+            guard generation == bootstrapGeneration else { return }
+            failedProbes = socksAlive ? 0 : failedProbes + 1
+            if failedProbes >= 2 {
+                handleUnexpectedStop(reason: "SOCKS listener stopped answering")
+                return
+            }
         }
     }
 
-    private func getBootstrapSummary() -> String {
-        var buf = [CChar](repeating: 0, count: 256)
-        let len = arti_bootstrap_summary(&buf, Int32(buf.count))
-        if len > 0 {
-            return String(cString: buf)
-        }
-        return ""
+    private func handleUnexpectedStop(reason: String) {
+        SecureLogger.error("TorManager: \(reason) without a stop request; Tor is down", category: .session)
+        bootstrapGeneration += 1
+        // A runtime whose SOCKS listener is gone is stopped too, so the next
+        // start boots a fresh one instead of adopting the broken one.
+        if backend.isRunning() { _ = backend.stop() }
+        socksReady = false
+        bootstrapProgress = 0
+        bootstrapSummary = ""
+        isStarting = false
+        isReady = false
+        // `didStart` stays set so `startIfNeeded()` (awaitReady, relay
+        // queues) cannot bring Arti back behind the app's back; a shutdown
+        // or an explicit restart clears it.
+        bootstrapMonitorStarted = false
+        lastError = NSError(domain: "TorManager", code: -20, userInfo: [NSLocalizedDescriptionKey: reason])
+        didStopUnexpectedly = true
+        NotificationCenter.default.post(name: .TorDidStopUnexpectedly, object: nil)
     }
 
     // MARK: - Foreground/Background
@@ -371,11 +483,11 @@ public final class TorManager: ObservableObject {
         shutdownsInFlight += 1
         Task.detached { [weak self] in
             guard let self = self else { return }
-            _ = arti_stop()
+            _ = self.backend.stop()
 
             // Wait for shutdown
             var waited = 0
-            while arti_is_running() != 0 && waited < 50 {
+            while self.backend.isRunning() && waited < 50 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 waited += 1
             }
@@ -409,9 +521,9 @@ public final class TorManager: ObservableObject {
         allowAutoStart = false
         startPendingAfterShutdown = false
         bootstrapGeneration += 1
-        _ = arti_stop()
+        _ = backend.stop()
         let deadline = Date().addingTimeInterval(timeout)
-        while arti_is_running() != 0 && Date() < deadline {
+        while backend.isRunning() && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
         }
         isReady = false
@@ -422,7 +534,7 @@ public final class TorManager: ObservableObject {
         didStart = false
         restarting = false
         bootstrapMonitorStarted = false
-        return arti_is_running() == 0
+        return !backend.isRunning()
     }
 
     private func restartArti() async {
@@ -439,11 +551,11 @@ public final class TorManager: ObservableObject {
             self.lastRestartAt = Date()
         }
 
-        _ = arti_stop()
+        _ = backend.stop()
 
         // Wait for stop
         var waited = 0
-        while arti_is_running() != 0 && waited < 40 {
+        while backend.isRunning() && waited < 40 {
             try? await Task.sleep(nanoseconds: 100_000_000)
             waited += 1
         }
@@ -471,7 +583,7 @@ public final class TorManager: ObservableObject {
 
     private func startPathMonitorIfNeeded() {
         #if canImport(Network)
-        guard pathMonitor == nil else { return }
+        guard usesPathMonitor, pathMonitor == nil else { return }
         let monitor = NWPathMonitor()
         pathMonitor = monitor
         let queue = DispatchQueue(label: "TorPathMonitor")
