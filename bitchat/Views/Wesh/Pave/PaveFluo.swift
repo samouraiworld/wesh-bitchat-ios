@@ -96,16 +96,6 @@ enum PaveDisplayStyle: CaseIterable {
     var font: Font { PaveDisplayFont.font(size: size, relativeTo: relativeTo) }
 }
 
-extension Text {
-    /// App copy in poster capitals. VoiceOver keeps reading the text as written.
-    func paveDisplay(_ style: PaveDisplayStyle, label: String) -> some View {
-        self.textCase(.uppercase)
-            .font(style.font)
-            .lineSpacing(-4)
-            .accessibilityLabel(Text(verbatim: label))
-    }
-}
-
 enum PaveFluo {
     /// Pavés in the reach gauge. More phones than this keep the row full.
     static let gaugePaves = 12
