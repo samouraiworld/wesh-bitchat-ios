@@ -434,7 +434,7 @@ enum WeshSharedContentReview {
         switch destination {
         case .mesh: return "Salon local · PUBLIC"
         case .privateConversation(let peerID, let name):
-            return "Privé · " + weshIdentitySummary(name, fingerprint: peerID.noiseKey?.sha256Fingerprint())
+            return "Privé · " + weshIdentitySummary(PaveDisplayName.safe(name), fingerprint: peerID.noiseKey?.sha256Fingerprint())
         case .geohash: return "Destination indisponible"
         }
     }
@@ -929,7 +929,10 @@ private struct WeshConversation: View {
         return peerID.map { runtime.chatViewModel.canSendWeshMessage(to: $0) } ?? runtime.chatViewModel.canSendWeshPublic
     }
     private var sharedDestination: SharedContentDestination {
-        peerID.map { .privateConversation(peerID: $0, displayName: title) } ?? .mesh
+        // The raw nickname: `destinationLabel` draws it through the rule, once.
+        peerID.map { peer in
+            .privateConversation(peerID: peer, displayName: WeshQRTrust.shared.contacts.first { $0.peerID == peer }?.nickname ?? "")
+        } ?? .mesh
     }
     private var canImportShare: Bool {
         peerID.map { runtime.chatViewModel.canImportWeshSharedContent(to: $0) } ?? true
@@ -1299,7 +1302,7 @@ private struct WeshMessageBubble: View {
         HStack {
             if own { Spacer(minLength: 32) }
             VStack(alignment: .leading, spacing: 6) {
-                if !own && (!privateChat || isSystem) { Text(isSystem ? "Information" : WeshDisplayName.clean(message.sender, fallback: "Participant")).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
+                if !own && (!privateChat || isSystem) { Text(isSystem ? PaveCopy.text("pave.bubble.system") : PaveDisplayName.safe(message.sender)).font(.caption.weight(.semibold)).foregroundStyle(filled ? theme.onAccent : theme.secondary) }
                 // No system text selection: it would copy to the synced, non-expiring pasteboard.
                 Text(WeshIncomingMediaPolicy.displayText(message.content)).font(.body)
                 ViewThatFits(in: .horizontal) {
@@ -1710,6 +1713,11 @@ private struct WeshSettings: View {
                 Link(destination: WeshLinks.terms) {
                     Label("Conditions d’utilisation", systemImage: "doc.text").frame(minHeight: 48)
                 }
+                NavigationLink {
+                    PaveLicensesScreen().navigationTitle("Licences").weshInlineTitle()
+                } label: {
+                    Label("Licences", systemImage: "text.book.closed").frame(minHeight: 48)
+                }
             } header: { WeshSectionLabel(text: "À propos") }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
@@ -1823,11 +1831,11 @@ private struct WeshContactDetails: View {
                             feedback = "Contact débloqué."
                         } else { feedback = "Ce contact n’est plus bloqué." }
                     }.frame(minHeight: 48)
-                        .accessibilityLabel("Débloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
+                        .accessibilityLabel("Débloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
                         .accessibilityHint("Autorise à nouveau ses prochains messages sur ce téléphone")
                 } else {
                     Button("Bloquer sur ce téléphone", role: .destructive) { blocking = true }.frame(minHeight: 48)
-                        .accessibilityLabel("Bloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
+                        .accessibilityLabel("Bloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
                         .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
                 }
                 Button("Retirer ce contact", role: .destructive) { removing = true }.frame(minHeight: 48)
@@ -1843,12 +1851,12 @@ private struct WeshContactDetails: View {
                 Button("Bloquer", role: .destructive) {
                     let reported = PaveReportTarget(rawNickname: contact.nickname, fingerprint: PaveFingerprint.short(contact.peerID.noiseKey), source: .contact)
                     reportOffer = PaveReportMail.blockThenOffer(reported) {
-                        runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: contact.nickname)
+                        runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: PaveDisplayName.safe(contact.nickname))
                         return true
                     }.offer
                     feedback = "Contact bloqué sur ce téléphone."
                 }
-                .accessibilityLabel("Bloquer " + weshIdentitySummary(contact.nickname, fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
+                .accessibilityLabel("Bloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
             } message: { Text("Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion.") }
             .paveReportSendFlow($reportOffer)
             .alert("Retirer ce contact ?", isPresented: $removing) {
@@ -1893,7 +1901,7 @@ private struct WeshNearbyPeople: View {
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(participants, id: \.peerID) { person in
-                        let name = PaveDisplayName.safe(WeshDisplayName.clean(person.displayName, fallback: "Participant"))
+                        let name = PaveDisplayName.safe(person.displayName)
                         // One identity for the whole row: the key this peer proved in its Noise session.
                         // An announced key can be copied, so without a proven one there is nothing to block.
                         let proven = runtime.chatViewModel.noiseSessionPublicKeyData(for: person.peerID)
@@ -1929,7 +1937,7 @@ private struct WeshNearbyPeople: View {
                 }
                 .accessibilityLabel("Bloquer " + (selected.map { weshIdentitySummary($0.nickname, fingerprint: $0.peerID.noiseKey?.sha256Fingerprint()) } ?? "cette personne"))
             } message: {
-                Text("\(selected.map { PaveDisplayName.safe($0.nickname) + " · " + (PaveFingerprint.short($0.peerID.noiseKey) ?? "") } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
+                Text("\(selected.map { $0.nickname + " · " + (PaveFingerprint.short($0.peerID.noiseKey) ?? "") } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
             }
     }
 }
@@ -1949,7 +1957,7 @@ private struct WeshBlockedContacts: View {
     private var fingerprints: [String] { runtime.chatViewModel.identityManager.getBlockedFingerprints().sorted() }
     private func name(for fingerprint: String) -> String {
         let identity = runtime.chatViewModel.identityManager.getSocialIdentity(for: fingerprint)
-        return PaveDisplayName.safe(WeshDisplayName.blockedContact(petname: identity?.localPetname, claimedNickname: identity?.claimedNickname))
+        return WeshDisplayName.blockedContact(petname: identity?.localPetname, claimedNickname: identity?.claimedNickname)
     }
 
     var body: some View {
@@ -2219,8 +2227,9 @@ private struct WeshValueRow: View {
     }
 }
 
-private func weshIdentitySummary(_ name: String, fingerprint: String?) -> String {
-    let safeName = PaveDisplayName.safe(name)
+/// `safeName` has already been through `PaveDisplayName.safe`, once: a second pass would turn
+/// « Sans surnom » into « Sans surnom (réservé) ».
+private func weshIdentitySummary(_ safeName: String, fingerprint: String?) -> String {
     guard let short = weshShortFingerprint(hex: fingerprint) else { return safeName }
     return safeName + ", " + PaveFingerprint.accessibilityText(short)
 }

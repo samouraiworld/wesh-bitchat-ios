@@ -22,11 +22,49 @@ enum PaveDisplayFont {
         return CTFontCreateWithName(postScriptName as CFString, 12, nil).postScriptName == postScriptName
     }()
 
-    /// A poster style scaled with Dynamic Type relative to `textStyle`.
+    /// A poster style scaled with Dynamic Type relative to `textStyle`. The fallback follows
+    /// Dynamic Type too, through the text style itself.
     static func font(size: CGFloat, relativeTo textStyle: Font.TextStyle) -> Font {
         isAvailable
             ? .custom(postScriptName, size: size, relativeTo: textStyle)
-            : .system(size: size, weight: .black).width(.condensed)
+            : .system(textStyle, design: .default).weight(.black).width(.condensed)
+    }
+
+    /// The SIL Open Font License shipped next to the font, shown in Licences.
+    static var licenseText: String? {
+        let bundle = PaveCopy.bundle
+        let url = bundle.url(forResource: "Archivo-OFL", withExtension: "txt", subdirectory: "Fonts")
+            ?? bundle.url(forResource: "Archivo-OFL", withExtension: "txt")
+        return url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+    }
+}
+
+/// Licences: Wesh, its third-party components and the poster face, with the font's full licence.
+struct PaveLicensesScreen: View {
+    @Environment(\.paveTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: PaveSpace.s4) {
+                Text(PaveCopy.text("pave.about.licensesTitle"))
+                    .paveText(.title)
+                    .accessibilityAddTraits(.isHeader)
+                Text(PaveCopy.text("pave.about.licenseWesh")).paveText(.body)
+                Text(PaveCopy.text("pave.about.licenseThirdParty")).paveText(.body)
+                Text(PaveCopy.text("pave.about.licenseFont")).paveText(.body)
+                if let license = PaveDisplayFont.licenseText {
+                    Text(verbatim: license)
+                        .paveText(.caption)
+                        .foregroundStyle(theme[.inkMuted])
+                        .padding(PaveSpace.s3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
+                }
+            }
+            .foregroundStyle(theme[.ink])
+            .padding(PaveSpace.s4)
+        }
+        .paveScreenBackground()
     }
 }
 

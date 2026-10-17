@@ -18,6 +18,23 @@
         }
       }
     },
+    "pave.about.licenseFont" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poster typeface: Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, under the SIL Open Font License 1.1, reproduced below."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Police d’affiche : Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, sous SIL Open Font License 1.1, reproduite ci-dessous."
+          }
+        }
+      }
+    },
     "pave.about.licenseThirdParty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -303,6 +320,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Échec de l'envoi. Réessayer."
+          }
+        }
+      }
+    },
+    "pave.bubble.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Information"
           }
         }
       }

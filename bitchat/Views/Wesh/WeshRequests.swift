@@ -64,8 +64,8 @@ final class WeshInboundRequests: ObservableObject {
         let date = now()
         deleted = deleted.filter { date.timeIntervalSince($0.value) < Self.deletedMemory }
         guard deleted[fingerprint + "|" + message.id] == nil else { return false }
-        // Sender-chosen: shown in the list, the detail and the block flow.
-        let nickname = WeshDisplayName.clean(message.sender, fallback: "Participant")
+        // Sender-chosen and kept raw: every view draws it through `PaveDisplayName.safe`, once.
+        let nickname = message.sender
         let shown = BitchatMessage(
             id: message.id, sender: message.sender,
             content: WeshIncomingMediaPolicy.displayText(message.content),

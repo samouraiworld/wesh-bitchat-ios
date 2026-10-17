@@ -42,5 +42,7 @@ struct PaveFluoTests {
         let text = try String(contentsOf: try #require(licence), encoding: .utf8)
         #expect(text.contains("SIL Open Font License"))
         #expect(PaveDisplayFont.isAvailable)
+        // Shown in full in Licences, as the OFL asks of a bundled font.
+        #expect(PaveDisplayFont.licenseText?.contains("SIL Open Font License") == true)
     }
 }

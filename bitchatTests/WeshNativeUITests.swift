@@ -985,12 +985,15 @@ struct WeshNativeUITests {
         #expect(requests.requests.isEmpty)
     }
 
-    @Test @MainActor func requestNamesAreSanitizedBeforeDisplayOrBlocking() {
+    /// Kept raw, so every view, the block and the report draw it through the rule exactly once.
+    @Test @MainActor func requestNamesStayRawUntilDrawnThroughTheRuleOnce() throws {
         let requests = WeshInboundRequests()
         let message = BitchatMessage(id: "n1", sender: "Ad\u{202E}min", content: "texte", timestamp: Date(), isRelay: false,
                                      originalSender: nil, isPrivate: true, recipientNickname: nil, senderPeerID: nil)
         #expect(requests.add(message, from: Data(repeating: 0x54, count: 32)))
-        #expect(requests.requests.first?.nickname == "Participant")
+        let stored = try #require(requests.requests.first?.nickname)
+        #expect(stored == "Ad\u{202E}min")
+        #expect(!PaveDisplayName.safe(stored).contains("\u{202E}"))
     }
 
     @Test @MainActor func deletedRequestStaysDeletedWhenTheSenderRetriesTheSameMessage() {

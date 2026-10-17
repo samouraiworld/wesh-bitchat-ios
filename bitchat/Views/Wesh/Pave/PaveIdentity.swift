@@ -3,13 +3,14 @@ import Foundation
 import SwiftUI
 
 /// The single list of app labels a remote nickname may not imitate: every label drawn next to a
-/// nickname (« Vous », « Sans surnom », badges, delivery states, transport, public room, Échanger and
+/// nickname (« Vous », « Information », « Sans surnom », badges, delivery states, transport, public room, Échanger and
 /// its screen, Demandes, fingerprints, « Profil »). Checked in French and English whatever the phone language, so a peer
 /// cannot pick the other language's word. PaveReservedWordsTests fails when a label of these
 /// families is missing.
 enum PaveReservedWords {
     static let keys = [
         "pave.bubble.you",
+        "pave.bubble.system",
         "pave.name.unnamed",
         "pave.name.reserved",
         "pave.inbox.verified",
