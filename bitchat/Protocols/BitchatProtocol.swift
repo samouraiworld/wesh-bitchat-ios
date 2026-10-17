@@ -156,9 +156,6 @@ protocol BitchatDelegate: AnyObject {
     // Low-level events for better separation of concerns
     func didReceiveNoisePayload(from peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date)
 
-    // Encrypted group broadcast (opaque envelope; decrypted by the group coordinator)
-    func didReceiveGroupMessage(payload: Data, timestamp: Date)
-
     // Public live-voice burst packet (signature-verified by the transport)
     func didReceivePublicVoiceFrame(from peerID: PeerID, nickname: String, payload: Data, timestamp: Date)
 
@@ -178,10 +175,6 @@ extension BitchatDelegate {
     }
 
     func didReceiveNoisePayload(from peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date) {
-        // Default empty implementation
-    }
-
-    func didReceiveGroupMessage(payload: Data, timestamp: Date) {
         // Default empty implementation
     }
 

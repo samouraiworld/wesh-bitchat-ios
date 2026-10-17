@@ -435,6 +435,33 @@ struct BLEServiceCoreTests {
     }
 
     @Test
+    func groupBroadcastFromABitChatPeerIsNotRelayed() async {
+        // Wesh has no groups: a BitChat group broadcast (0x25) used to be
+        // relayed like any public packet. It must now stop at this node.
+        let ble = makeService()
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let sender = PeerID(str: "5566778899aabbcc")
+        let packet = BitchatPacket(
+            type: MessageType.groupMessage.rawValue,
+            senderID: Data(hexString: sender.id) ?? Data(),
+            recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: Data(repeating: 0x42, count: 64),
+            signature: nil,
+            ttl: 7
+        )
+
+        ble._test_handlePacket(packet, fromPeerID: sender)
+
+        let relayed = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .groupMessage) > 0 },
+            timeout: TestConstants.negativeWaitWindow
+        )
+        #expect(!relayed)
+    }
+
+    @Test
     func validSignedLeaveEvictsSessionAndRelays() async throws {
         let ble = makeService()
         let alice = NoiseEncryptionService(keychain: MockKeychain())
@@ -1004,7 +1031,7 @@ struct BLEServiceCoreTests {
             recipientNickname: "Alice",
             messageID: privateMessageID
         )
-        ble.sendGroupInvite(Data("queued-during-quarantine".utf8), to: alicePeerID)
+        ble.sendVouchAttestations(Data("queued-during-quarantine".utf8), to: alicePeerID)
         await ble._test_drainNoiseMessagePipeline()
         #expect(outbound.count(ofType: .noiseEncrypted) == 0)
 
@@ -1076,7 +1103,7 @@ struct BLEServiceCoreTests {
         )
         #expect(
             plaintexts.filter {
-                $0.first == NoisePayloadType.groupInvite.rawValue
+                $0.first == NoisePayloadType.vouch.rawValue
             }.count == 1
         )
         #expect(outbound.count(ofType: .announce) == 0)
@@ -1151,10 +1178,10 @@ struct BLEServiceCoreTests {
         )
         ble._test_enqueuePendingNoisePayload(
             NoisePayload(
-                type: .groupInvite,
+                type: .vouch,
                 data: Data("queued-during-quarantine".utf8)
             ).encode(),
-            transferId: "deferred-invite-\(UUID().uuidString)",
+            transferId: "deferred-vouch-\(UUID().uuidString)",
             for: alicePeerID
         )
 
@@ -1290,7 +1317,7 @@ struct BLEServiceCoreTests {
         )
         #expect(
             plaintexts.filter {
-                $0.first == NoisePayloadType.groupInvite.rawValue
+                $0.first == NoisePayloadType.vouch.rawValue
             }.count == 1
         )
     }

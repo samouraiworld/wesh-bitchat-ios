@@ -163,18 +163,6 @@ private final class MockChatTransportEventContext: ChatTransportEventContext {
         verifyResponsePayloads.append((peerID, payload))
     }
 
-    // Group payloads
-    private(set) var groupInvitePayloads: [(peerID: PeerID, payload: Data)] = []
-    private(set) var groupKeyUpdatePayloads: [(peerID: PeerID, payload: Data)] = []
-
-    func handleGroupInvitePayload(from peerID: PeerID, payload: Data) {
-        groupInvitePayloads.append((peerID, payload))
-    }
-
-    func handleGroupKeyUpdatePayload(from peerID: PeerID, payload: Data) {
-        groupKeyUpdatePayloads.append((peerID, payload))
-    }
-
     private(set) var vouchPayloads: [(peerID: PeerID, payload: Data)] = []
 
     func handleVouchPayload(from peerID: PeerID, payload: Data) {
@@ -479,5 +467,29 @@ struct ChatTransportEventCoordinatorContextTests {
         await drainMainActorTasks()
         #expect(context.handledPrivateMessages.count == 1)
         #expect(context.meshDeliveryAcks.count == 1)
+    }
+
+    @Test @MainActor
+    func groupPayloadsFromBitChatPeersReachNoHandler() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+
+        for type in [NoisePayloadType.groupInvite, .groupKeyUpdate] {
+            coordinator.didReceiveNoisePayload(from: peerID, type: type, payload: Data([0x01, 0x02]), timestamp: Date())
+        }
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.verifyChallengePayloads.isEmpty)
+        #expect(context.verifyResponsePayloads.isEmpty)
+        #expect(context.vouchPayloads.isEmpty)
     }
 }

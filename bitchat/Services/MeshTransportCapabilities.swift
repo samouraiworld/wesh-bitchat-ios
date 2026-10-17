@@ -73,14 +73,6 @@ protocol MeshCourierTransporting: AnyObject {
     func sendCourierMessage(_ content: String, messageID: String, recipientNoiseKey: Data, via couriers: [PeerID]) -> Bool
 }
 
-/// Private groups: creator-signed state travels 1:1 over Noise sessions;
-/// group messages flood like public broadcasts.
-protocol MeshGroupMessaging: AnyObject {
-    func sendGroupInvite(_ statePayload: Data, to peerID: PeerID)
-    func sendGroupKeyUpdate(_ statePayload: Data, to peerID: PeerID)
-    func broadcastGroupMessage(_ envelope: Data)
-}
-
 /// Mesh diagnostics (/ping, /trace).
 protocol MeshDiagnosing: AnyObject {
     /// Sends a directed ping probe; the completion fires exactly once on

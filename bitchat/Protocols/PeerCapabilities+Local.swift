@@ -6,7 +6,6 @@ extension PeerCapabilities {
     static let localSupported: PeerCapabilities = [
         .vouch,
         .prekeys,
-        .groups,
         .privateMedia,
         .privateMediaReceipts
     ]

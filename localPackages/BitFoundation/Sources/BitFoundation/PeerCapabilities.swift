@@ -16,6 +16,7 @@ public struct PeerCapabilities: OptionSet, Equatable, Hashable, Sendable {
     public static let prekeys = PeerCapabilities(rawValue: 1 << 0)
     public static let wifiBulk = PeerCapabilities(rawValue: 1 << 1)
     public static let gateway = PeerCapabilities(rawValue: 1 << 2)
+    // periphery:ignore - BitChat groups: never advertised, kept so the wire bit is never reused
     public static let groups = PeerCapabilities(rawValue: 1 << 3)
     public static let board = PeerCapabilities(rawValue: 1 << 4)
     public static let vouch = PeerCapabilities(rawValue: 1 << 5)

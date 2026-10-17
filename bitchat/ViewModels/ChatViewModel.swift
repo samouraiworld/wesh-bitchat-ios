@@ -134,9 +134,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     var canSendMediaInCurrentContext: Bool {
         if let peer = selectedPrivateChatPeer {
-            // Media transfer is not wired for groups in v1 (sendFilePrivate
-            // rejects the virtual group_ recipient), so keep the affordance off.
-            return !(peer.isGeoDM || peer.isGeoChat || peer.isGroup)
+            return !(peer.isGeoDM || peer.isGeoChat)
         }
         switch activeChannel {
         case .mesh: return true
@@ -225,7 +223,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Noise key hex + npub pairs already sent `[FAVORITED]:npub` in this process.
     var weshAnnouncedInternetKeys: Set<String> = []
     lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
-    lazy var groupCoordinator = ChatGroupCoordinator(context: self)
     lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
 
     // Computed properties for compatibility
@@ -343,8 +340,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private let panicPersistentStoreWipes: PanicPersistentStoreWipes
     let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
-    /// Private group membership: keys in the keychain, metadata on disk.
-    let groupStore: GroupStore
     private var nicknameStore: LocalNicknameStore {
         LocalNicknameStore(keychain: keychain, defaults: userDefaults)
     }
@@ -1199,8 +1194,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         panicNetworkLifecycle: PanicNetworkLifecycle = .noop,
         weshPrivatePolicyEnabled: Bool = false,
         weshMeetingNote: WeshMeetingNoteStore? = nil,
-        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil,
-        groupStore: GroupStore? = nil
+        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
     ) {
         self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
@@ -1224,7 +1218,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             ?? (TestEnvironment.isRunningTests
                 ? WeshMeetingNoteStore()
                 : WeshMeetingNoteStore(storage: .liveMeetingNote(), legacyDefaults: .standard, saveDelay: 0.4))
-        self.groupStore = groupStore ?? GroupStore(keychain: keychain)
         self.idBridge = idBridge
         self.identityManager = identityManager
         self.conversations = conversations
@@ -1857,8 +1850,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // which is the kind of trace a wipe should not leave behind.
         NostrRelaySettings.reset()
 
-        // Drop private group keys and rosters (keychain + disk)
-        let groupWipeCompleted = groupStore.wipe()
+        // Drop group rosters an earlier build may have stored; their keys go
+        // with the keychain wipe above.
+        let groupWipeCompleted = panicPersistentStoreWipes.legacyGroups()
         // Drop cached peers' prekey bundles (who we could write to is
         // metadata too). Our own prekey privates are keychain-backed and go
         // with deleteAllKeychainData above plus the identity reset below.
@@ -2270,12 +2264,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 timestamp: timestamp
             )
 
-        case let .groupMessageReceived(payload, timestamp):
-            groupCoordinator.handleGroupMessagePayload(
-                payload,
-                timestamp: timestamp
-            )
-
         case let .publicVoiceFrameReceived(
             peerID,
             nickname,
@@ -2347,12 +2335,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             timestamp: timestamp,
             messageID: messageID
         )
-    }
-
-    func didReceiveGroupMessage(payload: Data, timestamp: Date) {
-        Task { @MainActor [weak self] in
-            self?.groupCoordinator.handleGroupMessagePayload(payload, timestamp: timestamp)
-        }
     }
 
     func didReceivePublicVoiceFrame(from peerID: PeerID, nickname: String, payload: Data, timestamp: Date) {
