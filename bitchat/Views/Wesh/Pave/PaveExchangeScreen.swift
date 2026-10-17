@@ -323,6 +323,7 @@ struct PaveExchangeScreen: View {
 /// One scan outcome. A new one is a new event even with the same words, so VoiceOver repeats it.
 struct PaveExchangeNotice: Equatable {
     let text: String
+    // periphery:ignore - read by the synthesized Equatable, which tells two identical notices apart
     let id = UUID()
 
     init(_ text: String) { self.text = text }
