@@ -344,6 +344,45 @@ struct BLEServiceCoreTests {
     }
 
     @Test
+    func syncResponseFragmentedForUsIsReassembledAndDelivered() async throws {
+        // A REQUEST_SYNC answer from iOS: a long public message, fragmented
+        // with every fragment addressed to the requester (us).
+        let ble = makeService()
+        let delegate = PublicCaptureDelegate()
+        ble.delegate = delegate
+        let signer = NoiseEncryptionService(keychain: MockKeychain())
+        let sender = PeerID(str: "1122334455667788")
+        // Random letters: a repeated phrase compresses into one fragment.
+        let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789 ")
+        let content = String((0..<1_200).map { _ in alphabet.randomElement()! })
+        let unsigned = makePublicPacket(
+            content: content,
+            sender: sender,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000)
+        )
+        let packet = try #require(signer.signPacket(unsigned), "Failed to sign public message")
+        let signingKey = try #require(signer.getSigningPublicKeyData())
+        let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+            for: BLEOutboundFragmentTransferRequest(packet: packet, pad: false, maxChunk: 256, directedPeer: ble.myPeerID),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
+            bleMaxMTU: 512
+        ))
+        #expect(plan.totalFragments > 1)
+        #expect(plan.fragmentPackets.allSatisfy { $0.recipientID == Data(hexString: ble.myPeerID.id) })
+
+        for fragment in plan.fragmentPackets {
+            ble._test_handlePacket(fragment, fromPeerID: sender, signingPublicKey: signingKey)
+        }
+
+        let delivered = await TestHelpers.waitUntil(
+            { delegate.publicMessagesSnapshot().count == 1 },
+            timeout: TestConstants.longTimeout
+        )
+        #expect(delivered)
+        #expect(delegate.publicMessagesSnapshot().first?.content == content)
+    }
+
+    @Test
     func staleBroadcast_isIgnored() async {
         let ble = makeService()
         let delegate = PublicCaptureDelegate()
@@ -642,6 +681,110 @@ struct BLEServiceCoreTests {
         #expect(!capabilities.contains(.privateMedia))
         #expect(!capabilities.contains(.privateMediaReceipts))
         #expect(capabilities.contains(.vouch))
+    }
+
+    @Test @MainActor
+    func fragmentsOfRetiredTypesAreNeitherRelayedNorAssembled() async throws {
+        // Rejecting the reassembled packet is not enough: each fragment of a
+        // BitChat group message, voice frame or public file used to be
+        // relayed (and gossip-stored) on its own. A file fragment for another
+        // peer still crosses this node.
+        let ble = makeService()
+        let delegate = TransportEventCaptureDelegate()
+        ble.eventDelegate = delegate
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let sender = try #require(Data(hexString: alicePeerID.id))
+        let otherPeer = try #require(Data(hexString: "8899aabbccddeeff"))
+        let me = try #require(Data(hexString: ble.myPeerID.id))
+
+        for (type, recipient) in [
+            (MessageType.groupMessage, nil), (.groupMessage, otherPeer),
+            (.voiceFrame, nil), (.fileTransfer, nil), (.fileTransfer, me)
+        ] as [(MessageType, Data?)] {
+            ble._test_handlePacket(
+                retiredFragmentTestPacket(originalType: type, sender: sender, recipient: recipient),
+                fromPeerID: alicePeerID
+            )
+        }
+        let relayedRetired = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .fragment) > 0 },
+            timeout: TestConstants.negativeWaitWindow
+        )
+        #expect(!relayedRetired)
+
+        // A whole file for another peer, every fragment delivered: relayed
+        // fragment by fragment, never reassembled into a file here.
+        let file = BitchatPacket(
+            type: MessageType.fileTransfer.rawValue,
+            senderID: sender,
+            recipientID: otherPeer,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: Data((0..<1_200).map { _ in UInt8.random(in: 0...255) }),
+            signature: nil,
+            ttl: 7
+        )
+        let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+            for: BLEOutboundFragmentTransferRequest(packet: file, pad: false, maxChunk: 256, directedPeer: nil),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
+            bleMaxMTU: 512
+        ))
+        #expect(plan.totalFragments > 1)
+        for fragment in plan.fragmentPackets {
+            ble._test_handlePacket(fragment, fromPeerID: alicePeerID)
+        }
+        let relayedForOther = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .fragment) >= plan.totalFragments },
+            timeout: TestConstants.longTimeout
+        )
+        #expect(relayedForOther)
+        #expect(outbound.snapshot().allSatisfy { $0.recipientID == otherPeer })
+        #expect(outbound.count(ofType: .fileTransfer) == 0)
+        #expect(delegate.messageIDs.isEmpty)
+        #expect(delegate.noisePayloadTypes.isEmpty)
+    }
+
+    @Test
+    func refusedFragmentsNeverEnterGossipSync() async throws {
+        // A refused fragment is not stored for sync: a peer asking for every
+        // fragment gets the kept one back, never the refused one.
+        let ble = makeService()
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let sender = try #require(Data(hexString: alicePeerID.id))
+        let refused = retiredFragmentTestPacket(originalType: .groupMessage, sender: sender, recipient: nil)
+        let kept = retiredFragmentTestPacket(originalType: .message, sender: sender, recipient: nil)
+        ble._test_handlePacket(refused, fromPeerID: alicePeerID)
+        ble._test_handlePacket(kept, fromPeerID: alicePeerID)
+        await ble._test_drainFragmentPipeline()
+
+        // REQUEST_SYNC must be signed by a known peer to be answered.
+        let bob = NoiseEncryptionService(keychain: MockKeychain())
+        let requester = PeerID(publicKey: bob.getStaticPublicKeyData()!)
+        let unsignedRequest = BitchatPacket(
+            type: MessageType.requestSync.rawValue,
+            senderID: try #require(Data(hexString: requester.id)),
+            recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: RequestSyncPacket(p: 4, m: 1, data: Data(), types: .fragment).encode(),
+            signature: nil,
+            ttl: 0
+        )
+        let request = try #require(bob.signPacket(unsignedRequest))
+        ble._test_handlePacket(request, fromPeerID: requester, signingPublicKey: bob.getSigningPublicKeyData()!)
+
+        func served(_ fragment: BitchatPacket) -> Bool {
+            outbound.snapshot().contains {
+                $0.type == MessageType.fragment.rawValue && $0.ttl == 0 && $0.payload == fragment.payload
+            }
+        }
+        let servedKept = await TestHelpers.waitUntil({ served(kept) }, timeout: TestConstants.longTimeout)
+        #expect(servedKept)
+        #expect(!outbound.snapshot().contains { $0.payload == refused.payload })
     }
 
     @Test

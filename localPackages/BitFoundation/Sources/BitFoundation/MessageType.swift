@@ -23,8 +23,10 @@ public enum MessageType: UInt8 {
 
     // Fragmentation (simplified)
     case fragment = 0x20        // Single fragment type for large messages
-    // BitChat file/audio/image payloads. Wesh sends none and drops received
-    // ones (fragmented or not) without relaying; the value stays reserved.
+    // BitChat file/audio/image payloads. Wesh sends none and never stores or
+    // shows one. A file for another peer, whole or fragmented, is relayed as
+    // before; a broadcast one or one for us is dropped without relaying. The
+    // value stays reserved.
     case fileTransfer = 0x22
     case boardPost = 0x23       // Signed geohash bulletin-board post or tombstone
     case prekeyBundle = 0x24    // Signed batch of one-time prekeys (gossiped)
