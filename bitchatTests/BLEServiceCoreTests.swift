@@ -641,6 +641,69 @@ struct BLEServiceCoreTests {
         #expect(capabilities.contains(.vouch))
     }
 
+    @Test @MainActor
+    func fragmentsOfRetiredTypesAreNeitherRelayedNorAssembled() async throws {
+        // Rejecting the reassembled packet is not enough: each fragment of a
+        // BitChat group message, voice frame or public file used to be
+        // relayed (and gossip-stored) on its own. A file fragment for another
+        // peer still crosses this node.
+        let ble = makeService()
+        let delegate = TransportEventCaptureDelegate()
+        ble.eventDelegate = delegate
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let sender = try #require(Data(hexString: alicePeerID.id))
+        let otherPeer = try #require(Data(hexString: "8899aabbccddeeff"))
+        let me = try #require(Data(hexString: ble.myPeerID.id))
+
+        for (type, recipient) in [
+            (MessageType.groupMessage, nil), (.groupMessage, otherPeer),
+            (.voiceFrame, nil), (.fileTransfer, nil), (.fileTransfer, me)
+        ] as [(MessageType, Data?)] {
+            ble._test_handlePacket(
+                retiredFragmentTestPacket(originalType: type, sender: sender, recipient: recipient),
+                fromPeerID: alicePeerID
+            )
+        }
+        let relayedRetired = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .fragment) > 0 },
+            timeout: TestConstants.negativeWaitWindow
+        )
+        #expect(!relayedRetired)
+
+        // A whole file for another peer, every fragment delivered: relayed
+        // fragment by fragment, never reassembled into a file here.
+        let file = BitchatPacket(
+            type: MessageType.fileTransfer.rawValue,
+            senderID: sender,
+            recipientID: otherPeer,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: Data((0..<1_200).map { _ in UInt8.random(in: 0...255) }),
+            signature: nil,
+            ttl: 7
+        )
+        let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+            for: BLEOutboundFragmentTransferRequest(packet: file, pad: false, maxChunk: 256, directedPeer: nil),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
+            bleMaxMTU: 512
+        ))
+        #expect(plan.totalFragments > 1)
+        for fragment in plan.fragmentPackets {
+            ble._test_handlePacket(fragment, fromPeerID: alicePeerID)
+        }
+        let relayedForOther = await TestHelpers.waitUntil(
+            { outbound.count(ofType: .fragment) >= plan.totalFragments },
+            timeout: TestConstants.longTimeout
+        )
+        #expect(relayedForOther)
+        #expect(outbound.snapshot().allSatisfy { $0.recipientID == otherPeer })
+        #expect(outbound.count(ofType: .fileTransfer) == 0)
+        #expect(delegate.messageIDs.isEmpty)
+        #expect(delegate.noisePayloadTypes.isEmpty)
+    }
+
     @Test
     func validSignedLeaveEvictsSessionAndRelays() async throws {
         let ble = makeService()

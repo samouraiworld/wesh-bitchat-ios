@@ -244,6 +244,94 @@ struct BLEFragmentHandlerTests {
     }
 
     @Test
+    func reassembledPacketAddressedElsewhereThanItsFragmentsIsDropped() throws {
+        // Relay and retired-type decisions are taken on the fragments, so the
+        // inner packet must carry the same recipient.
+        let cases: [(inner: Data?, fragments: Data?)] = [
+            (Data(hexString: "8899aabbccddeeff"), nil),
+            (nil, Data(hexString: localPeerID.id)),
+            (Data(hexString: "8899aabbccddeeff"), Data(hexString: localPeerID.id))
+        ]
+        for (innerRecipient, fragmentRecipient) in cases {
+            let innerPacket = BitchatPacket(
+                type: MessageType.message.rawValue,
+                senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+                recipientID: innerRecipient,
+                timestamp: 900_000,
+                payload: Data("hello".utf8),
+                signature: nil,
+                ttl: 5
+            )
+            let reassembled = try #require(innerPacket.toBinaryData())
+            let recorder = Recorder()
+            recorder.appendResult = { header in
+                .complete(header: header, reassembledData: reassembled, started: false)
+            }
+            let handler = makeHandler(recorder: recorder)
+            let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, recipientID: fragmentRecipient)
+
+            handler.handle(packet, from: remotePeerID)
+
+            #expect(recorder.ingressChecks.isEmpty)
+            #expect(recorder.reinjectedPackets.isEmpty)
+        }
+    }
+
+    @Test
+    func reassembledDirectedPacketWithMatchingRecipientIsReinjected() throws {
+        let me = try #require(Data(hexString: localPeerID.id))
+        let innerPacket = BitchatPacket(
+            type: MessageType.message.rawValue,
+            senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+            recipientID: me,
+            timestamp: 900_000,
+            payload: Data("hello".utf8),
+            signature: nil,
+            ttl: 5
+        )
+        let reassembled = try #require(innerPacket.toBinaryData())
+        let recorder = Recorder()
+        recorder.appendResult = { header in
+            .complete(header: header, reassembledData: reassembled, started: false)
+        }
+        let handler = makeHandler(recorder: recorder)
+        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, recipientID: me)
+
+        handler.handle(packet, from: remotePeerID)
+
+        #expect(recorder.reinjectedPackets.count == 1)
+    }
+
+    @Test
+    func reassembledPacketOfARetiredTypeIsNeverReinjected() throws {
+        // Dispatch already refuses these fragments; the reassembly check is
+        // the second line if one slips through.
+        for type in [MessageType.groupMessage, .voiceFrame, .fileTransfer] {
+            let innerPacket = BitchatPacket(
+                type: type.rawValue,
+                senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+                recipientID: nil,
+                timestamp: 900_000,
+                payload: Data(repeating: 0x42, count: 32),
+                signature: nil,
+                ttl: 5
+            )
+            let reassembled = try #require(innerPacket.toBinaryData())
+            let recorder = Recorder()
+            recorder.appendResult = { header in
+                .complete(header: header, reassembledData: reassembled, started: false)
+            }
+            let handler = makeHandler(recorder: recorder)
+            let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, originalType: type.rawValue)
+
+            handler.handle(packet, from: remotePeerID)
+
+            #expect(recorder.ingressChecks.isEmpty)
+            #expect(recorder.reinjectedPackets.isEmpty)
+        }
+    }
+
+    @Test
     func undecodableReassembledDataIsDropped() {
         let recorder = Recorder()
         recorder.appendResult = { header in

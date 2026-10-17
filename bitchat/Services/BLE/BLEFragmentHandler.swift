@@ -70,6 +70,17 @@ final class BLEFragmentHandler {
                     "🚫 Reassembled packet id=\(completedHeader.idLogString) is type \(originalPacket.type), fragments claimed \(completedHeader.originalType)",
                     category: .security
                 )
+            } else if !Self.sameRecipient(originalPacket.recipientID, packet.recipientID) {
+                // Both platforms' fragmenters address every fragment to the
+                // inner packet's recipient. Relay and retired-type decisions
+                // are taken on the fragments, so an inner packet addressed
+                // elsewhere is forged.
+                SecureLogger.warning(
+                    "🚫 Reassembled packet id=\(completedHeader.idLogString) is addressed differently from its fragments",
+                    category: .security
+                )
+            } else if BLERetiredFragmentPolicy.isRetired(reassembled: originalPacket) {
+                SecureLogger.debug("🚫 Reassembled packet id=\(completedHeader.idLogString) is a retired type \(originalPacket.type)", category: .session)
             } else if !env.isAcceptedIngressPayload(originalPacket, innerSender) {
                 // Cleanup below
             } else {
@@ -80,6 +91,14 @@ final class BLEFragmentHandler {
         } else {
             SecureLogger.error("❌ Failed to decode reassembled packet (type=\(completedHeader.originalType), total=\(completedHeader.total))", category: .session)
         }
+    }
+
+    /// Absent and all-0xFF recipients both mean broadcast.
+    private static func sameRecipient(_ lhs: Data?, _ rhs: Data?) -> Bool {
+        let lhsBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(lhs)
+        let rhsBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(rhs)
+        if lhsBroadcast || rhsBroadcast { return lhsBroadcast == rhsBroadcast }
+        return lhs == rhs
     }
 
     private func logFragmentAssemblyResult(_ result: BLEFragmentAssemblyBuffer.AppendResult) {

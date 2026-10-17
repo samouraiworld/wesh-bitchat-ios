@@ -4349,6 +4349,24 @@ extension BLEService {
         }
         #endif
 
+        // Retired types travel as fragments too: stop those before gossip
+        // tracking and relay, not only once reassembled.
+        switch BLERetiredFragmentPolicy.disposition(for: packet, localPeerIDData: myPeerIDData) {
+        case .process:
+            break
+        case .relayOnly:
+            if !forwardAlongRouteIfNeeded(packet) {
+                scheduleRelayIfNeeded(packet, senderID: senderID, messageID: messageID)
+            }
+            return
+        case .refuse:
+            // Known and refused: our sync filter lists it so peers stop
+            // re-offering it, but it is never stored, served or relayed.
+            if BLEPacketFreshnessPolicy.isBroadcastRecipient(packet.recipientID) {
+                gossipSyncManager?.onRefusedFragmentSeen(packet)
+            }
+            return
+        }
 
         // Process by type
         switch context.messageType {
@@ -4377,15 +4395,9 @@ extension BLEService {
             handleNoiseEncrypted(packet, from: senderID)
             
         case .fragment:
-            // A BitChat file transfer travels as fragments: Wesh never
-            // reassembles or stores them. Fragments of a file for another peer
-            // are relayed as before; broadcast ones are not (the V1 never
-            // spreads public files).
-            if BLEFragmentHeader(packet: packet)?.originalType == MessageType.fileTransfer.rawValue {
-                guard isDirectedToAnotherPeer(packet) else { return }
-            } else {
-                handleFragment(packet, from: senderID)
-            }
+            // Fragments of retired types (files included) were settled by
+            // BLERetiredFragmentPolicy above.
+            handleFragment(packet, from: senderID)
 
         case .fileTransfer:
             // Wesh has no media: a BitChat file is never stored or shown. A

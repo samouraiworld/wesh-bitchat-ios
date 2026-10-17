@@ -64,6 +64,54 @@ final class GossipSyncManager {
         }
     }
 
+    /// IDs of broadcast fragments this node refused (retired types). They
+    /// only feed our sync filter, so peers stop re-offering them; the packets
+    /// themselves are never kept, served or relayed.
+    private struct RefusedFragmentIDs {
+        struct Entry {
+            let id: Data
+            let timestamp: UInt64
+            let senderID: Data
+        }
+        private(set) var entries: [String: Entry] = [:]
+        private var order: [String] = []
+
+        /// Bounded overall and per sender, so one neighbor cannot fill it.
+        mutating func insert(_ entry: Entry, capacity: Int, perSenderCapacity: Int) {
+            guard capacity > 0, perSenderCapacity > 0 else { return }
+            let key = entry.id.hexEncodedString()
+            guard entries[key] == nil else { return }
+            let fromSender = order.filter { entries[$0]?.senderID == entry.senderID }
+            if fromSender.count >= perSenderCapacity, let oldest = fromSender.first {
+                entries.removeValue(forKey: oldest)
+                order.removeAll { $0 == oldest }
+            }
+            order.append(key)
+            entries[key] = entry
+            while order.count > capacity {
+                entries.removeValue(forKey: order.removeFirst())
+            }
+        }
+
+        func all(isFresh: (UInt64) -> Bool) -> [Entry] {
+            order.compactMap { key in
+                guard let entry = entries[key], isFresh(entry.timestamp) else { return nil }
+                return entry
+            }
+        }
+
+        mutating func remove(where shouldRemove: (Entry) -> Bool) {
+            order = order.filter { key in
+                guard let entry = entries[key] else { return false }
+                if shouldRemove(entry) {
+                    entries.removeValue(forKey: key)
+                    return false
+                }
+                return true
+            }
+        }
+    }
+
     private struct SyncSchedule {
         let types: SyncTypeFlags
         let interval: TimeInterval
@@ -88,6 +136,12 @@ final class GossipSyncManager {
         // oversized.
         var messageByteBudget: Int = 8 * 1024 * 1024
         var fragmentByteBudget: Int = 1024 * 1024
+        // Refused (retired-type) fragment IDs listed in our filter so peers stop
+        // re-offering them: a small store, bounded per sender, that only fills
+        // the room real packets leave in the filter.
+        var refusedFragmentCapacity: Int = 128
+        var refusedFragmentPerSenderCapacity: Int = 16
+        var refusedFragmentFilterCapacity: Int = 64
         var fragmentSyncIntervalSeconds: TimeInterval = 30.0
         var messageSyncIntervalSeconds: TimeInterval = 15.0
         var responseRateLimitMaxResponses: Int = 8
@@ -111,6 +165,7 @@ final class GossipSyncManager {
     // Storage: broadcast packets by type, and latest announce per sender
     private var messages = PacketStore()
     private var fragments = PacketStore()
+    private var refusedFragments = RefusedFragmentIDs()
     private var latestAnnouncementByPeer: [PeerID: BitchatPacket] = [:]
     // Latest verified prekey bundle per owner. Unlike announces, bundles are
     // NOT dropped on leave/stale peer: their whole purpose is reaching a
@@ -199,12 +254,35 @@ final class GossipSyncManager {
         }
     }
 
+    /// A broadcast fragment this node refused: listed in our sync filter
+    /// ("known") so peers stop re-offering it, never stored or served.
+    func onRefusedFragmentSeen(_ packet: BitchatPacket) {
+        queue.async { [weak self] in
+            guard let self,
+                  packet.type == MessageType.fragment.rawValue,
+                  self.isPacketFresh(packet) else { return }
+            self.refusedFragments.insert(
+                RefusedFragmentIDs.Entry(
+                    id: PacketIdUtil.computeId(packet),
+                    timestamp: packet.timestamp,
+                    senderID: packet.senderID
+                ),
+                capacity: self.config.refusedFragmentCapacity,
+                perSenderCapacity: self.config.refusedFragmentPerSenderCapacity
+            )
+        }
+    }
+
     // Helper to check if a packet is within the age threshold. Whole public
     // messages get the long town-crier window; fragments and announces keep
     // the short one.
     private func isPacketFresh(_ packet: BitchatPacket) -> Bool {
+        isFresh(timestamp: packet.timestamp, type: packet.type)
+    }
+
+    private func isFresh(timestamp: UInt64, type: UInt8) -> Bool {
         let maxAgeSeconds: TimeInterval
-        switch packet.type {
+        switch type {
         case MessageType.message.rawValue:
             maxAgeSeconds = config.publicMessageMaxAgeSeconds
         case MessageType.prekeyBundle.rawValue:
@@ -217,7 +295,7 @@ final class GossipSyncManager {
         // expire, sort ahead of everything in each GCS filter, and push the
         // requester's since-cursor past all real history, so anything dated
         // beyond the ingress skew is never stored, served or restored.
-        if packet.timestamp > nowMs, packet.timestamp - nowMs > config.maxFutureSkewMs {
+        if timestamp > nowMs, timestamp - nowMs > config.maxFutureSkewMs {
             return false
         }
         let ageThresholdMs = UInt64(maxAgeSeconds * 1000)
@@ -226,7 +304,7 @@ final class GossipSyncManager {
         guard nowMs >= ageThresholdMs else { return true }
 
         let cutoffMs = nowMs - ageThresholdMs
-        return packet.timestamp >= cutoffMs
+        return timestamp >= cutoffMs
     }
 
     private func isAnnouncementFresh(_ packet: BitchatPacket) -> Bool {
@@ -465,24 +543,35 @@ final class GossipSyncManager {
 
     // Build REQUEST_SYNC payload using current candidates and GCS params
     private func buildGcsPayload(for types: SyncTypeFlags, fragmentIdFilter: String? = nil) -> Data {
-        var candidates: [BitchatPacket] = []
+        var packetCandidates: [BitchatPacket] = []
         if types.contains(.announce) {
             for (_, pkt) in latestAnnouncementByPeer where isPacketFresh(pkt) {
-                candidates.append(pkt)
+                packetCandidates.append(pkt)
             }
         }
         if types.contains(.message) {
-            candidates.append(contentsOf: messages.allPackets(isFresh: isPacketFresh))
+            packetCandidates.append(contentsOf: messages.allPackets(isFresh: isPacketFresh))
         }
         if types.contains(.fragment) {
-            candidates.append(contentsOf: fragments.allPackets(isFresh: isPacketFresh))
+            packetCandidates.append(contentsOf: fragments.allPackets(isFresh: isPacketFresh))
         }
         if types.contains(.prekeyBundle) {
             for (_, pair) in latestPrekeyBundleByPeer where isPacketFresh(pair.packet) {
-                candidates.append(pair.packet)
+                packetCandidates.append(pair.packet)
             }
         }
-        if candidates.isEmpty {
+        var candidates = packetCandidates.map { (id: PacketIdUtil.computeId($0), timestamp: $0.timestamp) }
+        // Refused fragment IDs only fill the room real packets leave: they
+        // never take part in `takeN` nor in the since-cursor, so a neighbor
+        // flooding retired fragments cannot push real ones out of the filter.
+        var refusedIDs: [Data] = []
+        if types.contains(.fragment) {
+            let fragmentType = MessageType.fragment.rawValue
+            refusedIDs = refusedFragments.all { self.isFresh(timestamp: $0, type: fragmentType) }
+                .sorted { $0.timestamp > $1.timestamp }
+                .map(\.id)
+        }
+        if candidates.isEmpty && refusedIDs.isEmpty {
             let p = GCSFilter.deriveP(targetFpr: config.gcsTargetFpr)
             let req = RequestSyncPacket(p: p, m: 1, data: Data(), types: types, fragmentIdFilter: fragmentIdFilter)
             return req.encode()
@@ -502,12 +591,16 @@ final class GossipSyncManager {
             cap = max(1, config.seenCapacity)
         }
         let takeN = min(candidates.count, min(nMax, cap))
-        if takeN <= 0 {
+        let refusedRoom = max(0, min(nMax, cap) - takeN)
+        let refusedTaken = Array(refusedIDs.prefix(min(refusedRoom, config.refusedFragmentFilterCapacity)))
+        if takeN <= 0 && refusedTaken.isEmpty {
             let req = RequestSyncPacket(p: p, m: 1, data: Data(), types: types, fragmentIdFilter: fragmentIdFilter)
             return req.encode()
         }
         let included = Array(candidates.prefix(takeN))
-        let ids: [Data] = included.map { PacketIdUtil.computeId($0) }
+        // Real packets first: the encoder trims from the tail, so refused IDs
+        // are the first to go when the byte budget is short.
+        let ids: [Data] = included.map { $0.id } + refusedTaken
         let params = GCSFilter.buildFilter(ids: ids, maxBytes: config.gcsMaxBytes, targetFpr: config.gcsTargetFpr)
         // When the filter can't cover every candidate — either the store
         // exceeds `takeN` or the encoder trimmed the tail to fit the byte
@@ -516,8 +609,8 @@ final class GossipSyncManager {
         // covered set is a contiguous newest-prefix and the oldest included
         // timestamp is an exact cursor. Packets older than it are outside the
         // filter but not missing; without the cursor the responder would
-        // re-send that entire tail every round.
-        let covered = params.includedCount
+        // re-send that entire tail every round. Only real packets count here.
+        let covered = min(params.includedCount, included.count)
         let sinceTimestamp: UInt64? = (covered < candidates.count && covered > 0)
             ? included[covered - 1].timestamp
             : nil
@@ -538,6 +631,8 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.removeExpired(isFresh: isPacketFresh)
+        let fragmentType = MessageType.fragment.rawValue
+        refusedFragments.remove { !isFresh(timestamp: $0.timestamp, type: fragmentType) }
         latestPrekeyBundleByPeer = latestPrekeyBundleByPeer.filter { _, pair in
             isPacketFresh(pair.packet)
         }
@@ -706,6 +801,7 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.remove { PeerID(hexData: $0.senderID) == peerID }
+        refusedFragments.remove { PeerID(hexData: $0.senderID) == peerID }
     }
 }
 
@@ -727,6 +823,10 @@ extension GossipSyncManager {
         queue.sync {
             latestPrekeyBundleByPeer[peerID] != nil
         }
+    }
+
+    func _refusedFragmentCount() -> Int {
+        queue.sync { refusedFragments.entries.count }
     }
 
     func _messageCount(for peerID: PeerID) -> Int {
