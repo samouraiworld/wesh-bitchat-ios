@@ -341,6 +341,43 @@ struct BLEServiceCoreTests {
     }
 
     @Test
+    func syncResponseFragmentedForUsIsReassembledAndDelivered() async throws {
+        // A REQUEST_SYNC answer from iOS: a long public message, fragmented
+        // with every fragment addressed to the requester (us).
+        let ble = makeService()
+        let delegate = PublicCaptureDelegate()
+        ble.delegate = delegate
+        let signer = NoiseEncryptionService(keychain: MockKeychain())
+        let sender = PeerID(str: "1122334455667788")
+        let content = String(repeating: "manif ", count: 200)
+        let unsigned = makePublicPacket(
+            content: content,
+            sender: sender,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000)
+        )
+        let packet = try #require(signer.signPacket(unsigned), "Failed to sign public message")
+        let signingKey = try #require(signer.getSigningPublicKeyData())
+        let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+            for: BLEOutboundFragmentTransferRequest(packet: packet, pad: false, maxChunk: 256, directedPeer: ble.myPeerID),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
+            bleMaxMTU: 512
+        ))
+        #expect(plan.totalFragments > 1)
+        #expect(plan.fragmentPackets.allSatisfy { $0.recipientID == Data(hexString: ble.myPeerID.id) })
+
+        for fragment in plan.fragmentPackets {
+            ble._test_handlePacket(fragment, fromPeerID: sender, signingPublicKey: signingKey)
+        }
+
+        let delivered = await TestHelpers.waitUntil(
+            { delegate.publicMessagesSnapshot().count == 1 },
+            timeout: TestConstants.longTimeout
+        )
+        #expect(delivered)
+        #expect(delegate.publicMessagesSnapshot().first?.content == content)
+    }
+
+    @Test
     func staleBroadcast_isIgnored() async {
         let ble = makeService()
         let delegate = PublicCaptureDelegate()
@@ -702,6 +739,47 @@ struct BLEServiceCoreTests {
         #expect(outbound.count(ofType: .fileTransfer) == 0)
         #expect(delegate.messageIDs.isEmpty)
         #expect(delegate.noisePayloadTypes.isEmpty)
+    }
+
+    @Test
+    func refusedFragmentsNeverEnterGossipSync() async throws {
+        // A refused fragment is not stored for sync: a peer asking for every
+        // fragment gets the kept one back, never the refused one.
+        let ble = makeService()
+        let outbound = OutboundPacketTap()
+        ble._test_onOutboundPacket = outbound.record
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
+        let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
+        let sender = try #require(Data(hexString: alicePeerID.id))
+        let refused = retiredFragmentTestPacket(originalType: .groupMessage, sender: sender, recipient: nil)
+        let kept = retiredFragmentTestPacket(originalType: .message, sender: sender, recipient: nil)
+        ble._test_handlePacket(refused, fromPeerID: alicePeerID)
+        ble._test_handlePacket(kept, fromPeerID: alicePeerID)
+        await ble._test_drainFragmentPipeline()
+
+        // REQUEST_SYNC must be signed by a known peer to be answered.
+        let bob = NoiseEncryptionService(keychain: MockKeychain())
+        let requester = PeerID(publicKey: bob.getStaticPublicKeyData()!)
+        let unsignedRequest = BitchatPacket(
+            type: MessageType.requestSync.rawValue,
+            senderID: try #require(Data(hexString: requester.id)),
+            recipientID: nil,
+            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+            payload: RequestSyncPacket(p: 4, m: 1, data: Data(), types: .fragment).encode(),
+            signature: nil,
+            ttl: 0
+        )
+        let request = try #require(bob.signPacket(unsignedRequest))
+        ble._test_handlePacket(request, fromPeerID: requester, signingPublicKey: bob.getSigningPublicKeyData()!)
+
+        func served(_ fragment: BitchatPacket) -> Bool {
+            outbound.snapshot().contains {
+                $0.type == MessageType.fragment.rawValue && $0.ttl == 0 && $0.payload == fragment.payload
+            }
+        }
+        let servedKept = await TestHelpers.waitUntil({ served(kept) }, timeout: TestConstants.longTimeout)
+        #expect(servedKept)
+        #expect(!outbound.snapshot().contains { $0.payload == refused.payload })
     }
 
     @Test

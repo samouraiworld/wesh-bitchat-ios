@@ -70,11 +70,16 @@ final class BLEFragmentHandler {
                     "🚫 Reassembled packet id=\(completedHeader.idLogString) is type \(originalPacket.type), fragments claimed \(completedHeader.originalType)",
                     category: .security
                 )
-            } else if !Self.sameRecipient(originalPacket.recipientID, packet.recipientID) {
-                // Both platforms' fragmenters address every fragment to the
-                // inner packet's recipient. Relay and retired-type decisions
-                // are taken on the fragments, so an inner packet addressed
-                // elsewhere is forged.
+            } else if !Self.recipientsAgree(
+                inner: originalPacket.recipientID,
+                fragments: packet.recipientID,
+                localPeerID: env.localPeerID()
+            ) {
+                // Relay and retired-type decisions are taken on the fragments,
+                // so an inner packet addressed elsewhere than they are is
+                // forged. One mismatch is legitimate: iOS addresses the
+                // fragments of a sync response to the requester while the
+                // inner packet stays a broadcast.
                 SecureLogger.warning(
                     "🚫 Reassembled packet id=\(completedHeader.idLogString) is addressed differently from its fragments",
                     category: .security
@@ -93,12 +98,22 @@ final class BLEFragmentHandler {
         }
     }
 
-    /// Absent and all-0xFF recipients both mean broadcast.
-    private static func sameRecipient(_ lhs: Data?, _ rhs: Data?) -> Bool {
-        let lhsBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(lhs)
-        let rhsBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(rhs)
-        if lhsBroadcast || rhsBroadcast { return lhsBroadcast == rhsBroadcast }
-        return lhs == rhs
+    /// Absent and all-0xFF recipients both mean broadcast. Fragments for us
+    /// may carry a broadcast (a sync response; reinjected with TTL 0, so it
+    /// is never relayed). Any other difference is refused.
+    private static func recipientsAgree(inner: Data?, fragments: Data?, localPeerID: PeerID) -> Bool {
+        let innerBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(inner)
+        let fragmentsBroadcast = BLEPacketFreshnessPolicy.isBroadcastRecipient(fragments)
+        switch (innerBroadcast, fragmentsBroadcast) {
+        case (true, true):
+            return true
+        case (false, false):
+            return inner == fragments
+        case (true, false):
+            return fragments == Data(hexString: localPeerID.id)
+        case (false, true):
+            return false
+        }
     }
 
     private func logFragmentAssemblyResult(_ result: BLEFragmentAssemblyBuffer.AppendResult) {
