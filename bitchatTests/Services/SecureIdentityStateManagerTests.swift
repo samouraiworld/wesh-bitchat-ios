@@ -499,7 +499,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
 
         XCTAssertTrue(manager.getFavorites().isEmpty)
         XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
-        XCTAssertFalse(manager.isNostrBlocked(pubkeyHexLowercased: "ABCD"))
+        XCTAssertTrue(manager.isNostrBlocked(pubkeyHexLowercased: "ABCD"), "An unreadable block cache must refuse the peer")
         XCTAssertFalse(manager.isPersistenceAvailable)
         manager.setFavorite("new-peer", isFavorite: true)
         manager.forceSave()
