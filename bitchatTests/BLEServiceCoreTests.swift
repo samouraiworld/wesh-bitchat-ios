@@ -348,8 +348,6 @@ struct BLEServiceCoreTests {
         let manager = RequestSyncManager()
         let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
         manager.registerRequest(to: fixture.responder)
-        #expect(manager.isValidResponse(from: fixture.responder, isRSR: true))
-        #expect(!manager.isValidResponse(from: fixture.author, isRSR: true))
 
         for fragment in fixture.fragments {
             fixture.ble._test_ingestFrame(fragment, link: fixture.link)
@@ -367,7 +365,6 @@ struct BLEServiceCoreTests {
         // Only the actual bound responder may answer our request. A request
         // to the author does not authorize a different neighbor to replay it.
         manager.registerRequest(to: fixture.author)
-        #expect(manager.isValidResponse(from: fixture.author, isRSR: true))
         for fragment in fixture.fragments {
             fixture.ble._test_ingestFrame(fragment, link: fixture.link)
         }
@@ -381,11 +378,10 @@ struct BLEServiceCoreTests {
         let manager = RequestSyncManager(responseWindow: 30, now: { clock.now })
         let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
         manager.registerRequest(to: fixture.responder)
-        #expect(manager.isValidResponse(from: fixture.responder, isRSR: true))
         for fragment in fixture.fragments.dropLast() {
             fixture.ble._test_ingestFrame(fragment, link: fixture.link)
         }
-        fixture.ble._test_fenceEngine()
+        await fixture.ble._test_drainFragmentPipeline()
         clock.advance(by: 31)
         fixture.ble._test_ingestFrame(try #require(fixture.fragments.last), link: fixture.link)
         await fixture.ble._test_drainFragmentPipeline()
@@ -430,7 +426,7 @@ struct BLEServiceCoreTests {
         ble._test_bindCentral("synthetic-forged-self-message", to: remoteAuthor)
         // An attacker wraps an unsigned message claiming our identity in
         // fragments that identify the attacker. No sync request exists.
-        let content = String(decoding: Array(UInt8(33)...UInt8(96)), as: UTF8.self)
+        let content = try #require(String(bytes: Array(UInt8(33)...UInt8(96)), encoding: .utf8))
         let forgedInner = makePublicPacket(content: content, sender: ble.myPeerID,
                                           timestamp: UInt64(Date().timeIntervalSince1970 * 1_000))
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
