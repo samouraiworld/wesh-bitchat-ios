@@ -37,7 +37,6 @@ protocol CommandContextProvider: AnyObject {
     var activeChannel: ChannelID { get }
     var selectedPrivateChatPeer: PeerID? { get }
     var blockedUsers: Set<String> { get }
-    var idBridge: NostrIdentityBridge { get }
 
     // MARK: - Peer Lookup
     func getPeerIDForNickname(_ nickname: String) -> PeerID?

@@ -685,6 +685,8 @@ extension TorManager {
         allowAutoStart = allow
     }
 
+    #if os(iOS)
     @MainActor
     public func isAutoStartAllowed() -> Bool { allowAutoStart }
+    #endif
 }

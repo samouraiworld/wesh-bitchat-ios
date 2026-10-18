@@ -115,7 +115,6 @@ enum TransportConfig {
     static let uiStartupPhaseDurationSeconds: TimeInterval = 2.0
     static let uiBatchDispatchStaggerSeconds: TimeInterval = 0.15
     static let uiAnimationMediumSeconds: TimeInterval = 0.2
-    static let uiRecentCutoffFiveMinutesSeconds: TimeInterval = 5 * 60
     static let uiMeshEmptyConfirmationSeconds: TimeInterval = 30.0
 
     // BLE maintenance & thresholds

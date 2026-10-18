@@ -36,8 +36,6 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
     var sentReadReceipts: Set<String> = []
     var nickname = "me"
     var myPeerID = PeerID(str: "0011223344556677")
-    var activeChannel: ChannelID = .mesh
-    var nostrKeyMapping: [PeerID: String] = [:]
     private(set) var ownerLevelReadPasses: [PeerID] = []
     private(set) var managerReadMarks: [PeerID] = []
 
@@ -211,9 +209,6 @@ struct ChatLifecycleCoordinatorContextTests {
         let context = MockChatLifecycleContext()
         let coordinator = ChatLifecycleCoordinator(context: context)
         let convKey = PeerID(nostr_: "feedface00112233")
-        let recipientHex = "feedface00112233"
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruy"))
-        context.nostrKeyMapping[convKey] = recipientHex
         context.sentReadReceipts = ["already-acked"]
         context.privateChats[convKey] = [
             makePrivateMessage(id: "m1", senderPeerID: convKey),

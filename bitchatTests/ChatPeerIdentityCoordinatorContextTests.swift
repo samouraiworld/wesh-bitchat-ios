@@ -169,14 +169,9 @@ private final class MockChatPeerIdentityContext: ChatPeerIdentityContext {
         socialIdentitiesByFingerprint[fingerprint]
     }
 
-    // Geohash & Nostr
-    private(set) var registeredNostrKeyMappings: [(pubkey: String, peerID: PeerID)] = []
+    // Account Nostr identity
     private(set) var nostrFavoriteNotifications: [(noisePublicKey: Data, isFavorite: Bool)] = []
     var bridgedNostrKeysByNoiseKey: [Data: String] = [:]
-
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID) {
-        registeredNostrKeyMappings.append((pubkey, peerID))
-    }
 
     func bridgedNostrPublicKey(for noiseKey: Data) -> String? {
         bridgedNostrKeysByNoiseKey[noiseKey]

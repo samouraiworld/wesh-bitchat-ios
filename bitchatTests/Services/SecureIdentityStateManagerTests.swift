@@ -471,7 +471,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         manager.forceSave()
 
         let reloaded = SecureIdentityStateManager(keychain)
-        XCTAssertEqual(reloaded.getBlockedNostrPubkeys(), Set([pubkey.lowercased()]))
+        XCTAssertTrue(reloaded.isNostrBlocked(pubkeyHexLowercased: pubkey.lowercased()))
         XCTAssertTrue(reloaded.isNostrBlocked(pubkeyHexLowercased: pubkey))
     }
 
@@ -480,12 +480,12 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         let pubkey = "ABCDEF1234"
 
         manager.setNostrBlocked(pubkey, isBlocked: true)
-        _ = await waitUntil { manager.isNostrBlocked(pubkeyHexLowercased: pubkey) }
+        let primed = await waitUntil { manager.isNostrBlocked(pubkeyHexLowercased: pubkey) }
+        XCTAssertTrue(primed)
 
         manager.setNostrBlocked(pubkey, isBlocked: false)
         let cleared = await waitUntil {
-            !manager.isNostrBlocked(pubkeyHexLowercased: pubkey) &&
-            manager.getBlockedNostrPubkeys().isEmpty
+            !manager.isNostrBlocked(pubkeyHexLowercased: pubkey)
         }
         XCTAssertTrue(cleared)
     }
@@ -499,7 +499,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
 
         XCTAssertTrue(manager.getFavorites().isEmpty)
         XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
-        XCTAssertTrue(manager.getBlockedNostrPubkeys().isEmpty)
+        XCTAssertFalse(manager.isNostrBlocked(pubkeyHexLowercased: "ABCD"))
         XCTAssertFalse(manager.isPersistenceAvailable)
         manager.setFavorite("new-peer", isFavorite: true)
         manager.forceSave()
@@ -516,7 +516,8 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         manager.setNostrBlocked("ABCD", isBlocked: true)
         let primed = await waitUntil {
             manager.isFavorite(fingerprint: fingerprint) &&
-            manager.isVerified(fingerprint: fingerprint)
+            manager.isVerified(fingerprint: fingerprint) &&
+            manager.isNostrBlocked(pubkeyHexLowercased: "ABCD")
         }
         XCTAssertTrue(primed)
 
@@ -524,7 +525,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         let cleared = await waitUntil {
             !manager.isFavorite(fingerprint: fingerprint) &&
             !manager.isVerified(fingerprint: fingerprint) &&
-            manager.getBlockedNostrPubkeys().isEmpty
+            !manager.isNostrBlocked(pubkeyHexLowercased: "ABCD")
         }
         XCTAssertTrue(cleared)
     }

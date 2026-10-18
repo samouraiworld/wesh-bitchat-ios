@@ -535,16 +535,12 @@ struct ChatViewModelNostrExtensionTests {
 
 }
 
-// MARK: - Geohash Queue Tests
-
-// MARK: - GeoDM Tests
-
 // MARK: - Single-Writer Intent Operation Tests
 
 /// Contracts for the owner-side intent ops that are the sole mutation paths
 /// for `ChatViewModel`'s shared coordinator state (`nostrKeyMapping`,
-/// `sentReadReceipts`, `sentNostrDeliveryAcks`, `isBatchingPublic`, the geo
-/// subscription IDs, and the selected private chat hand-off).
+/// `sentReadReceipts`, `sentNostrDeliveryAcks`, `isBatchingPublic`, and the
+/// selected private chat hand-off).
 struct ChatViewModelIntentOperationTests {
 
     @Test @MainActor
@@ -577,21 +573,6 @@ struct ChatViewModelIntentOperationTests {
         #expect(viewModel.sentReadReceipts == ["keep-1", "keep-2"])
         // Nothing stale left: a second prune removes nothing.
         #expect(viewModel.pruneSentReadReceipts(keeping: ["keep-1", "keep-2"]) == 0)
-    }
-
-    @Test @MainActor
-    func registerNostrKeyMapping_isVisibleToNostrCoordinatorLookups() async {
-        let (viewModel, _) = makeTestableViewModel()
-        let hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-        let convKey = PeerID(nostr_: hex)
-
-        // Registered through the owner intent op (as e.g. the private
-        // conversation flow does) and resolved through the Nostr coordinator,
-        // which reads the same backing dictionary via `ChatNostrContext`.
-        viewModel.registerNostrKeyMapping(hex, for: convKey)
-
-        #expect(viewModel.nostrKeyMapping[convKey] == hex)
-        #expect(viewModel.nostrCoordinator.fullNostrHex(forSenderPeerID: convKey) == hex)
     }
 
     @Test @MainActor
@@ -672,12 +653,6 @@ private func deliveryStatus(in viewModel: ChatViewModel, peerID: PeerID, message
     viewModel.privateChats[peerID]?.first(where: { $0.id == messageID })?.deliveryStatus
 }
 
-private func isFailed(status: DeliveryStatus?) -> Bool {
-    if case .failed = status {
-        return true
-    }
-    return false
-}
 
 private func isDelivered(status: DeliveryStatus?) -> Bool {
     if case .delivered = status {

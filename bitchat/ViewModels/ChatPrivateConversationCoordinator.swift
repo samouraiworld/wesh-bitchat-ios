@@ -21,7 +21,6 @@ protocol ChatPrivateConversationContext: AnyObject {
     var sentReadReceipts: Set<String> { get }
     var selectedPrivateChatPeer: PeerID? { get }
     var nickname: String { get }
-    var activeChannel: ChannelID { get }
     var nostrKeyMapping: [PeerID: String] { get }
 
     // MARK: Conversation store intents

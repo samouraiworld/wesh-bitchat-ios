@@ -238,24 +238,6 @@ struct NostrProtocol {
     }
     #endif
 
-    /// Create a geohash-scoped ephemeral public message (kind 20000)
-    static func createEphemeralGeohashEvent(
-        content: String,
-        geohash: String,
-        senderIdentity: NostrIdentity,
-        nickname: String? = nil,
-        teleported: Bool = false
-    ) throws -> NostrEvent {
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .ephemeralEvent,
-            tags: ephemeralGeohashTags(geohash: geohash, nickname: nickname, teleported: teleported),
-            content: content
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
 
     /// Create a kind-20000 geohash message carrying a NIP-13 proof-of-work
     /// nonce tag (see `NostrPoW`). Mining runs off the calling actor and is
@@ -313,23 +295,6 @@ struct NostrProtocol {
         return tags
     }
 
-    /// Create a geohash presence heartbeat (kind 20001)
-    /// Must contain empty content and NO nickname tag
-    static func createGeohashPresenceEvent(
-        geohash: String,
-        senderIdentity: NostrIdentity
-    ) throws -> NostrEvent {
-        let tags = [["g", geohash]]
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .geohashPresence,
-            tags: tags,
-            content: ""
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
 
     // MARK: - Private Methods
     
