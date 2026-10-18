@@ -26,7 +26,6 @@ final class AppRuntime: ObservableObject {
     let locationChannelsModel: LocationChannelsModel
     let peerListModel: PeerListModel
     let appChromeModel: AppChromeModel
-    let boardAlertsModel: BoardAlertsModel
     let sharedContentImportModel: SharedContentImportModel
     let composerDrafts = ComposerDraftStore.repository
 
@@ -105,23 +104,6 @@ final class AppRuntime: ObservableObject {
             onPanicWipe: { sharedContentImportModel.discardAll() }
         )
         let chatViewModel = self.chatViewModel
-        self.boardAlertsModel = BoardAlertsModel(
-            arrivals: BoardStore.shared.postArrivals.eraseToAnyPublisher(),
-            wipes: BoardStore.shared.didWipe.eraseToAnyPublisher(),
-            dependencies: BoardAlertsModel.Dependencies(
-                isOwnPost: { post in
-                    let key = chatViewModel.meshService.noiseSigningPublicKeyData()
-                    return !key.isEmpty && key == post.authorSigningKey
-                },
-                emitSystemLine: { content, geohash in
-                    if geohash.isEmpty {
-                        chatViewModel.addMeshOnlySystemMessage(content)
-                    } else {
-                        chatViewModel.addGeohashSystemMessage(content, geohash: geohash)
-                    }
-                }
-            )
-        )
         // Wesh Internet mode talks to its pinned relays only: no geo relay directory.
         if !WeshMode.isActive && chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
             GeoRelayDirectory.shared.prefetchIfNeeded()

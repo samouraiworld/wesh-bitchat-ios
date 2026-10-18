@@ -46,7 +46,6 @@ struct BitchatApp: App {
                 .environmentObject(runtime.locationChannelsModel)
                 .environmentObject(runtime.peerListModel)
                 .environmentObject(runtime.appChromeModel)
-                .environmentObject(runtime.boardAlertsModel)
                 .environmentObject(runtime.sharedContentImportModel)
                 .paveEraseShortcut { runtime.appChromeModel.panicClearAllData() }
                 .onAppear {

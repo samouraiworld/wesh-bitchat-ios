@@ -10,6 +10,14 @@ struct BLEReceivedPacketContext: Equatable {
 }
 
 struct BLEReceivePipeline {
+    /// Keep the wire numbers reserved, but refuse the retired feature before
+    /// ingress accounting, reassembly, source routing, sync or radio writes.
+    static func isRetiredBoardPacket(_ packet: BitchatPacket) -> Bool {
+        if packet.type == MessageType.boardPost.rawValue { return true }
+        return packet.type == MessageType.fragment.rawValue && packet.payload.count >= 13
+            && packet.payload[12] == MessageType.boardPost.rawValue
+    }
+
     static func context(for packet: BitchatPacket, localPeerID: PeerID) -> BLEReceivedPacketContext {
         let senderID = PeerID(hexData: packet.senderID)
         // Include a payload digest so that distinct packets sharing the same
@@ -43,7 +51,10 @@ struct BLEReceivePipeline {
         degree: Int,
         highDegreeThreshold: Int
     ) -> RelayDecision {
-        RelayController.decide(
+        guard !isRetiredBoardPacket(packet) else {
+            return RelayDecision(shouldRelay: false, newTTL: packet.ttl, delayMs: 0)
+        }
+        return RelayController.decide(
             ttl: packet.ttl,
             senderIsSelf: senderID == localPeerID,
             recipientIsSelf: PeerID(hexData: packet.recipientID) == localPeerID,
@@ -66,10 +77,6 @@ struct BLEReceivePipeline {
             isHandshake: packet.type == MessageType.noiseHandshake.rawValue,
             isAnnounce: packet.type == MessageType.announce.rawValue,
             isRequestSync: packet.type == MessageType.requestSync.rawValue,
-            // Board posts relay like broadcast messages; urgent ones get the
-            // announce-class TTL headroom so alerts travel the extra hop.
-            isUrgentBoardPost: packet.type == MessageType.boardPost.rawValue
-                && BoardWire.urgentFlag(in: packet.payload),
             degree: degree,
             highDegreeThreshold: highDegreeThreshold
         )

@@ -239,7 +239,7 @@ struct LocationNotesManagerTests {
     /// created_at is author-chosen: a note dated 2100 used to sort above
     /// every real note forever and survive the newest-first memory cap.
     @Test
-    func ingestClampsFutureDatedNotesToTheBoardSkew() throws {
+    func ingestClampsFutureDatedNotesToOneHour() throws {
         var storedHandler: ((NostrEvent) -> Void)?
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         var currentNow = start
@@ -256,7 +256,7 @@ struct LocationNotesManagerTests {
 
         let manager = LocationNotesManager(geohash: "u4pruydq", dependencies: deps)
         let identity = try NostrIdentity.generate()
-        let skew = TimeInterval(BoardStore.Limits.clockSkewMs) / 1000
+        let skew = TimeInterval(3_600)
 
         // Within the board's skew allowance the author's timestamp is kept,
         // so a bridged copy of a board post still dedupes against the post.

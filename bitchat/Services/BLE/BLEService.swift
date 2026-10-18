@@ -87,8 +87,6 @@ final class BLEService: NSObject {
     // reject. Injectable for tests; main-actor policy because favorites live
     // on the main actor.
     var courierStore: CourierStore = .shared
-    // Bulletin-board posts this device carries; injectable for tests.
-    var boardStore: BoardStore = .shared
     var courierDepositPolicy: @MainActor (Data, Bool) -> CourierDepositTier? = { depositorNoiseKey, isVerifiedPeer in
         if FavoritesPersistenceService.shared.isMutualFavorite(depositorNoiseKey) { return .favorite }
         return isVerifiedPeer ? .verified : nil
@@ -637,14 +635,6 @@ final class BLEService: NSObject {
         let delegate = makeGossipDelegate()
         gossipDelegate = delegate
         manager.delegate = delegate
-        // Board posts sync from the board store (their retention owner) so
-        // deleted/expired posts drop out of rounds immediately. Real sessions
-        // only, matching the archive: unit tests stay hermetic.
-        if meshBackgroundEnabled {
-            manager.boardPacketsProvider = { [weak self] in
-                self?.boardStore.syncCandidates() ?? []
-            }
-        }
         // Only start the periodic sync timers when real Bluetooth exists. In unit
         // tests there is no mesh to sync with, and the periodic sign/broadcast
         // churn just keeps the process busy and aggravates flaky exit hangs.
@@ -1376,6 +1366,7 @@ final class BLEService: NSObject {
     // MARK: - Packet Broadcasting
     
     private func broadcastPacket(_ packet: BitchatPacket) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
         guard isTransportTrafficAllowed else { return }
         // Apply route if recipient exists (centralized route application)
         let packetToSend: BitchatPacket
@@ -1679,6 +1670,7 @@ final class BLEService: NSObject {
         requireDirectPeerLink: Bool = false,
         requireNoiseAuthenticatedPeerLink: Bool = false
     ) -> Bool {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return false }
         #if DEBUG
         _test_onOutboundPacket?(packet)
         #endif
@@ -4409,6 +4401,7 @@ extension BLEService {
         link: BLEIngressLinkID,
         linkDescription: String
     ) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
         guard let lifecycleGeneration = capturePanicLifecycleGeneration() else { return }
         messageQueue.async { [weak self] in
             guard let self,
@@ -4429,6 +4422,7 @@ extension BLEService {
         link: BLEIngressLinkID,
         linkDescription: String
     ) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
         let claimedSenderID = PeerID(hexData: packet.senderID)
         let context = acceptedIngressContext(
             for: packet,
@@ -4467,6 +4461,7 @@ extension BLEService {
     }
 
     private func handleReceivedPacket(_ packet: BitchatPacket, from peerID: PeerID) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
         let isNoisePacket = packet.type == MessageType.noiseHandshake.rawValue
             || packet.type == MessageType.noiseEncrypted.rawValue
 
@@ -4520,6 +4515,7 @@ extension BLEService {
         _ packet: BitchatPacket,
         from peerID: PeerID
     ) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
         let context = BLEReceivePipeline.context(for: packet, localPeerID: myPeerID)
         let senderID = context.senderID
         let messageID = context.messageID
@@ -4618,8 +4614,7 @@ extension BLEService {
             handlePrekeyBundle(packet, from: senderID)
 
         case .boardPost:
-            // Invalid or deleted posts must not spread; skip the relay step.
-            guard handleBoardPost(packet, from: senderID) else { return }
+            return // Reserved wire type; the feature is retired.
         case .nostrCarrier:
             handleNostrCarrier(packet, from: peerID)
 
@@ -5167,32 +5162,6 @@ extension BLEService {
                 }
             }
         )
-    }
-
-    // MARK: - Board (geohash bulletin board)
-
-    /// Validates and stores an incoming board post or tombstone. Returns
-    /// whether the packet is worth relaying onward.
-    private func handleBoardPost(_ packet: BitchatPacket, from peerID: PeerID) -> Bool {
-        guard let wire = BoardWire.decode(from: packet.payload) else {
-            SecureLogger.warning("⚠️ Malformed board packet from \(peerID.id.prefix(8))…", category: .session)
-            return false
-        }
-        // Posts are self-authenticating: the payload embeds the author's
-        // Ed25519 key and signature, so verification does not depend on the
-        // author still being around to announce.
-        guard wire.verifySignature() else {
-            if logRateLimiter.shouldLog(key: "board-sig:\(peerID.id)") {
-                SecureLogger.warning("🚫 Dropping board packet with invalid signature from \(peerID.id.prefix(8))…", category: .security)
-            }
-            return false
-        }
-        switch boardStore.ingest(wire, packet: packet) {
-        case .accepted, .duplicate:
-            return true
-        case .rejected:
-            return false
-        }
     }
 
     // Handle REQUEST_SYNC: decode payload and respond with missing packets via sync manager

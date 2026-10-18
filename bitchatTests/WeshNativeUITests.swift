@@ -134,7 +134,7 @@ struct WeshNativeUITests {
             let store = PrekeyBundleStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "board":
-            let store = BoardStore(fileURL: url, wipeFileManager: files)
+            let store = RetiredBoardStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         default:
             let store = MessageOutboxStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
