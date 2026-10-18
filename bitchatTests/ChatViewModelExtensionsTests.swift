@@ -8,6 +8,7 @@
 import Testing
 import Foundation
 import Combine
+import CoreLocation
 #if os(iOS)
 import UIKit
 #else
@@ -19,7 +20,9 @@ import BitFoundation
 // MARK: - Test Helpers
 
 @MainActor
-private func makeTestableViewModel() -> (viewModel: ChatViewModel, transport: MockTransport) {
+private func makeTestableViewModel(
+    locationManager: LocationChannelManager = .shared
+) -> (viewModel: ChatViewModel, transport: MockTransport) {
     let keychain = MockKeychain()
     let keychainHelper = MockKeychainHelper()
     let idBridge = NostrIdentityBridge(keychain: keychainHelper)
@@ -30,10 +33,33 @@ private func makeTestableViewModel() -> (viewModel: ChatViewModel, transport: Mo
         keychain: keychain,
         idBridge: idBridge,
         identityManager: identityManager,
-        transport: transport
+        transport: transport,
+        locationManager: locationManager
     )
 
     return (viewModel, transport)
+}
+
+private final class IsolatedChannelLocationManager: LocationStateManaging {
+    weak var delegate: CLLocationManagerDelegate?
+    var desiredAccuracy: CLLocationAccuracy = 0
+    var distanceFilter: CLLocationDistance = 0
+    var authorizationStatus: CLAuthorizationStatus { .denied }
+
+    func requestWhenInUseAuthorization() { preconditionFailure("Unexpected authorization request") }
+    func requestLocation() { preconditionFailure("Unexpected location request") }
+    func startUpdatingLocation() { preconditionFailure("Unexpected location updates") }
+    func stopUpdatingLocation() {}
+}
+
+private final class IsolatedChannelGeocoder: LocationStateGeocoding {
+    func cancelGeocode() {}
+    func reverseGeocodeLocation(
+        _ location: CLLocation,
+        completionHandler: @escaping ([CLPlacemark]?, Error?) -> Void
+    ) {
+        preconditionFailure("Unexpected geocoding request")
+    }
 }
 
 // MARK: - Private Chat Extension Tests
@@ -273,16 +299,28 @@ struct ChatViewModelNostrExtensionTests {
     func subscribeNostrEvent_addsToTimeline_ifMatchesGeohash() async throws {
         let geohash = "u4pruydq"
         let channel = ChannelID.location(GeohashChannel(level: .city, geohash: geohash))
+        let suiteName = "ChatViewModelNostrExtensionTests.\(UUID().uuidString)"
+        let storage = try #require(UserDefaults(suiteName: suiteName))
+        defer { storage.removePersistentDomain(forName: suiteName) }
+        // Inject synthetic storage and fakes; no platform location adapter is constructed.
+        let locationManager = LocationChannelManager(
+            storage: storage,
+            locationManager: IsolatedChannelLocationManager(),
+            geocoder: IsolatedChannelGeocoder(),
+            shouldInitializeCoreLocation: false
+        )
+        let (viewModel, _) = makeTestableViewModel(locationManager: locationManager)
+        defer {
+            viewModel.geoChannelCoordinator = nil
+            viewModel.switchLocationChannel(to: .mesh)
+        }
+        locationManager.select(channel)
+        let ready = await TestHelpers.waitUntil({
+            locationManager.selectedChannel == channel &&
+            viewModel.activeChannel == channel && viewModel.currentGeohash == geohash
+        }, timeout: TestConstants.settleTimeout)
+        try #require(ready, "The isolated channel must be ready before event intake")
 
-        LocationChannelManager.shared.select(channel)
-        defer { LocationChannelManager.shared.select(.mesh) }
-
-        _ = await TestHelpers.waitUntil({ LocationChannelManager.shared.selectedChannel == channel }, timeout: TestConstants.settleTimeout)
-
-        let (viewModel, _) = makeTestableViewModel()
-        
-        _ = await TestHelpers.waitUntil({ viewModel.activeChannel == channel }, timeout: TestConstants.settleTimeout)
-        
         let signer = try NostrIdentity.generate()
         let event = NostrEvent(
             pubkey: signer.publicKeyHex,
@@ -293,25 +331,10 @@ struct ChatViewModelNostrExtensionTests {
         )
         let signed = try event.sign(with: signer.schnorrSigningKey())
         viewModel.handleNostrEvent(signed)
-        
+
         let didAppend = await TestHelpers.waitUntil({
             viewModel.publicMessagePipeline.flushIfNeeded()
-            if viewModel.messages.contains(where: { $0.content == "Hello Geo" }) { return true }
-            // LocationChannelManager is a process-wide singleton: a suite
-            // running in parallel (e.g. CommandProcessorTests) can flip the
-            // selected channel mid-test, which reroutes or drops the event
-            // permanently — no amount of waiting recovers it. Re-assert the
-            // channel and redeliver on each poll: every channel switch clears
-            // the processed-event set and the store dedups by message ID, so
-            // redelivery is idempotent and interference heals on the next
-            // poll while a genuine failure still times out.
-            if LocationChannelManager.shared.selectedChannel != channel {
-                LocationChannelManager.shared.select(channel)
-            }
-            if viewModel.activeChannel == channel {
-                viewModel.handleNostrEvent(signed)
-            }
-            return false
+            return viewModel.messages.contains(where: { $0.id == signed.id })
         }, timeout: TestConstants.settleTimeout)
         #expect(didAppend)
     }
