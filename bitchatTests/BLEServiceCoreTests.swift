@@ -343,6 +343,61 @@ struct BLEServiceCoreTests {
         #expect(messages.first?.content == "Hello")
     }
 
+    @Test(arguments: [false, true])
+    func selfAuthoredSyncRejectsUnsignedOrForeignSignedMessage(useForeignSignature: Bool) async throws {
+        let ble = makeService()
+        let capture = PublicCaptureDelegate()
+        ble.delegate = capture
+        let responder = PeerID(str: "1122334455667788")
+        let link = BLEIngressLinkID.central("self-sync-responder")
+        ble._test_bindCentral("self-sync-responder", to: responder)
+        ble._test_registerSyncRequest(to: responder)
+        var packet = makePublicPacket(content: "Synthetic self-history forgery",
+                                      sender: ble.myPeerID,
+                                      timestamp: UInt64(Date().timeIntervalSince1970 * 1_000))
+        if useForeignSignature {
+            let foreignSigner = NoiseEncryptionService(keychain: MockKeychain())
+            packet = try #require(foreignSigner.signPacket(packet))
+        }
+        packet.ttl = 0
+        packet.isRSR = true
+
+        ble._test_ingestFrame(packet, link: link)
+        await ble._test_drainFragmentPipeline()
+
+        #expect(capture.publicMessagesSnapshot().isEmpty)
+    }
+
+    @Test
+    func selfAuthoredSyncRestoresGenuineLocallySignedHistory() async throws {
+        let ble = makeService()
+        let capture = PublicCaptureDelegate()
+        ble.delegate = capture
+        let responder = PeerID(str: "1122334455667788")
+        let link = BLEIngressLinkID.central("self-sync-responder")
+        ble._test_bindCentral("self-sync-responder", to: responder)
+        ble._test_registerSyncRequest(to: responder)
+        // Old enough to need the solicited-response age waiver, within the
+        // public history window. It was signed by our current local identity.
+        let content = "Synthetic genuine self-history"
+        let timestamp = UInt64(Date().timeIntervalSince1970 * 1_000)
+            - TransportConfig.bleMaxTimestampSkewMs - 60_000
+        let original = makePublicPacket(content: content, sender: ble.myPeerID, timestamp: timestamp)
+        var packet = ble.signPacketForBroadcast(original)
+        let signature = try #require(packet.signature)
+        #expect(signature.count == 64)
+        packet.ttl = 0
+        packet.isRSR = true
+
+        ble._test_ingestFrame(packet, link: link)
+        await ble._test_drainFragmentPipeline()
+
+        let messages = capture.publicMessagesSnapshot()
+        #expect(messages.count == 1)
+        #expect(messages.first?.content == content)
+        #expect(messages.first?.senderPeerID == ble.myPeerID)
+    }
+
     @Test
     func staleBroadcast_isIgnored() async {
         let ble = makeService()
