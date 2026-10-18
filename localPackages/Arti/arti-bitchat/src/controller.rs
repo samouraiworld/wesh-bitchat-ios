@@ -540,11 +540,58 @@ mod tests {
     }
 
     #[test]
+    fn finite_internal_cleanup_completes_before_stop_acknowledges() {
+        let control = controller();
+        let work = blocked_internal_work(&control);
+        let stopped_control = control.clone();
+        let dropped = work.dropped.clone();
+        let (stopped_tx, stopped_rx) = mpsc::channel();
+        let stopping = std::thread::spawn(move || {
+            let result = stopped_control.stop();
+            let dropped_at_return = dropped.load(Ordering::SeqCst);
+            let _ = stopped_tx.send(());
+            (result, dropped_at_return)
+        });
+
+        work.root_completed
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        let before_release = stopped_rx.try_recv();
+        let blocked_after_root_completed = !work.dropped.load(Ordering::SeqCst);
+        let admitted = work.context.admit(|| true);
+        let published = work.context.publish(Arc::new(9));
+        work.context.set_progress(100);
+        work.context.set_summary("Ready");
+        let progress = control.progress();
+        let summary = control.summary().unwrap();
+
+        // Release explicitly, without depending on a sleep or a Tokio clock:
+        // the root is gone, but its runtime still owns this blocking work.
+        work.release.send(()).unwrap();
+        work.completed.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (stopped, dropped_at_return) = stopping.join().unwrap();
+        control.join_tasks();
+
+        assert!(matches!(before_release, Err(mpsc::TryRecvError::Empty)));
+        assert!(blocked_after_root_completed);
+        assert!(admitted.is_none());
+        assert!(!published);
+        assert_eq!((progress, summary.as_str()), (0, ""));
+        assert_eq!(stopped, 0);
+        assert!(dropped_at_return);
+        assert!(!control.is_running());
+
+        // A genuinely clean teardown permits a replacement generation.
+        let _replacement = completed_context(&control);
+        assert!(!control.is_running());
+    }
+
+    #[test]
     fn stop_cannot_report_clean_while_internal_runtime_work_is_alive() {
         let control = controller_with_timeout(Duration::ZERO);
         let work = blocked_internal_work(&control);
 
-        let clean = control.stop() == 0;
+        let stopped = control.stop();
         let dropped_at_return = work.dropped.load(Ordering::SeqCst);
         work.root_completed
             .recv_timeout(Duration::from_secs(2))
@@ -558,10 +605,8 @@ mod tests {
             blocked_after_root_completed,
             "the fixture must keep internal work alive independently of the completed root"
         );
-        assert!(
-            !clean || dropped_at_return,
-            "native stop reported success before internal runtime work ended"
-        );
+        assert_eq!(stopped, -5);
+        assert!(!dropped_at_return);
     }
 
     #[test]
@@ -582,12 +627,12 @@ mod tests {
         work.completed.recv_timeout(Duration::from_secs(2)).unwrap();
         control.join_tasks();
 
-        assert_ne!(
-            stopped, 0,
+        assert_eq!(
+            stopped, -5,
             "blocked internal work cannot have a clean stop result"
         );
-        assert_ne!(
-            replacement, 0,
+        assert_eq!(
+            replacement, -5,
             "a new runtime was admitted after teardown had not finished"
         );
         assert!(
@@ -596,14 +641,14 @@ mod tests {
         );
         assert_eq!(control.progress(), 0);
         assert_eq!(control.summary().unwrap(), "");
-        assert_ne!(
+        assert_eq!(
             control.start(|_, _| async {}),
-            0,
+            -5,
             "finishing late must not admit a later restart in this process"
         );
-        assert_ne!(
+        assert_eq!(
             control.stop(),
-            0,
+            -5,
             "a later stop must not report the failed teardown clean"
         );
     }
