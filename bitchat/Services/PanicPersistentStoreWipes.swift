@@ -15,6 +15,18 @@ enum PanicFileRemoval {
         } catch { return isMissing(error) }
     }
 
+    static func removeLegacyGroups(at applicationSupportURL: URL, fileManager: FileManager = .default) -> Bool {
+        remove(applicationSupportURL.appendingPathComponent("groups", isDirectory: true),
+               required: true, fileManager: fileManager)
+    }
+
+    static func removeLegacyMedia(fileStore: PanicRecoveryFileStore) -> Bool {
+        do {
+            try fileStore.removeLegacyMedia()
+            return true
+        } catch { return false }
+    }
+
     private static func isMissing(_ error: Error) -> Bool {
         let value = error as NSError
         return (value.domain == NSCocoaErrorDomain
@@ -46,7 +58,12 @@ struct PanicPersistentStoreWipes {
         guard let base = try? FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
         ) else { return false }
-        return PanicFileRemoval.remove(base.appendingPathComponent("groups", isDirectory: true), required: true)
+        return PanicFileRemoval.removeLegacyGroups(at: base)
+    }
+    /// Ordinary retirement deletes only the legacy tree, never a panic marker or drafts.
+    var legacyMedia: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return PanicFileRemoval.removeLegacyMedia(fileStore: PanicRecoveryFileStore())
     }
     /// Handoffs left by earlier share extensions; never parsed or imported.
     var sharedContent: @MainActor () -> Bool = {
