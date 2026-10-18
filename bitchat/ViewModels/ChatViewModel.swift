@@ -667,7 +667,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let startupDecision = PanicStartupDecision.preflight(
             checkPending: livePanicRecoveryOperations.isPending,
             wipeSightings: persistentWipes.sightings,
-            wipeGeography: persistentWipes.geography
+            wipeGeography: persistentWipes.geography,
+            wipeSharedContent: persistentWipes.sharedContent,
+            wipeBoard: persistentWipes.board,
+            wipeBridge: persistentWipes.bridge
         )
         // Preserve the preflight decision used to defer CoreBluetooth. A
         // transiently successful second read must not skip recovery and leave
@@ -1209,7 +1212,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let decision = PanicStartupDecision.retry(
             checkPending: panicRecoveryOperations.isPending,
             wipeSightings: panicPersistentStoreWipes.sightings,
-            wipeGeography: panicPersistentStoreWipes.geography
+            wipeGeography: panicPersistentStoreWipes.geography,
+            wipeSharedContent: panicPersistentStoreWipes.sharedContent,
+            wipeBoard: panicPersistentStoreWipes.board,
+            wipeBridge: panicPersistentStoreWipes.bridge
         )
         if decision.replayPanic {
             startupRetirementBlocked = false

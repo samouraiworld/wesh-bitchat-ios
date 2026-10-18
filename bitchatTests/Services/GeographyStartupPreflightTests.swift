@@ -18,7 +18,7 @@ struct GeographyStartupPreflightTests {
         }, wipeSightings: {
             sightingsCalls += 1
             return true
-        }, wipeGeography: fixture.erase)
+        }, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(markerReads == 1)
         #expect(sightingsCalls == 1)
@@ -41,7 +41,7 @@ struct GeographyStartupPreflightTests {
         let decision = PanicStartupDecision.preflight(checkPending: { false }, wipeSightings: {
             sightingsCalls += 1
             return true
-        }, wipeGeography: fixture.erase)
+        }, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(sightingsCalls == 1)
         #expect(fixture.eraseCalls == 1)
@@ -60,7 +60,7 @@ struct GeographyStartupPreflightTests {
         let decision = PanicStartupDecision.preflight(checkPending: { false }, wipeSightings: {
             sightingsCalls += 1
             return false
-        }, wipeGeography: fixture.erase)
+        }, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(sightingsCalls == 1)
         #expect(fixture.eraseCalls == 1)
@@ -81,7 +81,7 @@ struct GeographyStartupPreflightTests {
         let wipeSightings = { sightingsCalls += 1; return true }
 
         let failed = PanicStartupDecision.retry(checkPending: checkPending,
-            wipeSightings: wipeSightings, wipeGeography: fixture.erase)
+            wipeSightings: wipeSightings, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(failed.suspendTransport)
         #expect(failed.blockOrdinaryAdmission)
@@ -89,7 +89,7 @@ struct GeographyStartupPreflightTests {
         fixture.defaults.flushSucceeds = true
 
         let confirmed = PanicStartupDecision.retry(checkPending: checkPending,
-            wipeSightings: wipeSightings, wipeGeography: fixture.erase)
+            wipeSightings: wipeSightings, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(!confirmed.suspendTransport)
         #expect(!confirmed.blockOrdinaryAdmission)
@@ -110,7 +110,7 @@ struct GeographyStartupPreflightTests {
         let decision = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: {
             sightingsCalls += 1
             return false
-        }, wipeGeography: fixture.erase)
+        }, wipeGeography: fixture.erase, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(sightingsCalls == 1)
         #expect(fixture.eraseCalls == 1)
@@ -128,13 +128,13 @@ struct GeographyStartupPreflightTests {
             return true
         }
         let initial = PanicStartupDecision.preflight(checkPending: checkPending,
-            wipeSightings: { true }, wipeGeography: { true })
+            wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
         #expect(initial.replayPanic)
         #expect(initial.suspendTransport)
         #expect(markerReads == 1)
 
         let retry = PanicStartupDecision.retry(checkPending: checkPending,
-            wipeSightings: { true }, wipeGeography: { true })
+            wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
         #expect(retry.replayPanic)
         #expect(retry.suspendTransport)
         #expect(markerReads == 2)
@@ -148,7 +148,7 @@ struct GeographyStartupPreflightTests {
         let store = RetiredGeographyStore(defaults: defaults, applicationSupportURL: root)
 
         let decision = PanicStartupDecision.preflight(checkPending: { false },
-            wipeSightings: { true }, wipeGeography: store.wipe)
+            wipeSightings: { true }, wipeGeography: store.wipe, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true })
 
         #expect(!decision.suspendTransport)
         #expect(defaults.values.isEmpty)
