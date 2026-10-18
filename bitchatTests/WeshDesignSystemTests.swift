@@ -18,11 +18,14 @@ struct WeshDesignSystemTests {
         #expect(canvas.alpha == 1)
     }
 
-    @Test func storedAppearanceIDsKeepTheirMeaning() {
+    @Test func storedAppearanceIDsKeepTheirMeaning() throws {
+        let path = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj"))
+        let french = try #require(Bundle(path: path))
+        let locale = Locale(identifier: "fr")
         #expect(WeshTheme().appearance == .night)
-        #expect(WeshAppearance(rawValue: "night")?.title == "Nuit")
+        #expect(WeshAppearance(rawValue: "night")?.title(bundle: french, locale: locale) == "Nuit")
         #expect(WeshAppearance(rawValue: "night")?.paveTheme == .nuit)
-        #expect(WeshAppearance(rawValue: "day")?.title == "Jour")
+        #expect(WeshAppearance(rawValue: "day")?.title(bundle: french, locale: locale) == "Jour")
         #expect(WeshAppearance(rawValue: "day")?.paveTheme == .jour)
     }
 

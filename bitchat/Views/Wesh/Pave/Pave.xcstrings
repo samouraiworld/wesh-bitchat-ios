@@ -3391,6 +3391,3464 @@
           }
         }
       }
+    },
+    "pave.composer.changed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le brouillon a changé. Relisez le texte avant de l’envoyer."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The draft changed. Read the text again before sending."
+          }
+        }
+      }
+    },
+    "pave.composer.tooLong" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message trop long. Raccourcissez-le pour l’envoyer. Votre brouillon est conservé."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message too long. Shorten it to send. Your draft is kept."
+          }
+        }
+      }
+    },
+    "pave.contacts.recovery.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les contacts et vérifications conservés sur ce téléphone ne peuvent pas être lus. Réessayer ne les efface pas. Pour repartir de zéro, réinitialisez : toutes les données de Wesh sur ce téléphone seront effacées."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The contacts and verifications stored on this phone cannot be read. Retrying does not erase them. To start over, reset: all Wesh data on this phone will be erased."
+          }
+        }
+      }
+    },
+    "pave.contacts.recovery.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts illisibles"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unreadable contacts"
+          }
+        }
+      }
+    },
+    "pave.contacts.unavailable.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh ne peut pas lire vos contacts pour le moment. Déverrouillez le téléphone, puis réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh cannot read your contacts right now. Unlock the phone, then retry."
+          }
+        }
+      }
+    },
+    "pave.contacts.unavailable.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts indisponibles"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts unavailable"
+          }
+        }
+      }
+    },
+    "pave.identity.pending.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La sauvegarde de vos clés n’est pas confirmée. L’envoi et votre QR restent suspendus. Réessayer ne remplace pas vos clés existantes."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving your keys is not confirmed. Sending and your QR remain suspended. Retrying does not replace your existing keys."
+          }
+        }
+      }
+    },
+    "pave.identity.pending.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité en attente"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity pending"
+          }
+        }
+      }
+    },
+    "pave.identity.recovery.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les données d’identité conservées sont incomplètes ou ne correspondent pas. Gardez-les sur ce téléphone. Réessayer ne les efface pas."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The stored identity data is incomplete or does not match. Keep it on this phone. Retrying does not erase it."
+          }
+        }
+      }
+    },
+    "pave.identity.recovery.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité à récupérer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity recovery needed"
+          }
+        }
+      }
+    },
+    "pave.identity.suspended.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre identité locale a été désactivée. L’envoi et votre QR restent indisponibles. Une reprise ne peut pas annuler un effacement demandé."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your local identity was deactivated. Sending and your QR remain unavailable. Recovery cannot undo a requested erasure."
+          }
+        }
+      }
+    },
+    "pave.identity.suspended.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité suspendue"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity suspended"
+          }
+        }
+      }
+    },
+    "pave.identity.unavailable.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh ne peut pas lire ses clés sur ce téléphone. Déverrouillez-le, puis réessayez. L’envoi et votre QR sont suspendus."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wesh cannot read its keys on this phone. Unlock it, then retry. Sending and your QR are suspended."
+          }
+        }
+      }
+    },
+    "pave.identity.unavailable.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité indisponible"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity unavailable"
+          }
+        }
+      }
+    },
+    "pave.localErase.confirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacement local confirmé. Vos contacts devront être vérifiés à nouveau avant tout échange privé."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local erasure confirmed. Verify your contacts again before any private exchange."
+          }
+        }
+      }
+    },
+    "pave.localErase.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local erasure did not finish. Some data may remain here and exchanges stay suspended."
+          }
+        }
+      }
+    },
+    "pave.localErase.warning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette action efface l’identité Wesh, les contacts et leurs vérifications, l’historique, les fichiers reçus, les brouillons et la note de rendez-vous conservés ici. Elle ne supprime pas les copies détenues par d’autres personnes ni leurs sauvegardes. Elle ne garantit pas un effacement physique du stockage. Cette action est irréversible."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This erases the Wesh identity, contacts and their verifications, history, received files, drafts and meeting note kept here. It does not delete copies held by other people or their backups. It does not guarantee physical erasure of storage. This action is irreversible."
+          }
+        }
+      }
+    },
+    "pave.wesh.action.addContact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajouter un contact"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a contact"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.block" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.copyMessage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier le message"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy message"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.done" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminé"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.erase" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erase"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.remove" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.report" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signaler"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.reportName" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signaler %@"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.unblock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblock"
+          }
+        }
+      }
+    },
+    "pave.wesh.action.unblockName" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblock %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer %@"
+          }
+        }
+      }
+    },
+    "pave.wesh.appearance.daySubtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papier d’affiche, pour le plein soleil"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poster paper, for bright sunlight"
+          }
+        }
+      }
+    },
+    "pave.wesh.appearance.intro" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une touche de métal."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A touch of metal."
+          }
+        }
+      }
+    },
+    "pave.wesh.appearance.nightSubtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asphalte, noir réel pour l’OLED"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asphalt, true black for OLED"
+          }
+        }
+      }
+    },
+    "pave.wesh.appearance.qrScope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Argent ou or, sur noir pur. Le QR reste noir sur blanc pour être facile à scanner."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Silver or gold on pure black. The QR stays black on white so it is easy to scan."
+          }
+        }
+      }
+    },
+    "pave.wesh.block.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Their next messages will be ignored on this phone. Existing history stays here. You can unblock them in Settings → Blocked contacts."
+          }
+        }
+      }
+    },
+    "pave.wesh.block.confirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personne bloquée sur ce téléphone."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Person blocked on this phone."
+          }
+        }
+      }
+    },
+    "pave.wesh.block.contactTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquer ce contact ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block this contact?"
+          }
+        }
+      }
+    },
+    "pave.wesh.block.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks for confirmation before ignoring their next messages on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.block.namedBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: their next messages will be ignored here. Existing history stays on this phone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone."
+          }
+        }
+      }
+    },
+    "pave.wesh.block.onPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquer sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.block.personTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquer cette personne ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block this person?"
+          }
+        }
+      }
+    },
+    "pave.wesh.blocked.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personne n’est bloqué."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nobody is blocked."
+          }
+        }
+      }
+    },
+    "pave.wesh.blocked.emptyBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les personnes bloquées apparaîtront ici, même hors connexion."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocked people will appear here, even offline."
+          }
+        }
+      }
+    },
+    "pave.wesh.blocked.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts bloqués"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocked contacts"
+          }
+        }
+      }
+    },
+    "pave.wesh.bluetooth.allow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autoriser le Bluetooth"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Bluetooth"
+          }
+        }
+      }
+    },
+    "pave.wesh.bluetooth.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activez le Bluetooth pour échanger à proximité"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on Bluetooth to exchange nearby"
+          }
+        }
+      }
+    },
+    "pave.wesh.bluetooth.preparing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Préparation du Bluetooth…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing Bluetooth…"
+          }
+        }
+      }
+    },
+    "pave.wesh.bluetooth.unauthorized" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisez le Bluetooth dans les réglages du téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Bluetooth in the phone settings"
+          }
+        }
+      }
+    },
+    "pave.wesh.bluetooth.unsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth indisponible sur cet appareil"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth unavailable on this device"
+          }
+        }
+      }
+    },
+    "pave.wesh.composer.private" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message privé"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private message"
+          }
+        }
+      }
+    },
+    "pave.wesh.composer.public" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message public"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public message"
+          }
+        }
+      }
+    },
+    "pave.wesh.composer.sendPrivate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyer le message privé"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send private message"
+          }
+        }
+      }
+    },
+    "pave.wesh.composer.sendPublic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyer publiquement"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send publicly"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.blockConfirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact bloqué sur ce téléphone."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact blocked on this phone."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.blocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloqué sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocked on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.notBlocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce contact n’est plus bloqué."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This contact is no longer blocked."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.qrNameScope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce surnom vient du QR. La vérification concerne l’identité de connexion, sur ce téléphone seulement."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This nickname comes from the QR. Verification concerns the connection identity, on this phone only."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.remove" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer ce contact"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove this contact"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.removeBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Il disparaîtra des discussions. Ce retrait n’efface pas l’historique. Un nouveau scan sera nécessaire pour envoyer. Les envois en attente pourront reprendre après ce scan."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "They will disappear from chats. Removing them does not erase history. A new scan will be needed to send. Pending sends may resume after that scan."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.removeFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La suppression n’a pas pu être enregistrée. Les envois privés à ce contact restent suspendus. Réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removal could not be saved. Private sends to this contact stay suspended. Retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.removeScope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le blocage ignore ses prochains messages ici et conserve l’historique existant. Retirer le contact suspend les prochains envois privés ; un nouveau scan sera nécessaire. Les messages déjà transmis ne peuvent pas être rappelés."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocking ignores their next messages here and keeps existing history. Removing the contact suspends future private sends; a new scan will be needed. Messages already transmitted cannot be recalled."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.removeTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer ce contact ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove this contact?"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.unblockOffline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can unblock them here or in Settings → Blocked contacts, even when they are offline."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.unblocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact débloqué."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact unblocked."
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.verifiedHere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité vérifiée ici"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity verified here"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.verify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérifier le contact"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verify contact"
+          }
+        }
+      }
+    },
+    "pave.wesh.contact.view" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voir le contact"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View contact"
+          }
+        }
+      }
+    },
+    "pave.wesh.contacts.reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réinitialiser les contacts et l’identité"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset contacts and identity"
+          }
+        }
+      }
+    },
+    "pave.wesh.contacts.resetHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande confirmation avant d’effacer toutes les données de Wesh sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks for confirmation before erasing all Wesh data on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.contacts.retryHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Relire les contacts sans rien effacer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read contacts again without erasing anything"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actions de conversation"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversation actions"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.prepare" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Préparez un message. Il restera ici tant que l’envoi est indisponible."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prepare a message. It will stay here while sending is unavailable."
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.privateAbout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À propos de cette discussion privée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About this private conversation"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.privateEmpty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre discussion commence ici."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your conversation starts here."
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.privateEmptyBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écrivez quand votre contact est connecté."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write when your contact is connected."
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.privateTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discussion privée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private conversation"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.publicAbout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À propos du salon public"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About the public room"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.publicEmpty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un premier salut ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Say hello?"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.publicEmptyBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entrez dans la conversation.\nAucun contact à ajouter."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Join the conversation.\nNo contact to add."
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.publicRelay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public · Messages relayables"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public · Messages can be relayed"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.roomReady" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le salon est prêt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The room is ready."
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.verifyOrConnect" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérification ou connexion requise"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification or connection needed"
+          }
+        }
+      }
+    },
+    "pave.wesh.conversation.visible" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visible par les participants au salon."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visible to people in the room."
+          }
+        }
+      }
+    },
+    "pave.wesh.date.today" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aujourd’hui"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        }
+      }
+    },
+    "pave.wesh.date.yesterday" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hier"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yesterday"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.carried" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confié à un relais · réception non confirmée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Handed to a relay · receipt unconfirmed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.delivered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réception confirmée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Receipt confirmed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec d’envoi"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send failed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.partial" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transmission partielle"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partial transmission"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.publicFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de diffusion"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Broadcast failed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.publicPartial" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transmission partielle · réception non confirmée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partial transmission · receipt unconfirmed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.publicSending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diffusion en cours"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Broadcasting"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.publicUnconfirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diffusion publique · réception non confirmée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public broadcast · receipt unconfirmed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.publicWaiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En attente de diffusion"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting to broadcast"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lu"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.sending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En cours d’envoi"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.sent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transmission non confirmée"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transmission unconfirmed"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.waiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En attente d’envoi"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting to send"
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.capacity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce brouillon ne peut pas encore être enregistré. Gardez cette page ouverte et réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This draft cannot be saved yet. Keep this page open and retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.durable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brouillon enregistré sur ce téléphone."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Draft saved on this phone."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.editRejected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette modification dépasse la limite du brouillon ou ne peut pas être conservée. Le texte précédent reste affiché."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This edit exceeds the draft limit or cannot be kept. The previous text stays displayed."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.identityUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’identité est indisponible. Le brouillon n’est pas enregistré."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The identity is unavailable. The draft is not saved."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.kept" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre brouillon reste ici."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your draft stays here."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérification des brouillons sur ce téléphone…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking drafts on this phone…"
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.privateKept" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre brouillon reste ici. Vérifiez le contact et la connexion pour envoyer."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your draft stays here. Check the contact and connection to send."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le brouillon enregistré n’a pas pu être récupéré. Il est conservé sans être remplacé."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The saved draft could not be recovered. It is kept without being replaced."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réessayer l’enregistrement"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry saving"
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.saving" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrement du brouillon à confirmer…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Draft save awaiting confirmation…"
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.sessionOnly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brouillon conservé pour cette ouverture de Wesh."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Draft kept for this Wesh session."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.suspended" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’effacement doit se terminer avant d’enregistrer un brouillon."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erasure must finish before a draft can be saved."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.tooLarge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce texte est trop long pour être enregistré. Raccourcissez-le."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This text is too long to save. Shorten it."
+          }
+        }
+      }
+    },
+    "pave.wesh.draft.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’enregistrement du brouillon est indisponible. Gardez cette page ouverte."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Draft saving is unavailable. Keep this page open."
+          }
+        }
+      }
+    },
+    "pave.wesh.erase.blockedBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Some data may remain here. Exchanges are suspended. Retrying resumes the full erasure without restoring the old identity."
+          }
+        }
+      }
+    },
+    "pave.wesh.erase.confirmAction" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer les données locales"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erase local data"
+          }
+        }
+      }
+    },
+    "pave.wesh.erase.confirmTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer les données de Wesh sur ce téléphone ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erase Wesh data on this phone?"
+          }
+        }
+      }
+    },
+    "pave.wesh.erase.incomplete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacement local inachevé"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local erasure incomplete"
+          }
+        }
+      }
+    },
+    "pave.wesh.erase.resume" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reprendre l’effacement local"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume local erasure"
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.emptyBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajoutez une personne en face de vous pour commencer une discussion privée."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add someone in front of you to start a private conversation."
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.emptyTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un QR. Et on se parle."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One QR. Then we can talk."
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.nearby" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À proximité"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nearby"
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.private" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discussions privées"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private conversations"
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.unread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messages non lus"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unread messages"
+          }
+        }
+      }
+    },
+    "pave.wesh.inbox.verified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identité vérifiée sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identity verified on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.info.privateReceipt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une réception confirmée concerne ce message et son destinataire. Une connexion disponible ou un relais ne suffit pas."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A confirmed receipt concerns this message and its recipient. An available connection or a relay is not enough."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.privateScope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La vérification sur ce téléphone ne prouve pas que votre contact vous a vérifié. En cas de changement d’identité ou de connexion, l’écriture est suspendue et votre brouillon est conservé."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification on this phone does not prove your contact has verified you. If the identity or connection changes, writing is suspended and your draft is kept."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.privateTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une vérification en personne."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In-person verification."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.privateTrust" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour échanger, chacun doit scanner le QR de l’autre. L’identité vérifiée ici est liée à la connexion chiffrée de ce contact."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To exchange messages, each person must scan the other’s QR. The identity verified here is tied to this contact’s encrypted connection."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.publicMute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La sourdine coupe les notifications de mentions. Pour bloquer quelqu’un sur ce téléphone, ouvrez le menu de conversation puis Participants connus."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Muting turns off mention notifications. To block someone on this phone, open the conversation menu, then Known participants."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.publicScope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le Bluetooth ne garantit aucune frontière géographique : un message peut être relayé au-delà des personnes proches. La diffusion ne confirme pas sa réception."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth does not guarantee any geographic boundary: a message can be relayed beyond nearby people. Broadcasting does not confirm receipt."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.publicTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un salon ouvert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An open room."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.publicTrust" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les participants peuvent voir, conserver et relayer vos messages. Un surnom ne prouve pas une identité."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "People in the room can see, keep and relay your messages. A nickname does not prove an identity."
+          }
+        }
+      }
+    },
+    "pave.wesh.info.roomTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À propos du salon"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About the room"
+          }
+        }
+      }
+    },
+    "pave.wesh.mentions.mute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mettre les mentions en sourdine"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mute mentions"
+          }
+        }
+      }
+    },
+    "pave.wesh.mentions.unmute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réactiver les mentions"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unmute mentions"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.eraseAction" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer cette note"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erase this note"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.eraseTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer votre note ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erase your note?"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.introBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une note personnelle, conservée ici. Rien n’est envoyé à vos contacts."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A personal note, kept here. Nothing is sent to your contacts."
+          }
+        }
+      }
+    },
+    "pave.wesh.note.introTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une note pour vous"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A note for you"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.place" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lieu ou repère"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Place or landmark"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La note conservée n’a pas pu être lue. Elle est gardée sans être remplacée. Vous pouvez l’effacer pour en écrire une nouvelle."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The stored note could not be read. It is kept without being replaced. You can erase it to write a new one."
+          }
+        }
+      }
+    },
+    "pave.wesh.note.remember" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À retenir"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remember"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rendez-vous"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meeting"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre rendez-vous"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your meeting"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.suspended" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La note est suspendue après une demande d’effacement. Certaines données peuvent rester ici. Reprenez l’effacement local depuis les réglages de confidentialité."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The note is suspended after an erasure request. Some data may remain here. Resume local erasure from privacy settings."
+          }
+        }
+      }
+    },
+    "pave.wesh.note.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titre"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Title"
+          }
+        }
+      }
+    },
+    "pave.wesh.note.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La note est illisible pour le moment. Déverrouillez le téléphone, puis réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The note cannot be read right now. Unlock the phone, then retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.note.unconfirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrement de la note non confirmé. Gardez cette page ouverte et réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving the note is unconfirmed. Keep this page open and retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.note.when" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quand"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When"
+          }
+        }
+      }
+    },
+    "pave.wesh.participants.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun participant connu."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No known participants."
+          }
+        }
+      }
+    },
+    "pave.wesh.participants.emptyBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les connexions Bluetooth disponibles apparaîtront ici."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Available Bluetooth connections will appear here."
+          }
+        }
+      }
+    },
+    "pave.wesh.participants.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette liste n’indique ni distance ni réception des messages. Un surnom ne prouve pas une identité. Pour débloquer : Réglages → Contacts bloqués."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This list indicates neither distance nor message receipt. A nickname does not prove an identity. To unblock: Settings → Blocked contacts."
+          }
+        }
+      }
+    },
+    "pave.wesh.participants.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Participants connus"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Known participants"
+          }
+        }
+      }
+    },
+    "pave.wesh.person.capitalized" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This person"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette personne"
+          }
+        }
+      }
+    },
+    "pave.wesh.person.lowercase" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "this person"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cette personne"
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.publicCopies" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les participants peuvent conserver et relayer vos messages publics."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "People in the room can keep and relay your public messages."
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.removeBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour écrire à ces contacts, vous devrez scanner à nouveau leur QR. Les messages existants restent sur ce téléphone."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To write to these contacts, you must scan their QR again. Existing messages stay on this phone."
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.removeFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La suppression n’a pas pu être enregistrée. Les envois privés restent suspendus. Réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removal could not be saved. Private sends stay suspended. Retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.removeTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer les vérifications QR ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove QR verifications?"
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.removeVerifications" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer les vérifications QR"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove QR verifications"
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.removed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vérifications QR retirées."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR verifications removed."
+          }
+        }
+      }
+    },
+    "pave.wesh.privacy.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les vérifications QR concernent ce téléphone. Les notes de rendez-vous restent locales."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR verifications concern this phone. Meeting notes stay local."
+          }
+        }
+      }
+    },
+    "pave.wesh.profile.invalid" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choisissez un surnom plus court et non vide."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a shorter, non-empty nickname."
+          }
+        }
+      }
+    },
+    "pave.wesh.profile.saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surnom enregistré."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nickname saved."
+          }
+        }
+      }
+    },
+    "pave.wesh.profile.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce surnom est visible dans le salon public. Il ne prouve pas votre identité."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This nickname is visible in the public room. It does not prove your identity."
+          }
+        }
+      }
+    },
+    "pave.wesh.profile.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre profil"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your profile"
+          }
+        }
+      }
+    },
+    "pave.wesh.public.confirmBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tout participant au salon peut voir, conserver ou relayer ce message. Le Bluetooth ne garantit aucune frontière géographique. Un surnom ne prouve pas une identité. Votre brouillon reste ici si vous annulez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anyone in the room can see, keep or relay this message. Bluetooth does not guarantee any geographic boundary. A nickname does not prove an identity. Your draft stays here if you cancel."
+          }
+        }
+      }
+    },
+    "pave.wesh.public.confirmTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyer dans un salon public ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send in a public room?"
+          }
+        }
+      }
+    },
+    "pave.wesh.public.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public · une conversation ouverte autour de vous."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public · an open conversation around you."
+          }
+        }
+      }
+    },
+    "pave.wesh.public.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salon local"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local room"
+          }
+        }
+      }
+    },
+    "pave.wesh.recovery.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La reprise n’a pas abouti. L’identité reste indisponible."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recovery did not finish. The identity remains unavailable."
+          }
+        }
+      }
+    },
+    "pave.wesh.recovery.retryHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retenter la lecture et la sauvegarde de l’identité, sans effacer les données ni envoyer de message"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry reading and saving the identity, without erasing data or sending a message"
+          }
+        }
+      }
+    },
+    "pave.wesh.recovery.running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reprise en cours…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recovering…"
+          }
+        }
+      }
+    },
+    "pave.wesh.report.action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signaler et bloquer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report and block"
+          }
+        }
+      }
+    },
+    "pave.wesh.report.confirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signalement enregistré"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report saved"
+          }
+        }
+      }
+    },
+    "pave.wesh.report.confirmedBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette personne est bloquée sur ce téléphone et ses messages sont masqués. Vous pourrez la débloquer dans Réglages → Contacts bloqués."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This person is blocked on this phone and their messages are hidden. You can unblock them in Settings → Blocked contacts."
+          }
+        }
+      }
+    },
+    "pave.wesh.report.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signalement impossible"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not report"
+          }
+        }
+      }
+    },
+    "pave.wesh.report.failedBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le blocage n’a pas pu être enregistré sur ce téléphone. Ses messages restent visibles. Réessayez."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocking could not be saved on this phone. Their messages stay visible. Retry."
+          }
+        }
+      }
+    },
+    "pave.wesh.report.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks for confirmation, then blocks this person and hides their messages on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.report.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signaler ce message ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report this message?"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.accessibility" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request from %@, not verified, %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande de %@, non vérifiée, %@"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.blockBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ses prochains messages seront ignorés sur ce téléphone et cette demande sera supprimée."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Their next messages will be ignored on this phone and this request will be deleted."
+          }
+        }
+      }
+    },
+    "pave.wesh.request.count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Not verified · %lld message"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Not verified · %lld messages"
+                }
+              }
+            }
+          }
+        },
+        "fr" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Non vérifié · %lld message"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Non vérifié · %lld messages"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pave.wesh.request.delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer la demande"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete request"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.deleteBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les messages de cette demande seront effacés de ce téléphone."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The messages in this request will be erased from this phone."
+          }
+        }
+      }
+    },
+    "pave.wesh.request.deleteTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer cette demande ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete this request?"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.messages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messages reçus"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Received messages"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.scan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanner son QR pour vérifier"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan their QR to verify"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personnes qui vous ont écrit sans vérification QR. Pas de réponse possible avant de scanner leur QR en personne."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "People who wrote to you without QR verification. You cannot reply before scanning their QR in person."
+          }
+        }
+      }
+    },
+    "pave.wesh.request.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request"
+          }
+        }
+      }
+    },
+    "pave.wesh.request.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette demande n’est plus disponible."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This request is no longer available."
+          }
+        }
+      }
+    },
+    "pave.wesh.request.unverified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Non vérifié. Un surnom ne prouve pas une identité. Vous ne pouvez pas répondre avant de scanner son QR en personne."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not verified. A nickname does not prove an identity. You cannot reply before scanning their QR in person."
+          }
+        }
+      }
+    },
+    "pave.wesh.request.verified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact vérifié. Écrivez-lui depuis Discussions."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact verified. Write to them from Chats."
+          }
+        }
+      }
+    },
+    "pave.wesh.tab.chats" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discussions"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats"
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.confirmHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demande confirmation avant d’autoriser ses prochains messages sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks for confirmation before allowing their next messages on this phone"
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.confirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personne débloquée."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Person unblocked."
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorise à nouveau ses prochains messages sur ce téléphone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allows their next messages on this phone again"
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.namedBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblock %@? Their next messages may appear on this phone again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer %@ ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone."
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.notBlocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette personne n’est plus bloquée."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This person is no longer blocked."
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.personTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer cette personne ?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblock this person?"
+          }
+        }
+      }
+    },
+    "pave.wesh.unblock.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloquer ne remplace pas une vérification QR. Les messages des autres téléphones ne sont pas modifiés."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unblocking does not replace QR verification. Messages on other phones are not changed."
+          }
+        }
+      }
+    },
+    "pave.wesh.action.ok" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

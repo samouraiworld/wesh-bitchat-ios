@@ -189,9 +189,9 @@ struct WeshReportAlerts: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert("Signaler ce message ?", isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } })) {
-                Button("Annuler", role: .cancel) { target = nil }
-                Button("Signaler et bloquer", role: .destructive) {
+            .alert(PaveCopy.text("pave.wesh.report.title"), isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } })) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) { target = nil }
+                Button(PaveCopy.text("pave.wesh.report.action"), role: .destructive) {
                     if let target {
                         let mailTarget = PaveReportTarget(
                             rawNickname: message?.sender ?? name, fingerprint: PaveFingerprint.short(target.noiseKey),
@@ -207,17 +207,17 @@ struct WeshReportAlerts: ViewModifier {
                 // The nickname is chosen by the sender: it never leads the sentence.
                 Text(PaveReportCopy.localBlock)
             }
-            .alert("Signalement enregistré", isPresented: $done) {
+            .alert(PaveCopy.text("pave.wesh.report.confirmed"), isPresented: $done) {
                 Button(PaveReportCopy.sendAction) { sending = offer; offer = nil }
-                Button("OK", role: .cancel) { offer = nil }
+                Button(PaveCopy.text("pave.wesh.action.ok"), role: .cancel) { offer = nil }
             } message: {
-                Text("Cette personne est bloquée sur ce téléphone et ses messages sont masqués. Vous pourrez la débloquer dans Réglages → Contacts bloqués.")
+                Text(PaveCopy.text("pave.wesh.report.confirmedBody"))
             }
-            .alert("Signalement impossible", isPresented: $failed) {
+            .alert(PaveCopy.text("pave.wesh.report.failed"), isPresented: $failed) {
                 Button(PaveReportCopy.sendAction) { sending = offer; offer = nil }
-                Button("OK", role: .cancel) { offer = nil }
+                Button(PaveCopy.text("pave.wesh.action.ok"), role: .cancel) { offer = nil }
             } message: {
-                Text("Le blocage n’a pas pu être enregistré sur ce téléphone. Ses messages restent visibles. Réessayez.")
+                Text(PaveCopy.text("pave.wesh.report.failedBody"))
             }
             .paveReportSendFlow($sending)
     }
@@ -238,14 +238,14 @@ struct WeshRequestsSection: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(PaveDisplayName.safe(request.nickname)).font(.headline)
                             PaveFingerprintText(fingerprint: PaveFingerprint.short(request.noiseKey))
-                            Text("Non vérifié · \(request.messages.count) message\(request.messages.count > 1 ? "s" : "")")
+                            Text(PaveCopy.text("pave.wesh.request.count", request.messages.count))
                                 .font(.subheadline).foregroundStyle(theme.secondary)
                         }.padding(.vertical, 8)
                     }
-                    .accessibilityLabel("Demande de \(PaveDisplayName.safe(request.nickname)), non vérifiée, " + PaveFingerprint.accessibilityText(PaveFingerprint.short(request.noiseKey)))
+                    .accessibilityLabel(PaveCopy.text("pave.wesh.request.accessibility", PaveDisplayName.safe(request.nickname), PaveFingerprint.accessibilityText(PaveFingerprint.short(request.noiseKey))))
                 }
-            } header: { WeshSectionLabel(text: "Demandes") } footer: {
-                Text("Personnes qui vous ont écrit sans vérification QR. Pas de réponse possible avant de scanner leur QR en personne.")
+            } header: { WeshSectionLabel(text: PaveCopy.text("pave.inbox.requests")) } footer: {
+                Text(PaveCopy.text("pave.wesh.request.scope"))
                     .font(.footnote).foregroundStyle(theme.secondary)
             }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
@@ -275,8 +275,8 @@ private struct WeshRequestDetail: View {
                         Text(PaveDisplayName.safe(request.nickname)).font(.title2.weight(.semibold))
                         PaveFingerprintText(fingerprint: PaveFingerprint.short(request.noiseKey))
                         Text(trust.fingerprints.contains(request.id)
-                             ? "Contact vérifié. Écrivez-lui depuis Discussions."
-                             : "Non vérifié. Un surnom ne prouve pas une identité. Vous ne pouvez pas répondre avant de scanner son QR en personne.")
+                             ? PaveCopy.text("pave.wesh.request.verified")
+                             : PaveCopy.text("pave.wesh.request.unverified"))
                             .font(.subheadline).foregroundStyle(theme.secondary)
                     }.padding(.vertical, 8)
                 }.listRowBackground(theme.canvas)
@@ -287,26 +287,26 @@ private struct WeshRequestDetail: View {
                             Text(message.timestamp, style: .time).font(.caption).foregroundStyle(theme.secondary)
                         }.padding(.vertical, 6)
                     }
-                } header: { WeshSectionLabel(text: "Messages reçus") }
+                } header: { WeshSectionLabel(text: PaveCopy.text("pave.wesh.request.messages")) }
                 .listRowBackground(theme.canvas)
                 Section {
                     if !trust.fingerprints.contains(request.id) {
-                        Button { scanning = true } label: { Label("Scanner son QR pour vérifier", systemImage: "qrcode.viewfinder") }
+                        Button { scanning = true } label: { Label(PaveCopy.text("pave.wesh.request.scan"), systemImage: "qrcode.viewfinder") }
                             .frame(minHeight: 44)
                     }
-                    Button("Bloquer sur ce téléphone", role: .destructive) { confirmBlock = true }.frame(minHeight: 44)
-                    Button("Supprimer la demande", role: .destructive) { confirmDelete = true }.frame(minHeight: 44)
+                    Button(PaveCopy.text("pave.wesh.block.onPhone"), role: .destructive) { confirmBlock = true }.frame(minHeight: 44)
+                    Button(PaveCopy.text("pave.wesh.request.delete"), role: .destructive) { confirmDelete = true }.frame(minHeight: 44)
                 }.listRowBackground(theme.canvas)
             } else {
-                Text("Cette demande n’est plus disponible.").listRowBackground(theme.canvas)
+                Text(PaveCopy.text("pave.wesh.request.unavailable")).listRowBackground(theme.canvas)
             }
         }
         .listStyle(.plain).scrollContentBackground(.hidden)
-        .navigationTitle("Demande").weshInlineTitle().weshCanvas(title: "Demande")
+        .navigationTitle(PaveCopy.text("pave.wesh.request.title")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.wesh.request.title"))
         .sheet(isPresented: $scanning) { WeshContactSheet(runtime: runtime) }
-        .alert("Bloquer cette personne ?", isPresented: $confirmBlock) {
-            Button("Annuler", role: .cancel) {}
-            Button("Bloquer", role: .destructive) {
+        .alert(PaveCopy.text("pave.wesh.block.personTitle"), isPresented: $confirmBlock) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+            Button(PaveCopy.text("pave.wesh.action.block"), role: .destructive) {
                 guard let request else { return dismiss() }
                 // Nickname and fingerprint only: the request's private messages never leave.
                 reportOffer = PaveReportMail.blockThenOffer(.request(request)) {
@@ -315,14 +315,14 @@ private struct WeshRequestDetail: View {
                     return true
                 }.offer
             }
-        } message: { Text("Ses prochains messages seront ignorés sur ce téléphone et cette demande sera supprimée.") }
+        } message: { Text(PaveCopy.text("pave.wesh.request.blockBody")) }
         .paveReportSendFlow($reportOffer) { dismiss() }
-        .alert("Supprimer cette demande ?", isPresented: $confirmDelete) {
-            Button("Annuler", role: .cancel) {}
-            Button("Supprimer", role: .destructive) {
+        .alert(PaveCopy.text("pave.wesh.request.deleteTitle"), isPresented: $confirmDelete) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+            Button(PaveCopy.text("pave.wesh.action.delete"), role: .destructive) {
                 requests.remove(requestID)
                 dismiss()
             }
-        } message: { Text("Les messages de cette demande seront effacés de ce téléphone.") }
+        } message: { Text(PaveCopy.text("pave.wesh.request.deleteBody")) }
     }
 }

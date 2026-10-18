@@ -13,13 +13,24 @@ enum PaveCopy {
     }
 
     static func text(_ key: String, _ arguments: CVarArg...) -> String {
+        resolve(key, bundle: bundle, locale: .current, arguments: arguments)
+    }
+
+    /// A scoped resource table and formatting locale, without changing app or process preferences.
+    static func text(_ key: String, bundle: Bundle, locale: Locale,
+                     _ arguments: CVarArg...) -> String {
+        resolve(key, bundle: bundle, locale: locale, arguments: arguments)
+    }
+
+    private static func resolve(_ key: String, bundle: Bundle, locale: Locale,
+                                arguments: [CVarArg]) -> String {
         var format = bundle.localizedString(forKey: key, value: nil, table: "Pave")
         #if SWIFT_PACKAGE
         // A SwiftPM build copies Pave.xcstrings uncompiled: read the source language from it.
         if format == key, let value = uncompiledSource[key] { format = value }
         #endif
         guard !arguments.isEmpty else { return format }
-        return String(format: format, locale: .current, arguments: arguments)
+        return String(format: format, locale: locale, arguments: arguments)
     }
 
     #if SWIFT_PACKAGE

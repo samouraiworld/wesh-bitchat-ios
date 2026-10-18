@@ -229,27 +229,49 @@ struct WeshNoiseIdentityNotice: Equatable {
     let message: String
     let allowsRetry: Bool
 
-    init?(_ availability: NoiseIdentityAvailability) {
+    init?(_ availability: NoiseIdentityAvailability, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) {
         switch availability {
         case .available:
             return nil
         case .storageUnavailable:
-            title = "Identité indisponible"
-            message = "Wesh ne peut pas lire ses clés sur ce téléphone. Déverrouillez-le, puis réessayez. L’envoi et votre QR sont suspendus."
+            title = PaveCopy.text("pave.identity.unavailable.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.identity.unavailable.message", bundle: bundle, locale: locale)
             allowsRetry = true
         case .persistenceUnconfirmed:
-            title = "Identité en attente"
-            message = "La sauvegarde de vos clés n’est pas confirmée. L’envoi et votre QR restent suspendus. Réessayer ne remplace pas vos clés existantes."
+            title = PaveCopy.text("pave.identity.pending.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.identity.pending.message", bundle: bundle, locale: locale)
             allowsRetry = true
         case .recoveryRequired:
-            title = "Identité à récupérer"
-            message = "Les données d’identité conservées sont incomplètes ou ne correspondent pas. Gardez-les sur ce téléphone. Réessayer ne les efface pas."
+            title = PaveCopy.text("pave.identity.recovery.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.identity.recovery.message", bundle: bundle, locale: locale)
             allowsRetry = true
         case .invalidated:
-            title = "Identité suspendue"
-            message = "Votre identité locale a été désactivée. L’envoi et votre QR restent indisponibles. Une reprise ne peut pas annuler un effacement demandé."
+            title = PaveCopy.text("pave.identity.suspended.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.identity.suspended.message", bundle: bundle, locale: locale)
             allowsRetry = false
         }
+    }
+}
+
+/// Copy shared by the real erase confirmation and composer rejection paths.
+enum WeshFeedbackCopy {
+    static func eraseOutcome(_ completed: Bool, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        if completed {
+            return PaveCopy.text("pave.localErase.confirmed", bundle: bundle, locale: locale)
+        }
+        return PaveCopy.text("pave.localErase.failed", bundle: bundle, locale: locale)
+    }
+
+    static func eraseWarning(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        PaveCopy.text("pave.localErase.warning", bundle: bundle, locale: locale)
+    }
+
+    static func composerTooLong(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        PaveCopy.text("pave.composer.tooLong", bundle: bundle, locale: locale)
+    }
+
+    static func composerChanged(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        PaveCopy.text("pave.composer.changed", bundle: bundle, locale: locale)
     }
 }
 
@@ -263,13 +285,13 @@ private struct WeshNoiseIdentityRecoveryPanel: View {
                     .font(.headline).accessibilityAddTraits(.isHeader)
                 Text(notice.message).font(.subheadline).foregroundStyle(theme.secondary)
                 if notice.allowsRetry {
-                    Button(chrome.isRecoveringNoiseIdentity ? "Reprise en cours…" : "Réessayer") {
+                    Button(chrome.isRecoveringNoiseIdentity ? PaveCopy.text("pave.wesh.recovery.running") : PaveCopy.text("pave.delivery.retry")) {
                         chrome.retryNoiseIdentityRecovery()
                     }.frame(minHeight: 44).disabled(chrome.isRecoveringNoiseIdentity)
-                        .accessibilityHint("Retenter la lecture et la sauvegarde de l’identité, sans effacer les données ni envoyer de message")
+                        .accessibilityHint(PaveCopy.text("pave.wesh.recovery.retryHint"))
                 }
                 if chrome.noiseIdentityRetryFailed {
-                    Text("La reprise n’a pas abouti. L’identité reste indisponible.")
+                    Text(PaveCopy.text("pave.wesh.recovery.failed"))
                         .font(.footnote).foregroundStyle(theme.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -308,10 +330,10 @@ struct WeshRootView: View {
                             Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
                                 .frame(minHeight: 44)
                         } else {
-                            Label("Effacement local inachevé", systemImage: "exclamationmark.triangle")
+                            Label(PaveCopy.text("pave.wesh.erase.incomplete"), systemImage: "exclamationmark.triangle")
                                 .font(.headline).accessibilityAddTraits(.isHeader)
-                            Text("Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité.")
-                            Button("Reprendre l’effacement local") { chrome.requestPanicWipe() }
+                            Text(PaveCopy.text("pave.wesh.erase.blockedBody"))
+                            Button(PaveCopy.text("pave.wesh.erase.resume")) { chrome.requestPanicWipe() }
                                 .frame(minHeight: 44)
                         }
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -333,18 +355,18 @@ struct WeshRootView: View {
                 }
                 TabView(selection: $selectedTab) {
                     NavigationStack { WeshInbox(runtime: runtime) }
-                        .tabItem { Label("Discussions", systemImage: "bubble.left.and.bubble.right") }
+                        .tabItem { Label(PaveCopy.text("pave.wesh.tab.chats"), systemImage: "bubble.left.and.bubble.right") }
                         .tag(0).weshHiddenTabBar()
                     NavigationStack { WeshSettings(runtime: runtime) }
-                        .tabItem { Label("Réglages", systemImage: "gearshape") }
+                        .tabItem { Label(PaveCopy.text("pave.settings.title"), systemImage: "gearshape") }
                         .tag(1).weshHiddenTabBar()
                 }
                 .id(viewModel.weshPanicGeneration)
                 if !keyboardVisible { VStack(spacing: 0) {
                     Rectangle().fill(theme.line).frame(height: 0.5)
                     HStack(spacing: 0) {
-                        tab("Discussions", symbol: "bubble.left.and.bubble.right", index: 0)
-                        tab("Réglages", symbol: "gearshape", index: 1)
+                        tab(PaveCopy.text("pave.wesh.tab.chats"), symbol: "bubble.left.and.bubble.right", index: 0)
+                        tab(PaveCopy.text("pave.settings.title"), symbol: "gearshape", index: 1)
                     }.padding(.top, 8).padding(.bottom, 4)
                 }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
             }
@@ -365,18 +387,16 @@ struct WeshRootView: View {
             WeshQRTrust.shared.reloadIfNeeded()
             viewModel.weshMeetingNote.reloadIfNeeded()
         }
-        .alert("Effacer les données de Wesh sur ce téléphone ?", isPresented: $chrome.showPanicConfirmation) {
-            Button("Annuler", role: .cancel) {}
-            Button("Effacer les données locales", role: .destructive) {
+        .alert(PaveCopy.text("pave.wesh.erase.confirmTitle"), isPresented: $chrome.showPanicConfirmation) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+            Button(PaveCopy.text("pave.wesh.erase.confirmAction"), role: .destructive) {
                 _ = runtime.panicEraseAction(report: { completed in
                     selectedTab = 1
-                    panicFeedback = completed
-                        ? "Effacement local confirmé. Vos contacts devront être vérifiés à nouveau avant tout échange privé."
-                        : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+                    panicFeedback = WeshFeedbackCopy.eraseOutcome(completed)
                 })()
             }
         } message: {
-            Text("Cette action efface l’identité Wesh, les contacts et leurs vérifications, l’historique, les fichiers reçus, les brouillons et la note de rendez-vous conservés ici. Elle ne supprime pas les copies détenues par d’autres personnes ni leurs sauvegardes. Elle ne garantit pas un effacement physique du stockage. Cette action est irréversible.")
+            Text(WeshFeedbackCopy.eraseWarning())
         }
         .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillShow)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillHide)) { _ in keyboardVisible = false }
@@ -453,19 +473,19 @@ private struct WeshInbox: View {
             .listRowBackground(theme.canvas)
             Section {
                 NavigationLink {
-                    WeshConversation(runtime: runtime, peerID: nil, title: "Salon local")
+                    WeshConversation(runtime: runtime, peerID: nil, title: PaveCopy.text("pave.wesh.public.title"))
                 } label: {
                     // Pavé Fluo: the public room is a full yellow card that says PUBLIC first.
                     VStack(alignment: .leading, spacing: PaveSpace.s1) {
                         HStack(spacing: PaveSpace.s2) {
                             Image(systemName: "megaphone.fill").accessibilityHidden(true)
-                            Text("Salon local")
+                            Text(PaveCopy.text("pave.wesh.public.title"))
                                 .font(PaveDisplayStyle.displaySmall.font)
                                 .textCase(.uppercase)
-                                .accessibilityLabel(Text("Salon local"))
+                                .accessibilityLabel(Text(PaveCopy.text("pave.wesh.public.title")))
                             Spacer(minLength: 0)
                         }
-                        Text("Public · une conversation ouverte autour de vous.")
+                        Text(PaveCopy.text("pave.wesh.public.subtitle"))
                             .font(.subheadline.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -475,11 +495,11 @@ private struct WeshInbox: View {
                     .background(theme.publicFill, in: RoundedRectangle(cornerRadius: PaveRadius.control))
                 }
                 .listRowInsets(EdgeInsets(top: PaveSpace.s1, leading: PaveSpace.s4, bottom: PaveSpace.s1, trailing: PaveSpace.s4))
-            } header: { WeshSectionLabel(text: "À proximité") } footer: {
+            } header: { WeshSectionLabel(text: PaveCopy.text("pave.wesh.inbox.nearby")) } footer: {
                 Label(bluetoothSummary(chrome.bluetoothState), systemImage: "antenna.radiowaves.left.and.right")
                     .font(.footnote).foregroundStyle(theme.secondary).padding(.top, 8)
                 if chrome.bluetoothState == .unauthorized {
-                    Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44)
+                    Button(PaveCopy.text("pave.wesh.bluetooth.allow"), action: openWeshSystemSettings).frame(minHeight: 44)
                 }
             }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
@@ -487,12 +507,12 @@ private struct WeshInbox: View {
             Section {
                 if contacts.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Un QR. Et on se parle.")
+                        Text(PaveCopy.text("pave.wesh.inbox.emptyTitle"))
                             .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Ajoutez une personne en face de vous pour commencer une discussion privée.")
+                        Text(PaveCopy.text("pave.wesh.inbox.emptyBody"))
                             .font(.body).foregroundStyle(theme.secondary)
                         Button { addingContact = true } label: {
-                            Label("Ajouter un contact", systemImage: "qrcode.viewfinder")
+                            Label(PaveCopy.text("pave.wesh.action.addContact"), systemImage: "qrcode.viewfinder")
                         }.buttonStyle(WeshPrimaryButtonStyle())
                     }.padding(.vertical, 24)
                         .listRowSeparator(.hidden)
@@ -507,23 +527,23 @@ private struct WeshInbox: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(PaveDisplayName.safe(row.nickname)).font(.headline)
                                     PaveFingerprintText(fingerprint: PaveFingerprint.short(row.peerID.noiseKey))
-                                    Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? "Identité vérifiée sur ce téléphone")
+                                    Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? PaveCopy.text("pave.wesh.inbox.verified"))
                                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                         .font(.subheadline).foregroundStyle(theme.secondary)
                                     if dynamicTypeSize.isAccessibilitySize && hasUnread {
-                                        Text("Messages non lus").font(.subheadline).foregroundStyle(theme.accent)
+                                        Text(PaveCopy.text("pave.wesh.inbox.unread")).font(.subheadline).foregroundStyle(theme.accent)
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
                                 if !dynamicTypeSize.isAccessibilitySize && hasUnread {
-                                    Image(systemName: "circle.fill").font(.caption2).foregroundStyle(theme.accent).accessibilityLabel("Messages non lus")
+                                    Image(systemName: "circle.fill").font(.caption2).foregroundStyle(theme.accent).accessibilityLabel(PaveCopy.text("pave.wesh.inbox.unread"))
                                 }
                             }.padding(.vertical, theme.isDark ? 12 : 6)
                         }
                     }
                 }
-            } header: { WeshSectionLabel(text: "Discussions privées") }
+            } header: { WeshSectionLabel(text: PaveCopy.text("pave.wesh.inbox.private")) }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             WeshRequestsSection(runtime: runtime)
         }
@@ -532,7 +552,7 @@ private struct WeshInbox: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { addingContact = true } label: {
-                    Label("Ajouter un contact", systemImage: "plus").frame(minWidth: 44, minHeight: 44)
+                    Label(PaveCopy.text("pave.wesh.action.addContact"), systemImage: "plus").frame(minWidth: 44, minHeight: 44)
                 }
             }
         }
@@ -566,17 +586,17 @@ private struct WeshAvatar: View {
 enum WeshDraftStoragePresentation {
     static func message(_ status: ComposerDraftStatus, hasText: Bool) -> String? {
         switch status {
-        case .sessionOnly: return hasText ? "Brouillon conservé pour cette ouverture de Wesh." : nil
-        case .waitingForIdentity: return "L’identité est indisponible. Le brouillon n’est pas enregistré."
-        case .loading: return "Vérification des brouillons sur ce téléphone…"
-        case .dirty, .saving: return "Enregistrement du brouillon à confirmer…"
-        case .durable: return hasText ? "Brouillon enregistré sur ce téléphone." : nil
-        case .suspended: return "L’effacement doit se terminer avant d’enregistrer un brouillon."
-        case .unavailable(.tooLarge): return "Ce texte est trop long pour être enregistré. Raccourcissez-le."
-        case .unavailable(.capacityReached): return "Ce brouillon ne peut pas encore être enregistré. Gardez cette page ouverte et réessayez."
+        case .sessionOnly: return hasText ? PaveCopy.text("pave.wesh.draft.sessionOnly") : nil
+        case .waitingForIdentity: return PaveCopy.text("pave.wesh.draft.identityUnavailable")
+        case .loading: return PaveCopy.text("pave.wesh.draft.loading")
+        case .dirty, .saving: return PaveCopy.text("pave.wesh.draft.saving")
+        case .durable: return hasText ? PaveCopy.text("pave.wesh.draft.durable") : nil
+        case .suspended: return PaveCopy.text("pave.wesh.draft.suspended")
+        case .unavailable(.tooLarge): return PaveCopy.text("pave.wesh.draft.tooLarge")
+        case .unavailable(.capacityReached): return PaveCopy.text("pave.wesh.draft.capacity")
         case .unavailable(.recoveryRequired), .unavailable(.ownerMismatch):
-            return "Le brouillon enregistré n’a pas pu être récupéré. Il est conservé sans être remplacé."
-        case .unavailable: return "L’enregistrement du brouillon est indisponible. Gardez cette page ouverte."
+            return PaveCopy.text("pave.wesh.draft.recovery")
+        case .unavailable: return PaveCopy.text("pave.wesh.draft.unavailable")
         }
     }
     static func canRetry(_ status: ComposerDraftStatus) -> Bool {
@@ -712,7 +732,7 @@ private struct WeshConversation: View {
                 draft = value
                 composerFeedback.edited(rejection: nil)
             } else {
-                composerFeedback.edited(rejection: "Cette modification dépasse la limite du brouillon ou ne peut pas être conservée. Le texte précédent reste affiché.")
+                composerFeedback.edited(rejection: PaveCopy.text("pave.wesh.draft.editRejected"))
             }
             composerFeedbackFocused = false
         })
@@ -751,30 +771,30 @@ private struct WeshConversation: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Label(isPrivate ? (canSend ? "Identité vérifiée sur ce téléphone" : "Vérification ou connexion requise") : "Public · Messages relayables",
+                                    Label(isPrivate ? (canSend ? PaveCopy.text("pave.wesh.inbox.verified") : PaveCopy.text("pave.wesh.conversation.verifyOrConnect")) : PaveCopy.text("pave.wesh.conversation.publicRelay"),
                                           systemImage: isPrivate ? "lock" : "antenna.radiowaves.left.and.right")
                                         .font(.subheadline.weight(.medium))
                                     if !isPrivate {
-                                        Text("Visible par les participants au salon.")
+                                        Text(PaveCopy.text("pave.wesh.conversation.visible"))
                                             .font(.footnote).foregroundStyle(theme.secondary)
                                     }
                                 }
                                 Spacer(minLength: 8)
                                 Button { information = true } label: {
                                     Image(systemName: "info.circle").frame(width: 44, height: 44)
-                                }.accessibilityLabel(isPrivate ? "À propos de cette discussion privée" : "À propos du salon public")
+                                }.accessibilityLabel(isPrivate ? PaveCopy.text("pave.wesh.conversation.privateAbout") : PaveCopy.text("pave.wesh.conversation.publicAbout"))
                             }
                             if isPrivate && !canSend {
-                                Button("Vérifier le contact") { contactSheet = true }.frame(minHeight: 44)
+                                Button(PaveCopy.text("pave.wesh.contact.verify")) { contactSheet = true }.frame(minHeight: 44)
                             }
                         }.padding(.bottom, 16)
                         if displayedMessages.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: isPrivate ? "bubble.left.and.bubble.right" : "antenna.radiowaves.left.and.right")
                                     .font(.system(size: 40, weight: .light)).foregroundStyle(theme.accent).accessibilityHidden(true)
-                                Text(isPrivate ? "Votre discussion commence ici." : (canSend ? "Un premier salut ?" : "Le salon est prêt."))
+                                Text(isPrivate ? PaveCopy.text("pave.wesh.conversation.privateEmpty") : (canSend ? PaveCopy.text("pave.wesh.conversation.publicEmpty") : PaveCopy.text("pave.wesh.conversation.roomReady")))
                                     .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                                Text(isPrivate ? "Écrivez quand votre contact est connecté." : (canSend ? "Entrez dans la conversation.\nAucun contact à ajouter." : "Préparez un message. Il restera ici tant que l’envoi est indisponible."))
+                                Text(isPrivate ? PaveCopy.text("pave.wesh.conversation.privateEmptyBody") : (canSend ? PaveCopy.text("pave.wesh.conversation.publicEmptyBody") : PaveCopy.text("pave.wesh.conversation.prepare")))
                                     .font(.body).foregroundStyle(theme.secondary)
                             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 64)
                         }
@@ -785,10 +805,10 @@ private struct WeshConversation: View {
                             WeshMessageBubble(message: message,
                                 own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID),
                                 privateChat: isPrivate).id(message.id)
-                                .accessibilityAction(named: "Copier le message") { WeshPlatform.copy(message.content) }
+                                .accessibilityAction(named: PaveCopy.text("pave.wesh.action.copyMessage")) { WeshPlatform.copy(message.content) }
                                 .contextMenu {
                                     Button { WeshPlatform.copy(message.content) } label: {
-                                        Label("Copier", systemImage: "doc.on.doc")
+                                        Label(PaveCopy.text("pave.wesh.action.copy"), systemImage: "doc.on.doc")
                                     }
                                     moderationActions(for: message, knownKeys: knownKeys)
                                 }
@@ -810,18 +830,18 @@ private struct WeshConversation: View {
             VStack(alignment: .leading, spacing: 10) {
                 if chrome.noiseIdentityAvailability != .available {
                     WeshNoiseIdentityRecoveryPanel()
-                    Text("Votre brouillon reste ici.").font(.footnote).foregroundStyle(theme.secondary)
+                    Text(PaveCopy.text("pave.wesh.draft.kept")).font(.footnote).foregroundStyle(theme.secondary)
                 } else if !canSend {
-                    Text(isPrivate ? "Votre brouillon reste ici. Vérifiez le contact et la connexion pour envoyer." : bluetoothSummary(chrome.bluetoothState))
+                    Text(isPrivate ? PaveCopy.text("pave.wesh.draft.privateKept") : bluetoothSummary(chrome.bluetoothState))
                         .font(.footnote).foregroundStyle(theme.secondary)
                     if !isPrivate && chrome.bluetoothState == .unauthorized {
-                        Button("Autoriser le Bluetooth", action: openWeshSystemSettings).frame(minHeight: 44)
+                        Button(PaveCopy.text("pave.wesh.bluetooth.allow"), action: openWeshSystemSettings).frame(minHeight: 44)
                     }
                 }
                 if let message = WeshDraftStoragePresentation.message(draftStatus, hasText: !draft.isEmpty) {
                     Text(message).font(.footnote).foregroundStyle(theme.secondary)
                     if WeshDraftStoragePresentation.canRetry(draftStatus) {
-                        Button("Réessayer l’enregistrement") {
+                        Button(PaveCopy.text("pave.wesh.draft.retry")) {
                             composerDrafts.save(draft, for: draftKey, generation: draftGeneration)
                             composerDrafts.retry()
                         }.frame(minHeight: 44)
@@ -833,13 +853,13 @@ private struct WeshConversation: View {
                         .accessibilityFocused($composerFeedbackFocused)
                 }
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField(isPrivate ? "Message privé" : "Message public", text: draftBinding,
-                              prompt: Text(isPrivate ? "Message privé" : "Message public").foregroundColor(theme.secondary), axis: .vertical)
+                    TextField(isPrivate ? PaveCopy.text("pave.wesh.composer.private") : PaveCopy.text("pave.wesh.composer.public"), text: draftBinding,
+                              prompt: Text(isPrivate ? PaveCopy.text("pave.wesh.composer.private") : PaveCopy.text("pave.wesh.composer.public")).foregroundColor(theme.secondary), axis: .vertical)
                         .lineLimit(1...(dynamicTypeSize.isAccessibilitySize ? 3 : 6))
                         .focused($composerFocused)
                         .padding(14)
                         .overlay(RoundedRectangle(cornerRadius: theme.radius).strokeBorder(theme.line, lineWidth: 1))
-                        .accessibilityLabel(isPrivate ? "Message privé" : "Message public")
+                        .accessibilityLabel(isPrivate ? PaveCopy.text("pave.wesh.composer.private") : PaveCopy.text("pave.wesh.composer.public"))
                         .accessibilityHint(composerFeedback.isEditingRejection ? composerFeedback.message : "")
                     Button {
                         if !isPrivate && !publicAccepted { publicWarning = true } else { send() }
@@ -850,7 +870,7 @@ private struct WeshConversation: View {
                             .background(canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AnyShapeStyle(theme.metalFill) : AnyShapeStyle(theme.canvas), in: Circle())
                             .overlay(Circle().strokeBorder(theme.line, lineWidth: canSend ? 0 : 1))
                     }
-                    .accessibilityLabel(isPrivate ? "Envoyer le message privé" : "Envoyer publiquement")
+                    .accessibilityLabel(isPrivate ? PaveCopy.text("pave.wesh.composer.sendPrivate") : PaveCopy.text("pave.wesh.composer.sendPublic"))
                     .disabled(!canSend || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }.padding(16).background(theme.canvas)
@@ -859,32 +879,32 @@ private struct WeshConversation: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     if let peerID, let contact = trust.contacts.first(where: { $0.peerID == peerID }) {
-                        Button { contactDetails = contact } label: { Label("Voir le contact", systemImage: "person.crop.circle") }
+                        Button { contactDetails = contact } label: { Label(PaveCopy.text("pave.wesh.contact.view"), systemImage: "person.crop.circle") }
                     }
-                    Button { information = true } label: { Label("À propos", systemImage: "info.circle") }
+                    Button { information = true } label: { Label(PaveCopy.text("pave.settings.about"), systemImage: "info.circle") }
                     if !isPrivate {
-                        Button { showingParticipants = true } label: { Label("Participants connus", systemImage: "person.2") }
+                        Button { showingParticipants = true } label: { Label(PaveCopy.text("pave.wesh.participants.title"), systemImage: "person.2") }
                         Button { publicMuted.toggle() } label: {
-                            Label(publicMuted ? "Réactiver les mentions" : "Mettre les mentions en sourdine", systemImage: publicMuted ? "bell.slash" : "bell")
+                            Label(publicMuted ? PaveCopy.text("pave.wesh.mentions.unmute") : PaveCopy.text("pave.wesh.mentions.mute"), systemImage: publicMuted ? "bell.slash" : "bell")
                         }
                     }
                 } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                .accessibilityLabel("Actions de conversation")
+                .accessibilityLabel(PaveCopy.text("pave.wesh.conversation.actions"))
             }
         }
-        .alert("Envoyer dans un salon public ?", isPresented: $publicWarning) {
-            Button("Annuler", role: .cancel) {}
-            Button("Envoyer publiquement") { publicAccepted = true; send() }
-        } message: { Text("Tout participant au salon peut voir, conserver ou relayer ce message. Le Bluetooth ne garantit aucune frontière géographique. Un surnom ne prouve pas une identité. Votre brouillon reste ici si vous annulez.") }
+        .alert(PaveCopy.text("pave.wesh.public.confirmTitle"), isPresented: $publicWarning) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+            Button(PaveCopy.text("pave.wesh.composer.sendPublic")) { publicAccepted = true; send() }
+        } message: { Text(PaveCopy.text("pave.wesh.public.confirmBody")) }
         .sheet(isPresented: $contactSheet) { WeshContactSheet(runtime: runtime) }
-        .alert("Bloquer cette personne ?", isPresented: Binding(get: { blockTarget != nil }, set: { if !$0 { blockTarget = nil } })) {
-            Button("Annuler", role: .cancel) { blockTarget = nil }
-            Button("Bloquer", role: .destructive) {
+        .alert(PaveCopy.text("pave.wesh.block.personTitle"), isPresented: Binding(get: { blockTarget != nil }, set: { if !$0 { blockTarget = nil } })) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) { blockTarget = nil }
+            Button(PaveCopy.text("pave.wesh.action.block"), role: .destructive) {
                 if let target = blockTarget { actions.block(peerID: target, displayName: blockName) }
                 blockTarget = nil
             }
-            .accessibilityLabel("Bloquer " + weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint()))
-        } message: { Text("Ses prochains messages seront ignorés sur ce téléphone. L’historique existant reste ici. Vous pourrez la débloquer dans Réglages → Contacts bloqués.") }
+            .accessibilityLabel(PaveCopy.text("pave.action.block", weshIdentitySummary(blockName, fingerprint: blockTarget?.noiseKey?.sha256Fingerprint())))
+        } message: { Text(PaveCopy.text("pave.wesh.block.body")) }
         .modifier(WeshReportAlerts(target: $reportTarget, name: reportName, message: reportMessage, done: $reportDone) { target, name in
             runtime.chatViewModel.reportWeshPublicAuthor(target, displayName: name)
         })
@@ -957,30 +977,30 @@ private struct WeshConversation: View {
             let name = WeshDisplayName.blockTarget(sender: message.sender, privateTitle: title, isPrivate: isPrivate)
             let summary: String = weshIdentitySummary(name, fingerprint: identity.noiseKey?.sha256Fingerprint())
             if !isPrivate {
-                Button("Signaler", role: .destructive) {
+                Button(PaveCopy.text("pave.wesh.action.report"), role: .destructive) {
                     reportTarget = identity
                     reportName = name
                     reportMessage = message
                 }
-                .accessibilityLabel("Signaler " + summary)
-                .accessibilityHint("Demande confirmation, puis bloque cette personne et masque ses messages sur ce téléphone")
+                .accessibilityLabel(PaveCopy.text("pave.wesh.action.reportName", summary))
+                .accessibilityHint(PaveCopy.text("pave.wesh.report.hint"))
             }
-            Button("Bloquer sur ce téléphone", role: .destructive) {
+            Button(PaveCopy.text("pave.wesh.block.onPhone"), role: .destructive) {
                 blockTarget = identity
                 blockName = name
             }
-            .accessibilityLabel("Bloquer " + summary)
-            .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
+            .accessibilityLabel(PaveCopy.text("pave.action.block", summary))
+            .accessibilityHint(PaveCopy.text("pave.wesh.block.hint"))
         }
     }
 
     private func send() {
         guard draft.utf8.count <= WeshTextLimits.maximumUTF8Bytes else {
-            showComposerFeedback("Message trop long. Raccourcissez-le pour l’envoyer. Votre brouillon est conservé.")
+            showComposerFeedback(WeshFeedbackCopy.composerTooLong())
             return
         }
         guard let snapshot = composerDrafts.submission(for: draftKey, displayedText: draft, generation: draftGeneration) else {
-            showComposerFeedback("Le brouillon a changé. Relisez le texte avant de l’envoyer.")
+            showComposerFeedback(WeshFeedbackCopy.composerChanged())
             return
         }
         if runtime.chatViewModel.sendWeshDraft(&draft, to: peerID) {
@@ -1008,9 +1028,9 @@ private struct WeshDayDivider: View {
     @Environment(\.weshTheme) private var theme
     var body: some View {
         Group {
-            if Calendar.current.isDateInToday(date) { Text("Aujourd’hui") }
-            else if Calendar.current.isDateInYesterday(date) { Text("Hier") }
-            else { Text(date, format: .dateTime.day().month(.wide).year().locale(Locale(identifier: "fr_FR"))) }
+            if Calendar.current.isDateInToday(date) { Text(PaveCopy.text("pave.wesh.date.today")) }
+            else if Calendar.current.isDateInYesterday(date) { Text(PaveCopy.text("pave.wesh.date.yesterday")) }
+            else { Text(date, format: .dateTime.day().month(.wide).year()) }
         }.font(.caption.weight(.medium)).foregroundStyle(theme.secondary)
             .frame(maxWidth: .infinity).padding(.vertical, 8)
             .accessibilityAddTraits(.isHeader)
@@ -1050,26 +1070,26 @@ private struct WeshMessageBubble: View {
 }
 
 enum WeshDelivery {
-    static func publicLabel(_ status: DeliveryStatus) -> String {
+    static func publicLabel(_ status: DeliveryStatus, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         switch status {
-        case .notSentYet: return "En attente de diffusion"
-        case .sending: return "Diffusion en cours"
-        case .failed: return "Échec de diffusion"
-        case .partiallyDelivered: return "Transmission partielle · réception non confirmée"
-        default: return "Diffusion publique · réception non confirmée"
+        case .notSentYet: return PaveCopy.text("pave.wesh.delivery.publicWaiting", bundle: bundle, locale: locale)
+        case .sending: return PaveCopy.text("pave.wesh.delivery.publicSending", bundle: bundle, locale: locale)
+        case .failed: return PaveCopy.text("pave.wesh.delivery.publicFailed", bundle: bundle, locale: locale)
+        case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.publicPartial", bundle: bundle, locale: locale)
+        default: return PaveCopy.text("pave.wesh.delivery.publicUnconfirmed", bundle: bundle, locale: locale)
         }
     }
 
-    static func label(_ status: DeliveryStatus) -> String {
+    static func label(_ status: DeliveryStatus, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         switch status {
-        case .notSentYet: return "En attente d’envoi"
-        case .sending: return "En cours d’envoi"
-        case .sent: return "Transmission non confirmée"
-        case .carried: return "Confié à un relais · réception non confirmée"
-        case .delivered: return "Réception confirmée"
-        case .read: return "Lu"
-        case .failed: return "Échec d’envoi"
-        case .partiallyDelivered: return "Transmission partielle"
+        case .notSentYet: return PaveCopy.text("pave.wesh.delivery.waiting", bundle: bundle, locale: locale)
+        case .sending: return PaveCopy.text("pave.wesh.delivery.sending", bundle: bundle, locale: locale)
+        case .sent: return PaveCopy.text("pave.wesh.delivery.sent", bundle: bundle, locale: locale)
+        case .carried: return PaveCopy.text("pave.wesh.delivery.carried", bundle: bundle, locale: locale)
+        case .delivered: return PaveCopy.text("pave.wesh.delivery.delivered", bundle: bundle, locale: locale)
+        case .read: return PaveCopy.text("pave.wesh.delivery.read", bundle: bundle, locale: locale)
+        case .failed: return PaveCopy.text("pave.wesh.delivery.failed", bundle: bundle, locale: locale)
+        case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.partial", bundle: bundle, locale: locale)
         }
     }
 }
@@ -1208,29 +1228,29 @@ private struct WeshInformationSheet: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Image(systemName: isPrivate ? "lock" : "antenna.radiowaves.left.and.right")
                         .font(.largeTitle).foregroundStyle(theme.accent).accessibilityHidden(true)
-                    Text(isPrivate ? "Une vérification en personne." : "Un salon ouvert.")
+                    Text(isPrivate ? PaveCopy.text("pave.wesh.info.privateTitle") : PaveCopy.text("pave.wesh.info.publicTitle"))
                         .font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    Text(isPrivate ? "Pour échanger, chacun doit scanner le QR de l’autre. L’identité vérifiée ici est liée à la connexion chiffrée de ce contact." : "Les participants peuvent voir, conserver et relayer vos messages. Un surnom ne prouve pas une identité.")
-                    Text(isPrivate ? "La vérification sur ce téléphone ne prouve pas que votre contact vous a vérifié. En cas de changement d’identité ou de connexion, l’écriture est suspendue et votre brouillon est conservé." : "Le Bluetooth ne garantit aucune frontière géographique : un message peut être relayé au-delà des personnes proches. La diffusion ne confirme pas sa réception.")
+                    Text(isPrivate ? PaveCopy.text("pave.wesh.info.privateTrust") : PaveCopy.text("pave.wesh.info.publicTrust"))
+                    Text(isPrivate ? PaveCopy.text("pave.wesh.info.privateScope") : PaveCopy.text("pave.wesh.info.publicScope"))
                         .foregroundStyle(theme.secondary)
-                    Text(isPrivate ? "Une réception confirmée concerne ce message et son destinataire. Une connexion disponible ou un relais ne suffit pas." : "La sourdine coupe les notifications de mentions. Pour bloquer quelqu’un sur ce téléphone, ouvrez le menu de conversation puis Participants connus.")
+                    Text(isPrivate ? PaveCopy.text("pave.wesh.info.privateReceipt") : PaveCopy.text("pave.wesh.info.publicMute"))
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(theme.contentInset)
             }
-            .navigationTitle(isPrivate ? "Discussion privée" : "À propos du salon").weshInlineTitle()
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
-            .weshCanvas(title: isPrivate ? "Discussion privée" : "À propos du salon")
+            .navigationTitle(isPrivate ? PaveCopy.text("pave.wesh.conversation.privateTitle") : PaveCopy.text("pave.wesh.info.roomTitle")).weshInlineTitle()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(PaveCopy.text("pave.wesh.action.done")) { dismiss() }.frame(minHeight: 44) } }
+            .weshCanvas(title: isPrivate ? PaveCopy.text("pave.wesh.conversation.privateTitle") : PaveCopy.text("pave.wesh.info.roomTitle"))
         }.weshSheetBackground()
     }
 }
 
 private func bluetoothSummary(_ state: CBManagerState) -> String {
     switch state {
-    case .poweredOn: return "Bluetooth actif"
-    case .poweredOff: return "Activez le Bluetooth pour échanger à proximité"
-    case .unauthorized: return "Autorisez le Bluetooth dans les réglages du téléphone"
-    case .unsupported: return "Bluetooth indisponible sur cet appareil"
-    default: return "Préparation du Bluetooth…"
+    case .poweredOn: return PaveCopy.text("pave.fluo.bluetooth.on")
+    case .poweredOff: return PaveCopy.text("pave.wesh.bluetooth.off")
+    case .unauthorized: return PaveCopy.text("pave.wesh.bluetooth.unauthorized")
+    case .unsupported: return PaveCopy.text("pave.wesh.bluetooth.unsupported")
+    default: return PaveCopy.text("pave.wesh.bluetooth.preparing")
     }
 }
 
@@ -1318,59 +1338,59 @@ private struct WeshContactDetails: View {
                     WeshAvatar(symbol: "person")
                     Text(PaveDisplayName.safe(contact.nickname)).font(.title2.weight(.semibold))
                     PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
-                    Label(blocked ? "Bloqué sur ce téléphone" : "Identité vérifiée ici", systemImage: blocked ? "hand.raised" : "lock")
+                    Label(blocked ? PaveCopy.text("pave.wesh.contact.blocked") : PaveCopy.text("pave.wesh.contact.verifiedHere"), systemImage: blocked ? "hand.raised" : "lock")
                         .font(.subheadline).foregroundStyle(theme.secondary)
-                    Text("Ce surnom vient du QR. La vérification concerne l’identité de connexion, sur ce téléphone seulement.")
+                    Text(PaveCopy.text("pave.wesh.contact.qrNameScope"))
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(.vertical, 16)
             }.listRowBackground(theme.canvas)
             Section {
                 if blocked {
-                    Button("Débloquer") {
+                    Button(PaveCopy.text("pave.wesh.action.unblock")) {
                         if let key = contact.peerID.noiseKey, runtime.chatViewModel.unblockWeshIdentity(key.sha256Fingerprint()) {
-                            feedback = "Contact débloqué."
-                        } else { feedback = "Ce contact n’est plus bloqué." }
+                            feedback = PaveCopy.text("pave.wesh.contact.unblocked")
+                        } else { feedback = PaveCopy.text("pave.wesh.contact.notBlocked") }
                     }.frame(minHeight: 48)
-                        .accessibilityLabel("Débloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
-                        .accessibilityHint("Autorise à nouveau ses prochains messages sur ce téléphone")
+                        .accessibilityLabel(PaveCopy.text("pave.wesh.action.unblockName", weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint())))
+                        .accessibilityHint(PaveCopy.text("pave.wesh.unblock.hint"))
                 } else {
-                    Button("Bloquer sur ce téléphone", role: .destructive) { blocking = true }.frame(minHeight: 48)
-                        .accessibilityLabel("Bloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
-                        .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
+                    Button(PaveCopy.text("pave.wesh.block.onPhone"), role: .destructive) { blocking = true }.frame(minHeight: 48)
+                        .accessibilityLabel(PaveCopy.text("pave.action.block", weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint())))
+                        .accessibilityHint(PaveCopy.text("pave.wesh.block.hint"))
                 }
-                Button("Retirer ce contact", role: .destructive) { removing = true }.frame(minHeight: 48)
+                Button(PaveCopy.text("pave.wesh.contact.remove"), role: .destructive) { removing = true }.frame(minHeight: 48)
                 if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
             } footer: {
-                Text("Le blocage ignore ses prochains messages ici et conserve l’historique existant. Retirer le contact suspend les prochains envois privés ; un nouveau scan sera nécessaire. Les messages déjà transmis ne peuvent pas être rappelés.")
+                Text(PaveCopy.text("pave.wesh.contact.removeScope"))
             }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Contact").weshInlineTitle().weshCanvas(title: "Contact")
-            .toolbar { if inSheet { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } } }
-            .alert("Bloquer ce contact ?", isPresented: $blocking) {
-                Button("Annuler", role: .cancel) {}
-                Button("Bloquer", role: .destructive) {
+            .navigationTitle(PaveCopy.text("pave.wesh.contact.title")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.wesh.contact.title"))
+            .toolbar { if inSheet { ToolbarItem(placement: .confirmationAction) { Button(PaveCopy.text("pave.wesh.action.done")) { dismiss() }.frame(minHeight: 44) } } }
+            .alert(PaveCopy.text("pave.wesh.block.contactTitle"), isPresented: $blocking) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+                Button(PaveCopy.text("pave.wesh.action.block"), role: .destructive) {
                     let reported = PaveReportTarget(rawNickname: contact.nickname, fingerprint: PaveFingerprint.short(contact.peerID.noiseKey), source: .contact)
                     reportOffer = PaveReportMail.blockThenOffer(reported) {
                         runtime.chatViewModel.blockMeshPeer(peerID: contact.peerID, displayName: PaveDisplayName.safe(contact.nickname))
                         return true
                     }.offer
-                    feedback = "Contact bloqué sur ce téléphone."
+                    feedback = PaveCopy.text("pave.wesh.contact.blockConfirmed")
                 }
-                .accessibilityLabel("Bloquer " + weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint()))
-            } message: { Text("Vous pourrez le débloquer ici ou dans Réglages → Contacts bloqués, même s’il est hors connexion.") }
+                .accessibilityLabel(PaveCopy.text("pave.action.block", weshIdentitySummary(PaveDisplayName.safe(contact.nickname), fingerprint: contact.peerID.noiseKey?.sha256Fingerprint())))
+            } message: { Text(PaveCopy.text("pave.wesh.contact.unblockOffline")) }
             .paveReportSendFlow($reportOffer)
-            .alert("Retirer ce contact ?", isPresented: $removing) {
-                Button("Annuler", role: .cancel) {}
-                Button("Retirer", role: .destructive) {
+            .alert(PaveCopy.text("pave.wesh.contact.removeTitle"), isPresented: $removing) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+                Button(PaveCopy.text("pave.wesh.action.remove"), role: .destructive) {
                     // The key leaves the sending allowlist either way; only a
                     // confirmed write closes this page.
                     if let key = contact.peerID.noiseKey, runtime.chatViewModel.removeWeshContact(for: key) {
                         dismiss()
                     } else {
-                        feedback = "La suppression n’a pas pu être enregistrée. Les envois privés à ce contact restent suspendus. Réessayez."
+                        feedback = PaveCopy.text("pave.wesh.contact.removeFailed")
                     }
                 }
-            } message: { Text("Il disparaîtra des discussions. Ce retrait n’efface pas l’historique. Un nouveau scan sera nécessaire pour envoyer. Les envois en attente pourront reprendre après ce scan.") }
+            } message: { Text(PaveCopy.text("pave.wesh.contact.removeBody")) }
     }
 }
 
@@ -1396,8 +1416,8 @@ private struct WeshNearbyPeople: View {
             Section {
                 if participants.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Aucun participant connu.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Les connexions Bluetooth disponibles apparaîtront ici.").foregroundStyle(theme.secondary)
+                        Text(PaveCopy.text("pave.wesh.participants.empty")).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                        Text(PaveCopy.text("pave.wesh.participants.emptyBody")).foregroundStyle(theme.secondary)
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(participants, id: \.peerID) { person in
@@ -1409,35 +1429,35 @@ private struct WeshNearbyPeople: View {
                             Text(name).font(.headline)
                             PaveFingerprintText(fingerprint: PaveFingerprint.short(proven))
                             if let proven, runtime.chatViewModel.identityManager.isBlocked(fingerprint: proven.sha256Fingerprint()) {
-                                Text("Bloqué sur ce téléphone").font(.subheadline).foregroundStyle(theme.secondary)
+                                Text(PaveCopy.text("pave.wesh.contact.blocked")).font(.subheadline).foregroundStyle(theme.secondary)
                             } else if let proven {
-                                Button("Bloquer sur ce téléphone", role: .destructive) {
+                                Button(PaveCopy.text("pave.wesh.block.onPhone"), role: .destructive) {
                                     selected = .init(noiseKeyHex: proven.hexEncodedString(), nickname: name)
                                 }.frame(minHeight: 44)
-                                    .accessibilityLabel("Bloquer " + weshIdentitySummary(name, fingerprint: proven.sha256Fingerprint()))
-                                    .accessibilityHint("Demande confirmation avant d’ignorer ses prochains messages sur ce téléphone")
+                                    .accessibilityLabel(PaveCopy.text("pave.action.block", weshIdentitySummary(name, fingerprint: proven.sha256Fingerprint())))
+                                    .accessibilityHint(PaveCopy.text("pave.wesh.block.hint"))
                             }
                         }.padding(.vertical, 8)
                     }
                 }
                 if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
-            } footer: { Text("Cette liste n’indique ni distance ni réception des messages. Un surnom ne prouve pas une identité. Pour débloquer : Réglages → Contacts bloqués.") }
+            } footer: { Text(PaveCopy.text("pave.wesh.participants.scope")) }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Participants connus").weshInlineTitle().weshCanvas(title: "Participants connus")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Terminé") { dismiss() }.frame(minHeight: 44) } }
-            .alert("Bloquer cette personne ?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
-                Button("Annuler", role: .cancel) { selected = nil }
-                Button("Bloquer", role: .destructive) {
+            .navigationTitle(PaveCopy.text("pave.wesh.participants.title")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.wesh.participants.title"))
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(PaveCopy.text("pave.wesh.action.done")) { dismiss() }.frame(minHeight: 44) } }
+            .alert(PaveCopy.text("pave.wesh.block.personTitle"), isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) { selected = nil }
+                Button(PaveCopy.text("pave.wesh.action.block"), role: .destructive) {
                     if let person = selected {
                         runtime.chatViewModel.blockMeshPeer(peerID: person.peerID, displayName: person.nickname)
-                        feedback = "Personne bloquée sur ce téléphone."
+                        feedback = PaveCopy.text("pave.wesh.block.confirmed")
                     }
                     selected = nil
                 }
-                .accessibilityLabel("Bloquer " + (selected.map { weshIdentitySummary($0.nickname, fingerprint: $0.peerID.noiseKey?.sha256Fingerprint()) } ?? "cette personne"))
+                .accessibilityLabel(PaveCopy.text("pave.action.block", selected.map { weshIdentitySummary($0.nickname, fingerprint: $0.peerID.noiseKey?.sha256Fingerprint()) } ?? PaveCopy.text("pave.wesh.person.lowercase")))
             } message: {
-                Text("\(selected.map { $0.nickname + " · " + (PaveFingerprint.short($0.peerID.noiseKey) ?? "") } ?? "Cette personne") : ses prochains messages seront ignorés ici. L’historique existant reste sur ce téléphone.")
+                Text(PaveCopy.text("pave.wesh.block.namedBody", selected.map { $0.nickname + " · " + (PaveFingerprint.short($0.peerID.noiseKey) ?? "") } ?? PaveCopy.text("pave.wesh.person.capitalized")))
             }
     }
 }
@@ -1465,35 +1485,35 @@ private struct WeshBlockedContacts: View {
             Section {
                 if fingerprints.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Personne n’est bloqué.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                        Text("Les personnes bloquées apparaîtront ici, même hors connexion.").foregroundStyle(theme.secondary)
+                        Text(PaveCopy.text("pave.wesh.blocked.empty")).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                        Text(PaveCopy.text("pave.wesh.blocked.emptyBody")).foregroundStyle(theme.secondary)
                     }.padding(.vertical, 24).listRowSeparator(.hidden)
                 } else {
                     ForEach(fingerprints, id: \.self) { fingerprint in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(name(for: fingerprint)).font(.headline)
                             PaveFingerprintText(fingerprint: weshShortFingerprint(hex: fingerprint))
-                            Button("Débloquer") { selectedFingerprint = fingerprint }.frame(minHeight: 44)
-                                .accessibilityLabel("Débloquer " + weshIdentitySummary(name(for: fingerprint), fingerprint: fingerprint))
-                                .accessibilityHint("Demande confirmation avant d’autoriser ses prochains messages sur ce téléphone")
+                            Button(PaveCopy.text("pave.wesh.action.unblock")) { selectedFingerprint = fingerprint }.frame(minHeight: 44)
+                                .accessibilityLabel(PaveCopy.text("pave.wesh.action.unblockName", weshIdentitySummary(name(for: fingerprint), fingerprint: fingerprint)))
+                                .accessibilityHint(PaveCopy.text("pave.wesh.unblock.confirmHint"))
                         }.padding(.vertical, 8)
                     }
                 }
                 if !feedback.isEmpty { Text(feedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently) }
-            } footer: { Text("Débloquer ne remplace pas une vérification QR. Les messages des autres téléphones ne sont pas modifiés.") }
+            } footer: { Text(PaveCopy.text("pave.wesh.unblock.scope")) }
             .listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .navigationTitle("Contacts bloqués").weshInlineTitle().weshCanvas(title: "Contacts bloqués")
-            .alert("Débloquer cette personne ?", isPresented: Binding(get: { selectedFingerprint != nil }, set: { if !$0 { selectedFingerprint = nil } })) {
-                Button("Annuler", role: .cancel) { selectedFingerprint = nil }
-                Button("Débloquer") {
+            .navigationTitle(PaveCopy.text("pave.wesh.blocked.title")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.wesh.blocked.title"))
+            .alert(PaveCopy.text("pave.wesh.unblock.personTitle"), isPresented: Binding(get: { selectedFingerprint != nil }, set: { if !$0 { selectedFingerprint = nil } })) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) { selectedFingerprint = nil }
+                Button(PaveCopy.text("pave.wesh.action.unblock")) {
                     if let fingerprint = selectedFingerprint {
-                        feedback = runtime.chatViewModel.unblockWeshIdentity(fingerprint) ? "Personne débloquée." : "Cette personne n’est plus bloquée."
+                        feedback = runtime.chatViewModel.unblockWeshIdentity(fingerprint) ? PaveCopy.text("pave.wesh.unblock.confirmed") : PaveCopy.text("pave.wesh.unblock.notBlocked")
                     }
                     selectedFingerprint = nil
                 }
-                .accessibilityLabel("Débloquer " + (selectedFingerprint.map { weshIdentitySummary(name(for: $0), fingerprint: $0) } ?? "cette personne"))
-            } message: { Text("Débloquer \(selectedFingerprint.map { name(for: $0) + " · " + (weshShortFingerprint(hex: $0) ?? "") } ?? "cette personne") ? Ses prochains messages pourront à nouveau apparaître sur ce téléphone.") }
+                .accessibilityLabel(PaveCopy.text("pave.wesh.action.unblockName", selectedFingerprint.map { weshIdentitySummary(name(for: $0), fingerprint: $0) } ?? PaveCopy.text("pave.wesh.person.lowercase")))
+            } message: { Text(PaveCopy.text("pave.wesh.unblock.namedBody", selectedFingerprint.map { name(for: $0) + " · " + (weshShortFingerprint(hex: $0) ?? "") } ?? PaveCopy.text("pave.wesh.person.lowercase"))) }
     }
 }
 
@@ -1504,7 +1524,7 @@ private struct WeshAppearanceSettings: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Une touche de métal.").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                Text(PaveCopy.text("pave.wesh.appearance.intro")).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
                 ForEach(WeshAppearance.allCases) { choice in
                     let palette = WeshTheme(appearance: choice)
                     Button { appearance = choice } label: {
@@ -1529,10 +1549,10 @@ private struct WeshAppearanceSettings: View {
                         }.foregroundStyle(theme.ink).padding(.vertical, 8)
                     }.buttonStyle(.plain).accessibilityAddTraits(appearance == choice ? .isSelected : [])
                 }
-                Text("Argent ou or, sur noir pur. Le QR reste noir sur blanc pour être facile à scanner.")
+                Text(PaveCopy.text("pave.wesh.appearance.qrScope"))
                     .font(.subheadline).foregroundStyle(theme.secondary)
             }.padding(theme.contentInset)
-        }.navigationTitle("Apparence").weshInlineTitle().weshCanvas(title: "Apparence")
+        }.navigationTitle(PaveCopy.text("pave.settings.appearance")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.settings.appearance"))
     }
 }
 
@@ -1551,17 +1571,17 @@ private struct WeshProfileEditor: View {
         ScrollViewReader { scroll in
             Form {
                 Section {
-                    TextField("Votre surnom", text: $nickname).focused($nicknameFocused).onSubmit(save)
-                        .accessibilityLabel("Votre surnom")
-                    Button("Enregistrer", action: save).frame(minHeight: 44)
+                    TextField(PaveCopy.text("pave.onboarding.nicknameLabel"), text: $nickname).focused($nicknameFocused).onSubmit(save)
+                        .accessibilityLabel(PaveCopy.text("pave.onboarding.nicknameLabel"))
+                    Button(PaveCopy.text("pave.wesh.action.save"), action: save).frame(minHeight: 44)
                     if !feedback.isEmpty {
                         Text(feedback).font(.subheadline).id("profileFeedback")
                             .accessibilityFocused($feedbackFocused)
                     }
-                } header: { WeshSectionLabel(text: "Votre surnom") } footer: {
-                    Text("Ce surnom est visible dans le salon public. Il ne prouve pas votre identité.")
+                } header: { WeshSectionLabel(text: PaveCopy.text("pave.onboarding.nicknameLabel")) } footer: {
+                    Text(PaveCopy.text("pave.wesh.profile.scope"))
                 }.listRowBackground(theme.canvas)
-            }.scrollContentBackground(.hidden).navigationTitle("Votre profil").weshCanvas(title: "Votre profil")
+            }.scrollContentBackground(.hidden).navigationTitle(PaveCopy.text("pave.wesh.profile.title")).weshCanvas(title: PaveCopy.text("pave.wesh.profile.title"))
                 .onAppear { nickname = chrome.nickname }
                 .onChange(of: focusRevision) { _ in
                     scroll.scrollTo("profileFeedback", anchor: .center)
@@ -1579,8 +1599,8 @@ private struct WeshProfileEditor: View {
         let value = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         if !value.isEmpty, value.utf8.count <= 255 {
             chrome.setNickname(value); chrome.validateAndSaveNickname(); nickname = chrome.nickname
-            feedback = "Surnom enregistré."
-        } else { feedback = "Choisissez un surnom plus court et non vide." }
+            feedback = PaveCopy.text("pave.wesh.profile.saved")
+        } else { feedback = PaveCopy.text("pave.wesh.profile.invalid") }
         feedbackFocused = false
         waitingForKeyboard = nicknameFocused && softwareKeyboardVisible
         nicknameFocused = false
@@ -1616,11 +1636,11 @@ private struct WeshPrivacySettings: View {
     var body: some View {
         Form {
             Section {
-                Text("Les vérifications QR concernent ce téléphone. Les notes de rendez-vous restent locales.")
-                Text("Les participants peuvent conserver et relayer vos messages publics.").foregroundStyle(theme.secondary)
+                Text(PaveCopy.text("pave.wesh.privacy.scope"))
+                Text(PaveCopy.text("pave.wesh.privacy.publicCopies")).foregroundStyle(theme.secondary)
             }.listRowBackground(theme.canvas)
             Section {
-                Button("Retirer les vérifications QR", role: .destructive) { forgetContacts = true }.frame(minHeight: 44)
+                Button(PaveCopy.text("pave.wesh.privacy.removeVerifications"), role: .destructive) { forgetContacts = true }.frame(minHeight: 44)
                 if !forgetFeedback.isEmpty {
                     Text(forgetFeedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently)
                 }
@@ -1631,14 +1651,14 @@ private struct WeshPrivacySettings: View {
                 Text(PaveCopy.text("pave.settings.previewsHelp"))
             }.listRowBackground(theme.canvas)
         }.scrollContentBackground(.hidden).navigationTitle(PaveSettingsDestination.discretion.title).weshCanvas(title: PaveSettingsDestination.discretion.title)
-            .alert("Retirer les vérifications QR ?", isPresented: $forgetContacts) {
-                Button("Annuler", role: .cancel) {}
-                Button("Retirer", role: .destructive) {
+            .alert(PaveCopy.text("pave.wesh.privacy.removeTitle"), isPresented: $forgetContacts) {
+                Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+                Button(PaveCopy.text("pave.wesh.action.remove"), role: .destructive) {
                     forgetFeedback = runtime.chatViewModel.removeAllWeshContacts()
-                        ? "Vérifications QR retirées."
-                        : "La suppression n’a pas pu être enregistrée. Les envois privés restent suspendus. Réessayez."
+                        ? PaveCopy.text("pave.wesh.privacy.removed")
+                        : PaveCopy.text("pave.wesh.privacy.removeFailed")
                 }
-            } message: { Text("Pour écrire à ces contacts, vous devrez scanner à nouveau leur QR. Les messages existants restent sur ce téléphone.") }
+            } message: { Text(PaveCopy.text("pave.wesh.privacy.removeBody")) }
     }
 }
 
@@ -1655,34 +1675,34 @@ private struct WeshMeetingNote: View {
         let generation = store.generation
         Form {
             Section {
-                Label("Une note pour vous", systemImage: "calendar").font(.headline)
-                Text("Une note personnelle, conservée ici. Rien n’est envoyé à vos contacts.").foregroundStyle(theme.secondary)
+                Label(PaveCopy.text("pave.wesh.note.introTitle"), systemImage: "calendar").font(.headline)
+                Text(PaveCopy.text("pave.wesh.note.introBody")).foregroundStyle(theme.secondary)
             }.listRowBackground(theme.canvas)
-            Section("Votre rendez-vous") {
-                TextField("Titre", text: textBinding(\.title, generation: generation))
-                TextField("Lieu ou repère", text: textBinding(\.place, generation: generation))
-                DatePicker("Quand", selection: Binding(get: { Date(timeIntervalSince1970: store.content.date) }, set: {
+            Section(PaveCopy.text("pave.wesh.note.section")) {
+                TextField(PaveCopy.text("pave.wesh.note.title"), text: textBinding(\.title, generation: generation))
+                TextField(PaveCopy.text("pave.wesh.note.place"), text: textBinding(\.place, generation: generation))
+                DatePicker(PaveCopy.text("pave.wesh.note.when"), selection: Binding(get: { Date(timeIntervalSince1970: store.content.date) }, set: {
                     store.editDate($0.timeIntervalSince1970, generation: generation)
                 }))
-                TextField("À retenir", text: textBinding(\.note, generation: generation), axis: .vertical).lineLimit(3...8)
+                TextField(PaveCopy.text("pave.wesh.note.remember"), text: textBinding(\.note, generation: generation), axis: .vertical).lineLimit(3...8)
             }.disabled(!store.isEditable).listRowBackground(theme.canvas)
             if store.isSuspended {
-                Text("La note est suspendue après une demande d’effacement. Certaines données peuvent rester ici. Reprenez l’effacement local depuis les réglages de confidentialité.")
+                Text(PaveCopy.text("pave.wesh.note.suspended"))
             } else if store.storageState == .unavailable {
-                Text("La note est illisible pour le moment. Déverrouillez le téléphone, puis réessayez.")
-                Button("Réessayer") { store.reloadIfNeeded() }.frame(minHeight: 44)
+                Text(PaveCopy.text("pave.wesh.note.unavailable"))
+                Button(PaveCopy.text("pave.delivery.retry")) { store.reloadIfNeeded() }.frame(minHeight: 44)
             } else if store.storageState == .recoveryRequired {
-                Text("La note conservée n’a pas pu être lue. Elle est gardée sans être remplacée. Vous pouvez l’effacer pour en écrire une nouvelle.")
+                Text(PaveCopy.text("pave.wesh.note.recovery"))
             } else if !store.isSaveConfirmed {
-                Text("Enregistrement de la note non confirmé. Gardez cette page ouverte et réessayez.")
+                Text(PaveCopy.text("pave.wesh.note.unconfirmed"))
             }
-            Section { Button("Effacer cette note", role: .destructive) { clear = true }.frame(minHeight: 44).disabled(store.isSuspended) }.listRowBackground(theme.canvas)
+            Section { Button(PaveCopy.text("pave.wesh.note.eraseAction"), role: .destructive) { clear = true }.frame(minHeight: 44).disabled(store.isSuspended) }.listRowBackground(theme.canvas)
         }
-        .scrollContentBackground(.hidden).weshCanvas(title: "Rendez-vous")
-        .navigationTitle("Rendez-vous")
-        .alert("Effacer votre note ?", isPresented: $clear) {
-            Button("Annuler", role: .cancel) {}
-            Button("Effacer", role: .destructive) { store.clear(generation: generation) }
+        .scrollContentBackground(.hidden).weshCanvas(title: PaveCopy.text("pave.wesh.note.screen"))
+        .navigationTitle(PaveCopy.text("pave.wesh.note.screen"))
+        .alert(PaveCopy.text("pave.wesh.note.eraseTitle"), isPresented: $clear) {
+            Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
+            Button(PaveCopy.text("pave.wesh.action.erase"), role: .destructive) { store.clear(generation: generation) }
         }
     }
 }

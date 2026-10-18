@@ -1148,14 +1148,18 @@ struct WeshNativeUITests {
         #expect(!reloaded.remove(sessionKey: first))
     }
 
-    @Test func receiptsDoNotConflateQueuedCarriedAndDelivered() {
-        #expect(WeshDelivery.publicLabel(.notSentYet) == "En attente de diffusion")
-        #expect(WeshDelivery.publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
-        #expect(WeshDelivery.publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
-        #expect(WeshDelivery.label(.notSentYet) != WeshDelivery.label(.sent))
-        #expect(WeshDelivery.label(.sent).contains("non confirmée"))
-        #expect(WeshDelivery.label(.carried).contains("non confirmée"))
-        #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
-        #expect(WeshDelivery.label(.read(by: "Nora", at: Date())) == "Lu")
+    @Test func receiptsDoNotConflateQueuedCarriedAndDelivered() throws {
+        let path = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+        let publicLabel: (DeliveryStatus) -> String = { WeshDelivery.publicLabel($0, bundle: bundle, locale: Locale(identifier: "fr")) }
+        let label: (DeliveryStatus) -> String = { WeshDelivery.label($0, bundle: bundle, locale: Locale(identifier: "fr")) }
+        #expect(publicLabel(.notSentYet) == "En attente de diffusion")
+        #expect(publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
+        #expect(publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
+        #expect(label(.notSentYet) != label(.sent))
+        #expect(label(.sent).contains("non confirmée"))
+        #expect(label(.carried).contains("non confirmée"))
+        #expect(label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
+        #expect(label(.read(by: "Nora", at: Date())) == "Lu")
     }
 }

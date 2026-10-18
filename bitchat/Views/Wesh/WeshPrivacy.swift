@@ -24,14 +24,15 @@ struct WeshContactStorageNotice: Equatable {
     let message: String
     let offersReset: Bool
 
-    init?(identityAvailable: Bool, identityRequiresRecovery: Bool, contactsState: WeshQRTrust.StorageState) {
+    init?(identityAvailable: Bool, identityRequiresRecovery: Bool, contactsState: WeshQRTrust.StorageState,
+          bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) {
         if identityRequiresRecovery || contactsState == .recoveryRequired {
-            title = "Contacts illisibles"
-            message = "Les contacts et vérifications conservés sur ce téléphone ne peuvent pas être lus. Réessayer ne les efface pas. Pour repartir de zéro, réinitialisez : toutes les données de Wesh sur ce téléphone seront effacées."
+            title = PaveCopy.text("pave.contacts.recovery.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.contacts.recovery.message", bundle: bundle, locale: locale)
             offersReset = true
         } else if !identityAvailable || contactsState == .unavailable {
-            title = "Contacts indisponibles"
-            message = "Wesh ne peut pas lire vos contacts pour le moment. Déverrouillez le téléphone, puis réessayez."
+            title = PaveCopy.text("pave.contacts.unavailable.title", bundle: bundle, locale: locale)
+            message = PaveCopy.text("pave.contacts.unavailable.message", bundle: bundle, locale: locale)
             offersReset = false
         } else {
             return nil
@@ -50,13 +51,13 @@ struct WeshContactStorageRecoveryPanel: View {
             Label(notice.title, systemImage: "person.crop.circle.badge.exclamationmark")
                 .font(.headline).accessibilityAddTraits(.isHeader)
             Text(notice.message).font(.subheadline).foregroundStyle(theme.secondary)
-            Button("Réessayer", action: retry).frame(minHeight: 44)
-                .accessibilityHint("Relire les contacts sans rien effacer")
+            Button(PaveCopy.text("pave.delivery.retry"), action: retry).frame(minHeight: 44)
+                .accessibilityHint(PaveCopy.text("pave.wesh.contacts.retryHint"))
             if notice.offersReset {
-                Button("Réinitialiser les contacts et l’identité", role: .destructive) {
+                Button(PaveCopy.text("pave.wesh.contacts.reset"), role: .destructive) {
                     chrome.requestPanicWipe()
                 }.frame(minHeight: 44)
-                    .accessibilityHint("Demande confirmation avant d’effacer toutes les données de Wesh sur ce téléphone")
+                    .accessibilityHint(PaveCopy.text("pave.wesh.contacts.resetHint"))
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }

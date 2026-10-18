@@ -81,6 +81,25 @@ struct PaveCatalogTests {
         #expect(keys.subtracting(referenced).isEmpty, "unused keys: \(keys.subtracting(referenced).sorted())")
     }
 
+    @Test func activeWeshViewsKeepLiteralUIStringsInTheCatalog() throws {
+        let active = Set(["WeshRootView.swift", "WeshPrivacy.swift", "WeshRequests.swift", "WeshDesignSystem.swift"])
+        let patterns = try [
+            #"\b(?:Text|Label|Button|TextField|DatePicker|Section)\s*\(\s*"([^"]+)""#,
+            #"\.(?:navigationTitle|accessibilityLabel|accessibilityHint)\s*\(\s*"([^"]+)""#
+        ].map { try NSRegularExpression(pattern: $0) }
+        for source in try Self.sources().filter({ active.contains($0.name) }) {
+            for pattern in patterns {
+                for match in pattern.matches(in: source.text, range: NSRange(source.text.startIndex..., in: source.text)) {
+                    let range = try #require(Range(match.range(at: 1), in: source.text))
+                    // The brand keeps its spelling in both languages; icons, storage keys and
+                    // user content are outside these literal-copy call sites.
+                    #expect(["Wesh", "wesh"].contains(String(source.text[range])),
+                            "\(source.name) has a literal UI string outside the catalog")
+                }
+            }
+        }
+    }
+
     @Test func copyNeverPromisesAnonymityOrSecurity() throws {
         let banned = ["anonyme", "intraçable", "sécurisé", "anonymous", "untraceable", "secure"]
         for (key, locales) in try Self.load("Pave.xcstrings") {
