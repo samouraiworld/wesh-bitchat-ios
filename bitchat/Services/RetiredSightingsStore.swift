@@ -38,7 +38,10 @@ struct PanicStartupDecision {
     static func preflight(
         checkPending: () throws -> Bool,
         wipeSightings: @MainActor () -> Bool,
-        wipeGeography: @MainActor () -> Bool
+        wipeGeography: @MainActor () -> Bool,
+        wipeSharedContent _: @MainActor () -> Bool,
+        wipeBoard _: @MainActor () -> Bool,
+        wipeBridge _: @MainActor () -> Bool
     ) -> Self {
         let pending = (try? checkPending()) ?? true
         let sightingsConfirmed = wipeSightings()
@@ -50,8 +53,12 @@ struct PanicStartupDecision {
     static func retry(
         checkPending: () throws -> Bool,
         wipeSightings: @MainActor () -> Bool,
-        wipeGeography: @MainActor () -> Bool
+        wipeGeography: @MainActor () -> Bool,
+        wipeSharedContent: @MainActor () -> Bool,
+        wipeBoard: @MainActor () -> Bool,
+        wipeBridge: @MainActor () -> Bool
     ) -> Self {
-        preflight(checkPending: checkPending, wipeSightings: wipeSightings, wipeGeography: wipeGeography)
+        preflight(checkPending: checkPending, wipeSightings: wipeSightings, wipeGeography: wipeGeography,
+                  wipeSharedContent: wipeSharedContent, wipeBoard: wipeBoard, wipeBridge: wipeBridge)
     }
 }
