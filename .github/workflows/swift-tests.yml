@@ -7,6 +7,20 @@ on:
   pull_request:
 
 jobs:
+  bundle-contracts:
+    name: Check V1 bundle contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check share-extension retirement
+        run: python3 -m unittest discover -s scripts/tests -p "test_share_extension_retirement.py" -v
+
   test:
     name: Run Swift Tests (${{ matrix.name }})
     runs-on: macos-latest

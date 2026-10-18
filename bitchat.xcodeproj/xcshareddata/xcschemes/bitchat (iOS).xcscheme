@@ -14,20 +14,6 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "57CA17A36A2532A6CFF367BB"
-               BuildableName = "bitchatShareExtension.appex"
-               BlueprintName = "bitchatShareExtension"
-               ReferencedContainer = "container:bitchat.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
                BlueprintIdentifier = "AF077EA0474EDEDE2C72716C"
                BuildableName = "bitchat.app"
                BlueprintName = "bitchat_iOS"
