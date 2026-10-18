@@ -45,6 +45,88 @@ private final class FakeArti: @unchecked Sendable {
     }
 }
 
+/// Holds one fake connect attempt until the test releases it or its task is cancelled.
+/// Later attempts finish immediately so a failing regression cannot leave a 60 s loop.
+private final class ControlledSocksProbe: @unchecked Sendable {
+    let entered = XCTestExpectation(description: "Controlled SOCKS probe entered")
+    let cancelled = XCTestExpectation(description: "In-flight SOCKS probe cancelled")
+    let laterAttempt = XCTestExpectation(description: "Another SOCKS probe attempted")
+    let nativeStopped = XCTestExpectation(description: "Fake native stop completed")
+    private let lock = NSLock()
+    private let heldAttempt: Int
+    private var calls = 0
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var cancellationObserved = false
+    private var stopObserved = false
+    private var laterAttemptReported = false
+
+    init(heldAttempt: Int = 1) { self.heldAttempt = heldAttempt }
+
+    var attempts: Int { lock.withLock { calls } }
+
+    func attempt() async -> Bool {
+        let index = lock.withLock { calls += 1; return calls }
+        guard index == heldAttempt else {
+            let report = lock.withLock {
+                guard index > heldAttempt, !laterAttemptReported else { return false }
+                laterAttemptReported = true
+                return true
+            }
+            if report { laterAttempt.fulfill() }
+            return true
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { pending in
+                let alreadyCancelled = lock.withLock {
+                    if cancellationObserved { return true }
+                    continuation = pending
+                    return false
+                }
+                entered.fulfill()
+                if alreadyCancelled { pending.resume(returning: false) }
+            }
+        } onCancel: {
+            let (pending, report) = self.lock.withLock {
+                let report = !self.cancellationObserved
+                self.cancellationObserved = true
+                let pending = self.continuation
+                self.continuation = nil
+                return (pending, report)
+            }
+            pending?.resume(returning: false)
+            if report { self.cancelled.fulfill() }
+        }
+    }
+
+    func release() {
+        let pending = lock.withLock {
+            let pending = continuation
+            continuation = nil
+            return pending
+        }
+        pending?.resume(returning: false)
+    }
+
+    func recordNativeStop() {
+        let report = lock.withLock {
+            guard !stopObserved else { return false }
+            stopObserved = true
+            return true
+        }
+        if report { nativeStopped.fulfill() }
+    }
+}
+
+private final class ProbeTransportState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var startCount = 0
+    private var cancelCount = 0
+    var starts: Int { lock.withLock { startCount } }
+    var cancels: Int { lock.withLock { cancelCount } }
+    func start() { lock.withLock { startCount += 1 } }
+    func cancel() { lock.withLock { cancelCount += 1 } }
+}
+
 @MainActor
 final class TorManagerLivenessTests: XCTestCase {
     private var stateDirectory: URL!
@@ -84,6 +166,166 @@ final class TorManagerLivenessTests: XCTestCase {
         manager.startIfNeeded()
         let ready = await waitUntil { manager.isReady }
         XCTAssertTrue(ready, "fake Arti should bootstrap")
+    }
+
+    private func makeProbeManager(heldAttempt: Int = 1, progress: Int = 40) -> (TorManager, ControlledSocksProbe) {
+        let arti = FakeArti()
+        let probe = ControlledSocksProbe(heldAttempt: heldAttempt)
+        var backend = arti.backend
+        let nativeStop = backend.stop
+        backend.stop = {
+            let result = nativeStop()
+            probe.recordNativeStop()
+            return result
+        }
+        backend.bootstrapProgress = { progress }
+        backend.probeSocks = { _ in await probe.attempt() }
+        let directory = stateDirectory
+        let manager = TorManager(
+            backend: backend,
+            dataDirectory: { directory },
+            pollIntervalNanoseconds: 5_000_000,
+            livenessIntervalNanoseconds: 5_000_000,
+            usesPathMonitor: false
+        )
+        return (manager, probe)
+    }
+
+    private func assertExplicitStopCancelsProbe(synchronously: Bool, heldAttempt: Int = 1, progress: Int = 40) async {
+        let (manager, probe) = makeProbeManager(heldAttempt: heldAttempt, progress: progress)
+        probe.laterAttempt.isInverted = true
+        defer {
+            probe.release()
+            _ = manager.stopSynchronously(timeout: 1)
+        }
+        manager.setAutoStartAllowed(true)
+        manager.setAppForeground(true)
+        await fulfillment(of: [probe.entered], timeout: 1)
+
+        if synchronously {
+            XCTAssertTrue(manager.stopSynchronously(timeout: 1))
+        } else {
+            manager.shutdownCompletely()
+        }
+        await fulfillment(of: [probe.nativeStopped], timeout: 1)
+        // Release a non-cancelled fake too: old code then retries after stop,
+        // while the cancellation-aware path must leave the probe count fixed.
+        probe.release()
+        await fulfillment(of: [probe.cancelled, probe.laterAttempt], timeout: 1)
+
+        XCTAssertEqual(probe.attempts, heldAttempt,
+                       "explicit stop must close its in-flight probe and prevent another connect")
+        XCTAssertFalse(manager.isReady)
+    }
+
+    // MARK: - SOCKS probe ownership
+
+    func test_probeCancellationBeforeInstallationDoesNotStartTransport() async {
+        let attempt = SocksProbeAttempt()
+        let transport = ProbeTransportState()
+        // This is the cancellation-handler path winning before install runs.
+        attempt.complete(false)
+
+        let ready = await attempt.run(start: { transport.start() }, cancel: { transport.cancel() })
+
+        XCTAssertFalse(ready)
+        XCTAssertEqual(transport.starts, 0)
+        XCTAssertEqual(transport.cancels, 1)
+    }
+
+    func test_probeImmediateReadyClosesTransportExactlyOnce() async {
+        let attempt = SocksProbeAttempt()
+        let transport = ProbeTransportState()
+
+        let ready = await attempt.run(start: {
+            transport.start()
+            attempt.complete(true)
+        }, cancel: { transport.cancel() })
+        attempt.complete(false)
+
+        XCTAssertTrue(ready)
+        XCTAssertEqual(transport.starts, 1)
+        XCTAssertEqual(transport.cancels, 1)
+    }
+
+    func test_probeTaskCancellationClosesInFlightTransport() async {
+        let attempt = SocksProbeAttempt()
+        let transport = ProbeTransportState()
+        let entered = expectation(description: "Probe transport started")
+        let closed = expectation(description: "Probe transport cancelled")
+        let task = Task {
+            await attempt.run(start: {
+                transport.start()
+                entered.fulfill()
+            }, cancel: {
+                transport.cancel()
+                closed.fulfill()
+            })
+        }
+        await fulfillment(of: [entered], timeout: 1)
+
+        task.cancel()
+        await fulfillment(of: [closed], timeout: 1)
+        let cancelledBeforeRescue = transport.cancels
+        // Keep a broken cancellation handler from leaving the test suspended.
+        attempt.complete(false)
+        let ready = await task.value
+
+        XCTAssertFalse(ready)
+        XCTAssertEqual(cancelledBeforeRescue, 1)
+    }
+
+    func test_probeCallbacksTimeoutAndCancellationCompleteOnce() async {
+        let attempt = SocksProbeAttempt()
+        let transport = ProbeTransportState()
+        let entered = expectation(description: "Probe transport started")
+        let task = Task {
+            await attempt.run(start: {
+                transport.start()
+                entered.fulfill()
+            }, cancel: { transport.cancel() })
+        }
+        await fulfillment(of: [entered], timeout: 1)
+
+        DispatchQueue.concurrentPerform(iterations: 30) { index in
+            switch index % 3 {
+            case 0: attempt.complete(true)
+            case 1: attempt.complete(false)
+            default: task.cancel()
+            }
+        }
+        _ = await task.value
+
+        XCTAssertEqual(transport.starts, 1)
+        XCTAssertEqual(transport.cancels, 1)
+    }
+
+    func test_readinessProbeRetriesWhileTheSessionIsAllowed() async {
+        let (manager, probe) = makeProbeManager()
+        defer {
+            probe.release()
+            _ = manager.stopSynchronously(timeout: 1)
+        }
+        manager.setAutoStartAllowed(true)
+        manager.setAppForeground(true)
+        await fulfillment(of: [probe.entered], timeout: 1)
+
+        probe.release()
+        await fulfillment(of: [probe.laterAttempt], timeout: 1)
+
+        XCTAssertEqual(probe.attempts, 2)
+    }
+
+    func test_synchronousStopCancelsReadinessProbeAndPreventsFurtherAttempts() async {
+        await assertExplicitStopCancelsProbe(synchronously: true)
+    }
+
+    func test_completeShutdownCancelsReadinessProbeAndPreventsFurtherAttempts() async {
+        await assertExplicitStopCancelsProbe(synchronously: false)
+    }
+
+    func test_synchronousStopCancelsAnInFlightLivenessProbe() async {
+        await assertExplicitStopCancelsProbe(synchronously: true, heldAttempt: 2, progress: 100)
     }
 
     // MARK: - Background relaunch
