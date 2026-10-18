@@ -31,12 +31,14 @@
  *
  * # Returns
  * * 0 on success
- * * -1 if already running
+ * * -1 if a session is active, stopping, or native quiescence is already unconfirmed
  * * -2 if data_dir is invalid
  * * -3 if runtime initialization failed
  * * -4 if bootstrap failed
+ * * -5 if native teardown became unconfirmed while admitting this start; restart the process before starting again
  */
-int arti_start(const char *data_dir, uint16_t socks_port);
+int arti_start(const char *data_dir,
+               uint16_t socks_port);
 
 /**
  * Stop Arti gracefully.
@@ -44,6 +46,7 @@ int arti_start(const char *data_dir, uint16_t socks_port);
  * # Returns
  * * 0 on success
  * * -1 if not running
+ * * -5 if native quiescence could not be confirmed; the failure remains latched until process restart
  */
 int arti_stop(void);
 
@@ -51,8 +54,8 @@ int arti_stop(void);
  * Check if Arti is currently running.
  *
  * # Returns
- * * 1 if running
- * * 0 if not running
+ * * 1 if active or native quiescence is unconfirmed (including a latched teardown failure)
+ * * 0 only when native work is confirmed stopped
  */
 int arti_is_running(void);
 
