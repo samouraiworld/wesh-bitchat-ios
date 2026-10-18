@@ -29,9 +29,7 @@ enum TransportConfig {
     static let privateChatCap: Int = 1337
     static let meshTimelineCap: Int = 1337
     static let geoTimelineCap: Int = 1337
-    static let geoNicknameParticipantsCap: Int = 1337
     static let contentLRUCap: Int = 2000
-    static let geoSamplingEventLRUCap: Int = 2000
 
     // Timers
     static let networkResetGraceSeconds: TimeInterval = 600 // 10 minutes
@@ -81,9 +79,9 @@ enum TransportConfig {
     static let nostrInboundPerRelayBufferCap: Int = 256
     // Hard per-frame byte bound, applied as URLSessionWebSocketTask
     // .maximumMessageSize (oversized frames fail the receive instead of
-    // buffering). BitChat's legitimate Nostr traffic is small: geohash chat /
-    // presence events (kind 20000/20001), kind-1 notes, and NIP-17
-    // gift-wrapped DMs carrying text payloads or receipts are all a few KiB,
+    // buffering). BitChat's legitimate Nostr traffic is small: NIP-17
+    // gift-wrapped private messages carrying text payloads or receipts are
+    // a few KiB,
     // and most public relays reject events beyond ~64–256 KiB anyway. 512 KiB
     // leaves an order-of-magnitude margin over anything we produce or expect
     // while halving the URLSession default (1 MiB), so a hostile relay's
@@ -111,8 +109,6 @@ enum TransportConfig {
     static let uiSenderRateBucketMaxEntries: Int = 2000
     static let uiContentRateBucketMaxEntries: Int = 2000
     static let uiRateBucketIdleTTL: TimeInterval = 10 * 60
-    // Cap teleported-participant markers so remote events cannot grow the set.
-    static let geoTeleportedParticipantsCap: Int = 1337
 
     // UI sleeps/delays
     static let uiStartupInitialDelaySeconds: TimeInterval = 1.0
@@ -166,38 +162,15 @@ enum TransportConfig {
     static let bleConnectedAnnounceJitterDense: TimeInterval = 8.0
     static let bleConnectedAnnounceJitterSparse: TimeInterval = 4.0
 
-    // Location
-    static let locationDistanceFilterMeters: Double = 1000
-    // Live (channel sheet open) distance threshold for meaningful updates
-    static let locationDistanceFilterLiveMeters: Double = 10.0
-    static let locationLiveRefreshInterval: TimeInterval = 5.0
-
-    // Notifications (geohash)
-    static let uiGeoNotifyCooldownSeconds: TimeInterval = 60.0
-    static let uiGeoNotifySnippetMaxLen: Int = 80
-
-    // Nostr geohash
-    static let nostrGeohashInitialLookbackSeconds: TimeInterval = 3600
-    static let nostrGeohashInitialLimit: Int = 200
-    static let nostrGeoRelayCount: Int = 5
-    static let nostrGeohashSampleLookbackSeconds: TimeInterval = 300
-    static let nostrGeohashSampleLimit: Int = 100
+    // Account Nostr inbox
     static let nostrDMSubscribeLookbackSeconds: TimeInterval = 86400
     // Tolerated clock skew for the client-side rumor-timestamp window on
     // inbound Nostr DMs (senders stamp the inner rumor with real time; only
     // the outer gift wrap is randomized per NIP-17).
     static let nostrDMMaxClockSkewSeconds: TimeInterval = 900
-    // A sampled chat message this recent means "a conversation is happening
-    // there" for the empty-timeline nearby-activity hint.
-    static let uiGeohashChatActivityWindowSeconds: TimeInterval = 900
     // Startup delay before reading the gossip archive for "heard here
     // earlier" echoes; covers the archive's async disk restore.
     static let uiArchivedEchoLoadDelaySeconds: TimeInterval = 1.5
-    // Dead drops: location notes left via /drop expire after this long.
-    static let locationDropExpirySeconds: TimeInterval = 24 * 60 * 60
-    // Poll cadence while geo notes wait for a relay connection (Tor warming
-    // up); re-subscribes as soon as one comes up.
-    static let uiGeoNotesConnectivityRetrySeconds: TimeInterval = 3.0
 
     // Message deduplication
     static let messageDedupMaxAgeSeconds: TimeInterval = 300
@@ -220,7 +193,7 @@ enum TransportConfig {
     static let nostrTorReadyMaxWaitAttempts: Int = 3
     static let nostrPendingSendQueueCap: Int = 200
     // Sample interval for the send-queue overflow warning (first + every Nth
-    // dropped event). Drops are ephemeral presence/geo traffic — log-only.
+    // dropped event).
     static let nostrPendingSendDropLogInterval: Int = 10
     // Pending (not-yet-flushed) REQs are bounded per relay: oldest-by-insertion
     // eviction at the cap, plus an age sweep on connect attempts. Durable
@@ -230,17 +203,11 @@ enum TransportConfig {
     // Fallback deadline for treating a subscription's initial fetch as complete
     // when a relay never sends EOSE (generous to cover Tor circuit setup).
     static let nostrSubscriptionEOSEFallbackSeconds: TimeInterval = 10.0
-    // A bridge drop is durable only after NIP-01 `OK`. Relays that omit OK must
+    // A confirmed send requires NIP-01 `OK`. Relays that omit OK must
     // not pin the router's in-flight state indefinitely.
     static let nostrConfirmedSendAckTimeoutSeconds: TimeInterval = 10.0
     // After this long, a relay marked permanently failed gets another chance.
     static let nostrRelayFailureCooldownSeconds: TimeInterval = 600.0
-
-    // Geo relay directory
-    static let geoRelayFetchIntervalSeconds: TimeInterval = 60 * 60 * 24
-    static let geoRelayRefreshCheckIntervalSeconds: TimeInterval = 60 * 60
-    static let geoRelayRetryInitialSeconds: TimeInterval = 60
-    static let geoRelayRetryMaxSeconds: TimeInterval = 60 * 60
 
     // BLE operational delays
     static let bleInitialAnnounceDelaySeconds: TimeInterval = 0.6

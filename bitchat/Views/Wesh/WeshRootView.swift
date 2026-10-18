@@ -1020,7 +1020,7 @@ private struct WeshConversation: View {
                                 WeshDayDivider(date: message.timestamp)
                             }
                             WeshMessageBubble(message: message,
-                                own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender),
+                                own: runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID),
                                 privateChat: isPrivate).id(message.id)
                                 .accessibilityAction(named: "Copier le message") { WeshPlatform.copy(message.content) }
                                 .contextMenu {
@@ -1156,7 +1156,7 @@ private struct WeshConversation: View {
             draftGeneration = composerDrafts.currentGeneration
             draft = composerDrafts.load(draftKey)
             if let peerID { privateChat.startConversation(with: peerID) }
-            else { privateChat.endConversation(); runtime.chatViewModel.switchLocationChannel(to: .mesh) }
+            else { privateChat.endConversation(); runtime.chatViewModel.activeChannel = .mesh }
             if sharedContentID != nil && !handledSharedReview {
                 handledSharedReview = true
                 prepareSharedDraft()
@@ -1212,7 +1212,7 @@ private struct WeshConversation: View {
     /// or a public sender whose short ID derives exactly from a known key.
     private func moderationTarget(for message: BitchatMessage, knownKeys: [Data]) -> PeerID? {
         guard !WeshMessageActions.isLocalSystem(message),
-              !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID, displayName: message.sender) else { return nil }
+              !runtime.chatViewModel.isSelfSender(peerID: message.senderPeerID) else { return nil }
         if let pinned = WeshMessageActions.blockIdentity(messageSender: message.senderPeerID, pinnedConversation: peerID) {
             return pinned
         }

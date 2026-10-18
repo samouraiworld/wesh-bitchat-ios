@@ -86,29 +86,9 @@ struct NostrIdentityBridgeTests {
 
         // A device seed means derived identities exist that cannot be listed,
         // even on a fresh bridge whose in-memory cache is empty.
-        _ = try bridge.deriveIdentity(forGeohash: "u09tu")
+        keychain.backing.save(key: seedKey, data: Data(repeating: 0x39, count: 32), service: service, accessible: nil)
         #expect(throws: NostrIdentityBridge.StorageError.derivedIdentitiesNotEnumerable) {
             try NostrIdentityBridge(keychain: keychain).locallyOwnedNpubs()
-        }
-    }
-
-    @Test("Unreadable seed is preserved and does not cache a replacement")
-    func seedReadFailuresPreserveIdentity() throws {
-        for failure: KeychainReadResult in [.deviceLocked, .accessDenied, .authenticationFailed, .otherError(-36)] {
-            let keychain = NostrPersistenceKeychain()
-            let seed = Data(repeating: 0x39, count: 32)
-            keychain.backing.save(key: seedKey, data: seed, service: service, accessible: nil)
-            let bridge = NostrIdentityBridge(keychain: keychain)
-            keychain.readFailure = failure
-
-            #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.deriveIdentity(forGeohash: "00000") }
-            #expect(keychain.saveCount == 0)
-            #expect(keychain.backing.load(key: seedKey, service: service) == seed)
-
-            keychain.readFailure = nil
-            let expected = try NostrIdentityBridge(keychain: keychain.backing).deriveIdentity(forGeohash: "00000")
-            #expect(try bridge.deriveIdentity(forGeohash: "00000").npub == expected.npub)
-            #expect(keychain.saveCount == 0)
         }
     }
 
@@ -122,7 +102,7 @@ struct NostrIdentityBridgeTests {
         let bridge = NostrIdentityBridge(keychain: keychain)
 
         #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.getCurrentNostrIdentity() }
-        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.deriveIdentity(forGeohash: "00000") }
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.locallyOwnedNpubs() }
         #expect(keychain.saveCount == 0)
         for key in [identityKey, seedKey] {
             #expect(keychain.backing.load(key: key, service: service) == malformed)
@@ -144,54 +124,18 @@ struct NostrIdentityBridgeTests {
         #expect(keychain.saveCount == 2)
     }
 
-    @Test("Failed seed save cannot poison the in-memory identity cache")
-    func failedSeedSaveIsNotCached() throws {
-        let keychain = NostrPersistenceKeychain()
-        keychain.dropSaves = true
-        let bridge = NostrIdentityBridge(keychain: keychain)
-
-        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.deriveIdentity(forGeohash: "00000") }
-        #expect(keychain.backing.load(key: seedKey, service: service) == nil)
-
-        let seed = Data(repeating: 0x72, count: 32)
-        keychain.backing.save(key: seedKey, data: seed, service: service, accessible: nil)
-        let expected = try NostrIdentityBridge(keychain: keychain.backing).deriveIdentity(forGeohash: "00000")
-        #expect(try bridge.deriveIdentity(forGeohash: "00000").npub == expected.npub)
-        #expect(keychain.saveCount == 1)
-    }
-
     @Test("Unavailable readback does not expose a newly saved identity or seed")
     func unavailableReadbackFailsClosedAndCanRetry() throws {
-        for useSeed in [false, true] {
-            let keychain = NostrPersistenceKeychain()
-            keychain.failReadback = true
-            let bridge = NostrIdentityBridge(keychain: keychain)
-            #expect(throws: NostrIdentityBridge.StorageError.self) {
-                if useSeed { _ = try bridge.deriveIdentity(forGeohash: "00000") }
-                else { _ = try bridge.getCurrentNostrIdentity() }
-            }
-
-            keychain.failReadback = false
-            if useSeed {
-                let expected = try NostrIdentityBridge(keychain: keychain.backing).deriveIdentity(forGeohash: "00000")
-                #expect(try bridge.deriveIdentity(forGeohash: "00000").npub == expected.npub)
-            } else {
-                let expected = try NostrIdentityBridge(keychain: keychain.backing).getCurrentNostrIdentity()
-                #expect(try bridge.getCurrentNostrIdentity()?.npub == expected?.npub)
-            }
-            #expect(keychain.saveCount == 1)
-        }
-    }
-
-    @Test("A first-run seed persists and keeps derived identities stable across instances")
-    func firstRunSeedIsDurable() throws {
         let keychain = NostrPersistenceKeychain()
+        keychain.failReadback = true
         let bridge = NostrIdentityBridge(keychain: keychain)
-        let identity = try bridge.deriveIdentity(forGeohash: "00000")
-        #expect(keychain.backing.load(key: seedKey, service: service)?.count == 32)
-        #expect(try NostrIdentityBridge(keychain: keychain).deriveIdentity(forGeohash: "00000").npub == identity.npub)
+        #expect(throws: NostrIdentityBridge.StorageError.self) { try bridge.getCurrentNostrIdentity() }
+        keychain.failReadback = false
+        let expected = try NostrIdentityBridge(keychain: keychain.backing).getCurrentNostrIdentity()
+        #expect(try bridge.getCurrentNostrIdentity()?.npub == expected?.npub)
         #expect(keychain.saveCount == 1)
     }
+
 }
 
 /// Isolated storage only. Deliberately makes legacy `load` mask read errors,

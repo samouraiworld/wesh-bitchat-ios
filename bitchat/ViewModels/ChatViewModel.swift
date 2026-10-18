@@ -100,13 +100,11 @@ struct PanicNetworkLifecycle {
     static var live: PanicNetworkLifecycle {
         PanicNetworkLifecycle(
             stop: {
-                GeohashPresenceService.stopExistingForPanic()
                 NetworkActivationService.shared.stopForPanic()
                 return WeshMode.isActive ? WeshInternetMode.shared.wipeForPanic() : true
             },
             restart: {
                 NetworkActivationService.shared.start()
-                if !WeshMode.isActive { GeohashPresenceService.shared.start() }
             }
         )
     }
@@ -115,11 +113,9 @@ struct PanicNetworkLifecycle {
 /// Manages the application state and business logic for BitChat.
 /// Acts as the primary coordinator between UI components and backend services,
 /// implementing the BitchatDelegate protocol to handle network events.
-final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessageTransportEventDelegate, CommandContextProvider, GeohashParticipantContext, MessageFormattingContext {
+final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessageTransportEventDelegate, CommandContextProvider, MessageFormattingContext {
     // Use MessageFormattingEngine.Patterns for regex matching (shared, precompiled)
     typealias Patterns = MessageFormattingEngine.Patterns
-
-    typealias GeoOutgoingContext = (channel: GeohashChannel, event: NostrEvent, identity: NostrIdentity, teleported: Bool)
 
     var publicRateLimiter = MessageRateLimiter(
         senderCapacity: TransportConfig.uiSenderRateBucketCapacity,
@@ -300,8 +296,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// through.
     let conversations: ConversationStore
     let peerIdentityStore: PeerIdentityStore
-    let locationPresenceStore: LocationPresenceStore
-    let locationManager: LocationChannelManager
 
     var nostrRelayManager: NostrRelayManager?
     private let userDefaults = UserDefaults.standard
@@ -318,45 +312,26 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     #if os(iOS)
     private var nicknameProtectedDataObserver: AnyCancellable?
     #endif
-    // Location channel state (macOS supports manual geohash selection)
+    // Historical channel values remain decodable; the live UI selects mesh.
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
         set {
             guard conversations.activeChannel != newValue else { return }
-            // Leaving a channel expedites any in-flight NIP-13 mining: the
-            // pending message still sends, at the difficulty already reached.
-            outgoingCoordinator.expeditePendingGeohashMining()
             conversations.setActiveChannel(newValue)
             visibleMessagesCache = nil
             objectWillChange.send()
         }
     }
-    // Single-writer: mutate only via `setGeoChatSubscriptionID(_:)` / `setGeoDmSubscriptionID(_:)` below.
-    private(set) var geoSubscriptionID: String? = nil
-    private(set) var geoDmSubscriptionID: String? = nil
-    var currentGeohash: String? {
-        get { locationPresenceStore.currentGeohash }
-        set { locationPresenceStore.setCurrentGeohash(newValue) }
-    }
-    var cachedGeohashIdentity: (geohash: String, identity: NostrIdentity)? = nil // Cache current geohash identity
-    var geoNicknames: [String: String] {
-        get { locationPresenceStore.geoNicknames }
-        set { locationPresenceStore.replaceGeoNicknames(newValue) }
-    } // pubkeyHex(lowercased) -> nickname
     // Show Tor status once per app launch
-    var torStatusAnnounced = false
     // Track whether a Tor restart is pending so we only announce
     // "tor restarted" after an actual restart, not the first launch.
-    var torRestartPending: Bool = false
     // Announce a stalled bootstrap once per attempt, not once per poll.
-    var torStallAnnounced: Bool = false
     // Live "tor is blocked" state for the connectivity banner. The system
     // message above only reaches geohash timelines; this is the chrome-level
     // signal that stays up until tor actually gets through.
     @Published var torBlocked: Bool = false
     // Ensure we set up DM subscription only once per app session
     var nostrHandlersSetup: Bool = false
-    var geoChannelCoordinator: GeoChannelCoordinator?
 
     // MARK: - Caches
 
@@ -393,20 +368,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             update(self.deliveryCoordinator)
         }
     }
-    // Channel activity tracking for background nudges
-    var lastPublicActivityAt: [String: Date] = [:]   // channelKey -> last activity time
-    // Geohash participant tracker
-    let participantTracker = GeohashParticipantTracker(activityCutoff: -TransportConfig.uiRecentCutoffFiveMinutesSeconds)
-    // Participants who indicated they teleported (by tag in their events)
-    var teleportedGeo: Set<String> {
-        get { locationPresenceStore.teleportedGeo }
-        set { locationPresenceStore.replaceTeleportedGeo(newValue) }
-    }  // lowercased pubkey hex
-    // Sampling subscriptions for multiple geohashes (when channel sheet is open)
-    // Single-writer: mutate only via `addGeoSamplingSub` / `removeGeoSamplingSub` / `clearGeoSamplingSubs` below.
-    private(set) var geoSamplingSubs: [String: String] = [:] // subID -> geohash
-    var lastGeoNotificationAt: [String: Date] = [:] // geohash -> last notify time
-
     // MARK: - Message Delivery Tracking
 
     var cancellables = Set<AnyCancellable>()
@@ -464,7 +425,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private var storeAuditCount = 0
     private var storeAuditLastAppendCount = 0
     // Announce Tor initial readiness once per launch to avoid duplicates
-    var torInitialReadyAnnounced: Bool = false
 
     // Track Nostr pubkey mappings for unknown senders
     // Single-writer: mutate only via `registerNostrKeyMapping` / `removeNostrKeyMappings` below.
@@ -537,35 +497,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     func setPublicBatching(_ isBatching: Bool) {
         isBatchingPublic = isBatching
-    }
-
-    @MainActor
-    func setGeoChatSubscriptionID(_ id: String?) {
-        geoSubscriptionID = id
-    }
-
-    @MainActor
-    func setGeoDmSubscriptionID(_ id: String?) {
-        geoDmSubscriptionID = id
-    }
-
-    @MainActor
-    func addGeoSamplingSub(_ subID: String, forGeohash geohash: String) {
-        geoSamplingSubs[subID] = geohash
-    }
-
-    @MainActor
-    func removeGeoSamplingSub(_ subID: String) {
-        geoSamplingSubs.removeValue(forKey: subID)
-    }
-
-    /// Clears all sampling subscriptions and returns the removed subscription IDs
-    /// so the caller can unsubscribe them from the relay manager.
-    @MainActor
-    func clearGeoSamplingSubs() -> [String] {
-        let subIDs = Array(geoSamplingSubs.keys)
-        geoSamplingSubs.removeAll()
-        return subIDs
     }
 
     /// Moves the open private chat to `newPeerID` when the current selection is
@@ -685,14 +616,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.append(message, to: conversationID)
     }
 
-    /// Appends a geohash message if absent. Returns `true` when stored
-    /// (the legacy `PublicTimelineStore.appendIfAbsent` contract).
-    @MainActor
-    @discardableResult
-    func appendGeohashMessageIfAbsent(_ message: BitchatMessage, toGeohash geohash: String) -> Bool {
-        conversations.append(message, to: .geohash(geohash.lowercased()))
-    }
-
     /// A public (mesh/geohash) channel's full timeline.
     @MainActor
     func publicMessages(for channel: ChannelID) -> [BitchatMessage] {
@@ -716,13 +639,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         deduplicationService.forgetContent(removed.content, ifRecordedAt: removed.timestamp)
     }
 
-    /// Removes every message matching `predicate` from a geohash
-    /// conversation (block-user purge).
-    @MainActor
-    func removePublicMessages(fromGeohash geohash: String, where predicate: (BitchatMessage) -> Bool) {
-        conversations.removeMessages(from: .geohash(geohash.lowercased()), where: predicate)
-    }
-
     /// Empties a public conversation's timeline (`/clear`).
     @MainActor
     func clearPublicConversation(_ conversationID: ConversationID) {
@@ -733,26 +649,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         (meshService as? MeshPublicArchiving)?.purgeAllArchivedPublicMessages()
     }
 
-    /// Queues a system message for the next geohash channel visit. (Tiny
-    /// UI-flow queue formerly on `PublicTimelineStore`; it is notice text,
-    /// not conversation state, so it stays on the owner.)
-    @MainActor
-    func queueGeohashSystemMessage(_ content: String) {
-        pendingGeohashSystemMessages.append(content)
-    }
-
-    /// Drains the queued geohash system messages (single consumer:
-    /// `GeohashSubscriptionManager.switchLocationChannel`).
-    @MainActor
-    func drainPendingGeohashSystemMessages() -> [String] {
-        defer { pendingGeohashSystemMessages.removeAll(keepingCapacity: false) }
-        return pendingGeohashSystemMessages
-    }
-
-    // Single-writer: mutate only via `queueGeohashSystemMessage(_:)` /
-    // `drainPendingGeohashSystemMessages()` above.
-    private var pendingGeohashSystemMessages: [String] = []
-
     // MARK: - Initialization
 
     @MainActor
@@ -762,8 +658,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         identityManager: SecureIdentityStateManagerProtocol,
         conversations: ConversationStore? = nil,
         peerIdentityStore: PeerIdentityStore? = nil,
-        locationPresenceStore: LocationPresenceStore? = nil,
-        locationManager: LocationChannelManager = .shared,
         panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
     ) {
         let livePanicRecoveryOperations = PanicRecoveryOperations.live()
@@ -803,8 +697,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             transport: meshService,
             conversations: conversations,
             peerIdentityStore: peerIdentityStore ?? PeerIdentityStore(),
-            locationPresenceStore: locationPresenceStore ?? LocationPresenceStore(),
-            locationManager: locationManager,
             outboxStore: MessageOutboxStore(keychain: keychain),
             sfMetrics: .shared,
             panicRecoveryOperations: panicRecoveryOperations,
@@ -824,8 +716,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         transport: Transport,
         conversations: ConversationStore? = nil,
         peerIdentityStore: PeerIdentityStore? = nil,
-        locationPresenceStore: LocationPresenceStore? = nil,
-        locationManager: LocationChannelManager = .shared,
         readReceiptsDefaults: UserDefaults? = nil,
         outboxStore: MessageOutboxStore? = nil,
         sfMetrics: StoreAndForwardMetrics? = nil,
@@ -839,7 +729,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
         let peerIdentityStore = peerIdentityStore ?? PeerIdentityStore()
-        let locationPresenceStore = locationPresenceStore ?? LocationPresenceStore()
         let services = ChatViewModelServiceBundle(
             keychain: keychain,
             idBridge: idBridge,
@@ -862,8 +751,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.identityManager = identityManager
         self.conversations = conversations
         self.peerIdentityStore = peerIdentityStore
-        self.locationPresenceStore = locationPresenceStore
-        self.locationManager = locationManager
         self.meshService = transport
         self.noiseIdentityAvailability = (transport as? MeshIdentityRecovering)?.noiseIdentityAvailability ?? .available
         self.commandProcessor = services.commandProcessor
@@ -1078,7 +965,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             guard canSendWeshPublic,
                   UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return false }
             endPrivateChat()
-            switchLocationChannel(to: .mesh)
+            activeChannel = .mesh
         }
         outgoingCoordinator.sendMessage(content, allowCommands: false)
         return true
@@ -1160,71 +1047,14 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         outgoingCoordinator.sendMeshWave()
     }
 
-    // MARK: - Geohash Participants
+    // MARK: - Sender attribution
 
     @MainActor
-    func isSelfSender(peerID: PeerID?, displayName: String?) -> Bool {
-        guard let peerID else { return false }
-        if peerID == meshService.myPeerID { return true }
-        guard peerID.isGeoDM || peerID.isGeoChat else { return false }
-
-        if let mapped = nostrKeyMapping[peerID]?.lowercased(),
-           let gh = currentGeohash,
-           let myIdentity = try? idBridge.deriveIdentity(forGeohash: gh) {
-            if mapped == myIdentity.publicKeyHex.lowercased() { return true }
-        }
-
-        if let gh = currentGeohash,
-           let myIdentity = try? idBridge.deriveIdentity(forGeohash: gh) {
-            if peerID == PeerID(nostr: myIdentity.publicKeyHex) { return true }
-            let suffix = myIdentity.publicKeyHex.suffix(4)
-            let expected = (nickname + "#" + suffix).lowercased()
-            if let display = displayName?.lowercased(), display == expected { return true }
-        }
-
-        return false
+    func isSelfSender(peerID: PeerID?) -> Bool {
+        peerID == meshService.myPeerID
     }
 
     // MARK: - Public helpers
-
-    /// Return the current, pruned, sorted people list for the active geohash without mutating state.
-    @MainActor
-    func visibleGeohashPeople() -> [GeoPerson] {
-        publicConversationCoordinator.visibleGeohashPeople()
-    }
-
-    /// CommandContextProvider conformance - returns visible geo participants
-    func getVisibleGeoParticipants() -> [CommandGeoParticipant] {
-        publicConversationCoordinator.getVisibleGeoParticipants()
-    }
-    /// Returns the current participant count for a specific geohash, using the 5-minute activity window.
-    @MainActor
-    func geohashParticipantCount(for geohash: String) -> Int {
-        publicConversationCoordinator.geohashParticipantCount(for: geohash)
-    }
-
-    // MARK: - GeohashParticipantContext Protocol
-
-    func displayNameForPubkey(_ pubkeyHex: String) -> String {
-        publicConversationCoordinator.displayNameForPubkey(pubkeyHex)
-    }
-
-    func isBlocked(_ pubkeyHexLowercased: String) -> Bool {
-        publicConversationCoordinator.isBlocked(pubkeyHexLowercased)
-    }
-
-    // Geohash block helpers
-    @MainActor
-    func isGeohashUserBlocked(pubkeyHexLowercased: String) -> Bool {
-        publicConversationCoordinator.isGeohashUserBlocked(pubkeyHexLowercased: pubkeyHexLowercased)
-    }
-    @MainActor
-    func blockGeohashUser(pubkeyHexLowercased: String, displayName: String) {
-        publicConversationCoordinator.blockGeohashUser(
-            pubkeyHexLowercased: pubkeyHexLowercased,
-            displayName: displayName
-        )
-    }
 
     // Mesh (Noise identity) block helpers. Unlike the `/block <nickname>`
     // command, these resolve and persist the block by the peer's stable
@@ -1395,7 +1225,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // the legacy mirror empty with it)
         conversations.clearAll()
         WeshInboundRequests.shared.clear()
-        pendingGeohashSystemMessages.removeAll()
 
         // Delete all keychain data (including Noise and Nostr keys)
         let keychainWipeCompleted = keychain.deleteAllKeychainData()
@@ -1412,9 +1241,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         // Delete legacy geographic state without loading it or creating a
         // location manager; any unconfirmed erase keeps recovery blocked.
-        locationManager.retireForPanic()
-        GeoRelayDirectory.retireExistingForPanic()
-        nostrCoordinator.subscriptions.retireForPanic()
         let geographyWipeCompleted = panicPersistentStoreWipes.geography()
 
         // Reset nickname to anonymous; the previous one must be gone from
@@ -1441,7 +1267,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let meetingNoteWipeCompleted = weshMeetingNote.wipeForPanic()
         panicPersistentStoreWipes.notifications()
         panicPersistentStoreWipes.pasteboard()
-        locationPresenceStore.reset()
         publicRateLimiter.reset()
 
         // Clear persistent favorites from keychain
@@ -1458,7 +1283,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         // Ambient-liveliness bookkeeping: sampled nearby-chat previews, the
         // daily sightings tally, and the echoes-dismissed watermark
-        GeohashChatActivityTracker.shared.clear()
         MeshSightingsTracker.shared.clear()
         MeshEchoSettings.reset()
         NotificationPrivacySettings.reset()
@@ -1498,10 +1322,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // was wiped above, but the running view model can still be scoped to a
         // geohash channel and hold subscriptions tied to the old Nostr identity.
         activeChannel = .mesh
-        setGeoChatSubscriptionID(nil)
-        setGeoDmSubscriptionID(nil)
-        _ = clearGeoSamplingSubs()
-        cachedGeohashIdentity = nil
         nostrKeyMapping.removeAll()
 
         // Clear read receipt tracking
@@ -2047,12 +1867,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         publicConversationCoordinator.addPublicSystemMessage(content)
     }
 
-    /// Add a system message only if viewing a geohash location channel (never post to mesh).
-    @MainActor
-    func addGeohashOnlySystemMessage(_ content: String) {
-        publicConversationCoordinator.addGeohashOnlySystemMessage(content)
-    }
-
     // Send a public message without adding a local user echo.
     // Used for emotes where we want a local system-style confirmation instead.
     @MainActor
@@ -2076,10 +1890,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     /// Handle an incoming public Nostr message with its validated NIP-13
     /// difficulty; sufficient PoW relaxes the per-sender rate limit.
-    @MainActor
-    func handlePublicMessage(_ message: BitchatMessage, powBits: Int) {
-        publicConversationCoordinator.handlePublicMessage(message, powBits: powBits)
-    }
 
     /// Check for mentions and send notifications
     func checkForMentions(_ message: BitchatMessage) {

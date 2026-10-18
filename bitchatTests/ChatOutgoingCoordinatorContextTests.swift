@@ -27,7 +27,6 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
     var myPeerID = PeerID(str: "0011223344556677")
     var activeChannel: ChannelID = .mesh
     var selectedPrivateChatPeer: PeerID?
-    var isTeleported = false
 
     // Commands & private messages
     var selectedPeerAfterUpdate: PeerID??
@@ -62,8 +61,6 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
         return true
     }
 
-    func addSystemMessage(_ content: String) { systemMessages.append(content) }
-
     // Content dedup
     private(set) var recordedContentKeys: [(key: String, timestamp: Date)] = []
 
@@ -73,36 +70,12 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
     }
 
     // Outbound routing
-    private(set) var recordedActivityKeys: [String] = []
     private(set) var sentMeshMessages: [(content: String, mentions: [String], messageID: String, timestamp: Date)] = []
-    private(set) var sentGeohashContexts: [ChatViewModel.GeoOutgoingContext] = []
-
-    func recordPublicActivity(forChannelKey key: String) { recordedActivityKeys.append(key) }
 
     func sendMeshMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
         sentMeshMessages.append((content, mentions, messageID, timestamp))
     }
 
-    func sendGeohash(context: ChatViewModel.GeoOutgoingContext) {
-        sentGeohashContexts.append(context)
-    }
-
-
-    // Geohash identity
-    struct IdentityUnavailable: Error {}
-    var deriveNostrIdentityError: Error?
-    var syntheticGeographicIdentity: NostrIdentity?
-    static let dummyIdentity = NostrIdentity(
-        privateKey: Data(repeating: 0x11, count: 32),
-        publicKey: Data(repeating: 0x22, count: 32),
-        npub: "npub1mock",
-        createdAt: Date(timeIntervalSince1970: 0)
-    )
-
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        if let deriveNostrIdentityError { throw deriveNostrIdentityError }
-        return syntheticGeographicIdentity ?? Self.dummyIdentity
-    }
 }
 
 @MainActor
@@ -111,16 +84,12 @@ struct GeographicOutgoingRetirementTests {
     func aRetiredGeographicSelectionCannotPublishOrFallBackToPublicMesh() async throws {
         let context = MockChatOutgoingContext()
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
-        context.syntheticGeographicIdentity = try NostrIdentity.generate()
         let coordinator = ChatOutgoingCoordinator(context: context)
 
         coordinator.sendMessage("Synthetic retired geographic send")
-        await coordinator.geohashMiningTask?.value
 
-        #expect(context.sentGeohashContexts.isEmpty)
         #expect(context.sentMeshMessages.isEmpty)
         #expect(context.appendedPublicMessages.isEmpty)
-        #expect(context.recordedActivityKeys.isEmpty)
     }
 
     @Test
@@ -132,7 +101,6 @@ struct GeographicOutgoingRetirementTests {
 
         #expect(context.sentMeshMessages.count == 1)
         #expect(context.appendedPublicMessages.map(\.conversationID) == [.mesh])
-        #expect(context.sentGeohashContexts.isEmpty)
     }
 }
 
@@ -219,7 +187,6 @@ struct ChatOutgoingCoordinatorContextTests {
 
         // The mesh send carries the original (untrimmed) content and reuses
         // the echo's message ID and timestamp; activity is stamped for "mesh".
-        #expect(context.recordedActivityKeys == ["mesh"])
         #expect(context.sentMeshMessages.count == 1)
         let sent = context.sentMeshMessages[0]
         #expect(sent.content == "  hello @bob  ")
@@ -233,17 +200,12 @@ struct ChatOutgoingCoordinatorContextTests {
         let context = MockChatOutgoingContext()
         let coordinator = ChatOutgoingCoordinator(context: context)
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
-        context.isTeleported = true
         coordinator.sendMessage("Synthetic retired geographic send")
-        await coordinator.geohashMiningTask?.value
-        context.deriveNostrIdentityError = MockChatOutgoingContext.IdentityUnavailable()
         coordinator.sendMessage("Synthetic identity failure control")
         await drainMainActorTasks()
         #expect(context.systemMessages.isEmpty)
         #expect(context.appendedPublicMessages.isEmpty)
-        #expect(context.sentGeohashContexts.isEmpty)
         #expect(context.sentMeshMessages.isEmpty)
-        #expect(context.recordedActivityKeys.isEmpty)
     }
 
     @Test @MainActor
@@ -253,10 +215,7 @@ struct ChatOutgoingCoordinatorContextTests {
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
         coordinator.sendMessage("first " + String(repeating: "x", count: 4000))
         coordinator.sendMessage("second")
-        await coordinator.geohashMiningTask?.value
         #expect(context.appendedPublicMessages.isEmpty)
-        #expect(context.sentGeohashContexts.isEmpty)
         #expect(context.sentMeshMessages.isEmpty)
-        #expect(coordinator.geohashMiningTask == nil)
     }
 }

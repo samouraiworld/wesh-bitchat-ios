@@ -331,38 +331,6 @@ struct NostrProtocol {
         return try event.sign(with: schnorrKey)
     }
 
-    /// Create a persistent location note (kind 1: text note) tagged to a street-level geohash.
-    /// An optional `expiresAt` adds a NIP-40 expiration tag so honoring relays
-    /// drop the note in step with a bridged board post's expiry.
-    static func createGeohashTextNote(
-        content: String,
-        geohash: String,
-        senderIdentity: NostrIdentity,
-        nickname: String? = nil,
-        expiresAt: Date? = nil,
-        urgent: Bool = false
-    ) throws -> NostrEvent {
-        var tags = [["g", geohash]]
-        if let nickname = nickname?.trimmedOrNilIfEmpty {
-            tags.append(["n", nickname])
-        }
-        if let expiresAt {
-            tags.append(["expiration", String(Int(expiresAt.timeIntervalSince1970))])
-        }
-        if urgent {
-            tags.append(["t", "urgent"])
-        }
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .textNote,
-            tags: tags,
-            content: content
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
-
     // MARK: - Private Methods
     
     private static func createSeal(

@@ -851,16 +851,6 @@ struct ChatViewModelPublicConversationTests {
         #expect(viewModel.publicMessages(for: .mesh).isEmpty)
     }
 
-    @Test @MainActor
-    func queuedGeohashSystemMessages_drainOnce() async {
-        let (viewModel, _) = makeTestableViewModel()
-
-        viewModel.queueGeohashSystemMessage("first")
-        viewModel.queueGeohashSystemMessage("second")
-
-        #expect(viewModel.drainPendingGeohashSystemMessages() == ["first", "second"])
-        #expect(viewModel.drainPendingGeohashSystemMessages().isEmpty)
-    }
 }
 
 // MARK: - Peer Connection Tests
@@ -1461,26 +1451,12 @@ struct ChatViewModelPanicTests {
         let peerID = PeerID(nostr: pubkey)
 
         viewModel.activeChannel = .location(channel)
-        viewModel.setGeoChatSubscriptionID("geo-\(geohash)")
-        viewModel.setGeoDmSubscriptionID("geo-dm-\(geohash)")
-        viewModel.addGeoSamplingSub("geo-sample-\(geohash)", forGeohash: geohash)
-        viewModel.cachedGeohashIdentity = (geohash, identity)
         viewModel.registerNostrKeyMapping(pubkey, for: peerID)
-        viewModel.currentGeohash = geohash
-        viewModel.geoNicknames = [pubkey: "alice"]
-        viewModel.teleportedGeo = [pubkey]
 
         viewModel.panicClearAllData()
 
         #expect(viewModel.activeChannel == .mesh)
-        #expect(viewModel.geoSubscriptionID == nil)
-        #expect(viewModel.geoDmSubscriptionID == nil)
-        #expect(viewModel.geoSamplingSubs.isEmpty)
-        #expect(viewModel.cachedGeohashIdentity == nil)
         #expect(viewModel.nostrKeyMapping.isEmpty)
-        #expect(viewModel.currentGeohash == nil)
-        #expect(viewModel.geoNicknames.isEmpty)
-        #expect(viewModel.teleportedGeo.isEmpty)
     }
 }
 

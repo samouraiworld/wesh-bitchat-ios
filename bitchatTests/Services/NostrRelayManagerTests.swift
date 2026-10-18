@@ -7,7 +7,7 @@ final class NostrRelayManagerTests: XCTestCase {
     private let expectedDefaultRelayCount = 4
 
     func test_connect_directMode_connectsExistingDefaultRelaysWhenActivationBecomesAllowed() async {
-        let context = makeContext(permission: .authorized, activationAllowed: false)
+        let context = makeContext(defaultRelaysAllowed: true, activationAllowed: false)
 
         XCTAssertTrue(context.sessionFactory.requestedURLs.isEmpty)
         context.activationAllowed.value = true
@@ -21,12 +21,12 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(connected)
     }
 
-    func test_permissionPublisher_addsAndRemovesDefaultRelays() async {
-        let context = makeContext(permission: .denied, favorites: [])
+    func test_favoritesPublisher_addsAndRemovesDefaultRelays() async {
+        let context = makeContext(defaultRelaysAllowed: false, favorites: [])
 
         XCTAssertEqual(context.manager.getRelayStatuses().count, 0)
 
-        context.permissionSubject.send(.authorized)
+        context.favoritesSubject.send([Data([0x01])])
 
         let defaultRelaysConnected = await waitUntil {
             context.manager.getRelayStatuses().count == self.expectedDefaultRelayCount &&
@@ -34,7 +34,7 @@ final class NostrRelayManagerTests: XCTestCase {
         }
         XCTAssertTrue(defaultRelaysConnected)
 
-        context.permissionSubject.send(.denied)
+        context.favoritesSubject.send([])
 
         let defaultRelaysRemoved = await waitUntil {
             context.manager.getRelayStatuses().isEmpty
@@ -53,7 +53,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let center = NotificationCenter()
         let customRelays = MutableRelayList(urls: [customURL])
         let context = makeContext(
-            permission: .authorized,
+            defaultRelaysAllowed: true,
             userTorEnabled: true,
             torEnforced: true,
             torIsReady: false,
@@ -85,7 +85,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_connect_waitsForTorReadinessBeforeCreatingSessions() async {
-        let context = makeContext(permission: .authorized, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: true, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.connect()
 
@@ -101,7 +101,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_connect_coalescesRepeatedCallsWhileWaitingForTor() async {
-        let context = makeContext(permission: .authorized, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: true, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.connect()
         context.manager.connect()
@@ -120,7 +120,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_connect_whenTorReadinessFailsDoesNotCreateSessions() async {
-        let context = makeContext(permission: .authorized, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: true, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.connect()
         context.torWaiter.resolve(false)
@@ -131,7 +131,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_connect_retriesTorWaitAndConnectsWhenTorBecomesReady() async {
-        let context = makeContext(permission: .authorized, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: true, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.connect()
         XCTAssertEqual(context.torWaiter.awaitCallCount, 1)
@@ -153,7 +153,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_unblocksDeferredEOSEWhenTorWaitAttemptsExhausted() async {
         let relayURL = "wss://tor-eose-unblock.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -175,7 +175,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_parkedEOSEFiresAfterFallbackTimeoutWhenTorNeverBecomesReady() async {
         let relayURL = "wss://tor-eose-parked-fallback.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -206,7 +206,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_parkedEOSEFallbackIsNoOpWhenTorRecoversFirst() async throws {
         let relayURL = "wss://tor-eose-parked-recover.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -243,7 +243,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_parkedEOSEFallbackIsNoOpAfterRetryExhaustionUnblock() async {
         let relayURL = "wss://tor-eose-parked-exhausted.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -268,7 +268,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_survivesFailedTorWaitAndSendsWhenTorRecovers() async throws {
         let relayURL = "wss://tor-send-retry.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         let event = try makeSignedEvent(content: "queued through tor stall")
 
         context.manager.sendEvent(event, to: [relayURL])
@@ -290,7 +290,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_pendingQueueDropsOldestBeyondCap() async throws {
         let relayURL = "wss://tor-send-cap.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         let identity = try NostrIdentity.generate()
 
         for i in 0...(TransportConfig.nostrPendingSendQueueCap + 4) {
@@ -309,7 +309,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_waitsForTorReadinessBeforeSending() async throws {
         let relayURL = "wss://tor-ready.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         let event = try makeSignedEvent(content: "deferred")
 
         context.manager.sendEvent(event, to: [relayURL])
@@ -327,7 +327,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_queuesUntilRelayIsMarkedConnected() async throws {
         let relayURL = "wss://connect-before-send.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let event = try makeSignedEvent(content: "wait for connected")
 
         context.manager.sendEvent(event, to: [relayURL])
@@ -346,7 +346,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_sendEvent_queuesWhileBackgroundedAndFlushesWhenForegrounded() async throws {
         let relayURL = "wss://queue-flush.example"
         let context = makeContext(
-            permission: .denied,
+            defaultRelaysAllowed: false,
             userTorEnabled: true,
             torEnforced: true,
             torIsReady: true,
@@ -370,7 +370,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_sendFailureDoesNotIncrementMessageCount() async throws {
         let relayURL = "wss://send-failure.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.sessionFactory.sendErrorByURL[relayURL] = NSError(domain: "send", code: 1)
         let event = try makeSignedEvent(content: "send failure")
 
@@ -390,7 +390,7 @@ final class NostrRelayManagerTests: XCTestCase {
             "wss://confirmed-reject-one.example",
             "wss://confirmed-reject-two.example"
         ]
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.manager.ensureConnections(to: relays)
         let connected = await waitUntil {
             relays.allSatisfy { relay in
@@ -441,7 +441,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEventImmediately_mixedRelayOKUsesAcceptedResultOnce() async throws {
         let relays = ["wss://confirmed-mixed-one.example", "wss://confirmed-mixed-two.example"]
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.manager.ensureConnections(to: relays)
         let connected = await waitUntil {
             relays.allSatisfy { relay in
@@ -471,7 +471,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEventImmediately_timeoutFailsAndIgnoresLateWriteAndOK() async throws {
         let relay = "wss://confirmed-timeout.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.manager.ensureConnections(to: [relay])
         let connected = await waitUntil {
             context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
@@ -502,7 +502,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_sendEvent_queueIsPrunedWhenDefaultRelaysAreRevoked() async throws {
         let context = makeContext(
-            permission: .authorized,
+            defaultRelaysAllowed: true,
             userTorEnabled: true,
             torEnforced: true,
             torIsReady: true,
@@ -517,7 +517,7 @@ final class NostrRelayManagerTests: XCTestCase {
         }
         XCTAssertTrue(queued)
 
-        context.permissionSubject.send(.denied)
+        context.favoritesSubject.send([])
 
         let cleared = await waitUntil {
             context.manager.debugPendingMessageQueueCount == 0 &&
@@ -527,7 +527,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_connect_doesNothingWhenActivationIsDisallowed() {
-        let context = makeContext(permission: .authorized, activationAllowed: false)
+        let context = makeContext(defaultRelaysAllowed: true, activationAllowed: false)
 
         context.manager.connect()
 
@@ -538,7 +538,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_ensureConnections_deduplicatesRelayURLs() async {
         let relayOne = "wss://relay-one.example"
         let relayTwo = "wss://relay-two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayOne, "wss://relay-one.example:443/", "WSS://RELAY-TWO.EXAMPLE:443"])
 
@@ -556,7 +556,7 @@ final class NostrRelayManagerTests: XCTestCase {
             "wss://203.0.113.7", "wss://203.0.113.7:4848", "wss://[2001:db8::1]",
             "ws://127.1", "wss://0x7f.1", "wss://10.0.0.1./"
         ]
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: true)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: true)
 
         context.manager.ensureConnections(to: literals + [named])
 
@@ -579,7 +579,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_ensureConnections_coalescesTargetsWhileWaitingForTor() async {
         let relayOne = "wss://tor-one.example"
         let relayTwo = "wss://tor-two.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.ensureConnections(to: [relayOne])
         context.manager.ensureConnections(to: [relayTwo, relayOne])
@@ -598,7 +598,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_coalescesRapidDuplicateRequests() async {
         let relayURL = "wss://subscribe.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let filter = makeFilter()
 
         context.manager.subscribe(filter: filter, id: "sub", relayUrls: [relayURL], handler: { _ in })
@@ -616,7 +616,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_coalescesDuplicateRequestsBeforeTorReadyAndDefersEOSE() async throws {
         let relayURL = "wss://tor-subscribe-coalesce.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -653,7 +653,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_sameActiveRequestDoesNotRequeue() async {
         let relayURL = "wss://active-subscribe.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let filter = makeFilter()
 
         context.manager.subscribe(filter: filter, id: "sub", relayUrls: [relayURL], handler: { _ in })
@@ -673,7 +673,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscribe_waitsForTorReadinessAndPreservesEOSECallback() async throws {
         let relayURL = "wss://tor-subscribe.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -698,7 +698,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     func test_subscribe_withoutAllowedRelays_callsEOSEImmediatelyAndDoesNotFlushLater() async {
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -711,7 +711,7 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertEqual(eoseCount, 1)
         XCTAssertTrue(context.sessionFactory.requestedURLs.isEmpty)
 
-        context.permissionSubject.send(.authorized)
+        context.favoritesSubject.send([Data([0x01])])
         let connected = await waitUntil {
             context.sessionFactory.allConnections.count == self.expectedDefaultRelayCount &&
             context.manager.relays.allSatisfy(\.isConnected)
@@ -720,9 +720,9 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(context.sessionFactory.allConnections.allSatisfy { $0.sentStrings.isEmpty })
     }
 
-    func test_permissionRevocation_clearsQueuedDefaultSubscriptions() async {
+    func test_favoriteRevocation_clearsQueuedDefaultSubscriptions() async {
         let context = makeContext(
-            permission: .authorized,
+            defaultRelaysAllowed: true,
             userTorEnabled: true,
             torEnforced: true,
             torIsReady: true,
@@ -737,7 +737,7 @@ final class NostrRelayManagerTests: XCTestCase {
         }
         XCTAssertTrue(queued)
 
-        context.permissionSubject.send(.denied)
+        context.favoritesSubject.send([])
 
         let cleared = await waitUntil {
             context.manager.debugPendingSubscriptionCount(for: defaultRelay) == 0 &&
@@ -748,7 +748,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_unsubscribe_allowsResubscribeWithSameID() async {
         let relayURL = "wss://subscribe.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let filter = makeFilter()
 
         context.manager.subscribe(filter: filter, id: "sub", relayUrls: [relayURL], handler: { _ in })
@@ -774,7 +774,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_receiveEvent_deliversHandlerAndTracksReceivedCount() async throws {
         let relayURL = "wss://events.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let filter = makeFilter()
         let event = try makeSignedEvent(content: "hello")
         var receivedEvent: NostrEvent?
@@ -800,7 +800,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_receiveEvent_deduplicatesSameSubscriptionEventAcrossRelays() async throws {
         let firstRelayURL = "wss://events-one.example"
         let secondRelayURL = "wss://events-two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let event = try makeSignedEvent(content: "duplicate")
         var receivedIDs: [String] = []
 
@@ -836,7 +836,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_receiveEvent_duplicateFanInDeliversOnceAndCountsDrops() async throws {
         let relayURLs = (0..<8).map { "wss://fan-in-\($0).example" }
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let event = try makeSignedEvent(content: "fan-in")
         var receivedIDs: [String] = []
 
@@ -883,7 +883,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_receiveEvent_invalidSignatureDoesNotPoisonDuplicateCache() async throws {
         let firstRelayURL = "wss://invalid-first-one.example"
         let secondRelayURL = "wss://invalid-first-two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let event = try makeSignedEvent(content: "valid-after-invalid")
         let invalidEvent = invalidSignatureCopy(of: event)
         var receivedIDs: [String] = []
@@ -925,7 +925,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_receiveGiftWrap_tamperedSignatureIsDroppedAndDoesNotPoisonDedup() async throws {
         let firstRelayURL = "wss://giftwrap-one.example"
         let secondRelayURL = "wss://giftwrap-two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let sender = try NostrIdentity.generate()
         let recipient = try NostrIdentity.generate()
         let giftWrap = try NostrProtocol.createPrivateMessage(
@@ -970,7 +970,7 @@ final class NostrRelayManagerTests: XCTestCase {
     /// handler in that relay's arrival order.
     func test_receiveEvent_deliversBackToBackEventsInArrivalOrder() async throws {
         let relayURL = "wss://ordered.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let events = try (0..<12).map { try makeSignedEvent(content: "ordered-\($0)") }
         var receivedIDs: [String] = []
 
@@ -1003,7 +1003,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_receiveEvent_busyRelayDoesNotBlockOtherRelayDelivery() async throws {
         let busyRelayURL = "wss://busy-relay.example"
         let quietRelayURL = "wss://quiet-relay.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         // Distinct subscriptions per relay so dedup never coalesces A vs. B.
         let busyEvents = try (0..<200).map { try makeSignedEvent(content: "busy-\($0)") }
@@ -1053,7 +1053,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_receiveEvent_withoutHandlerStillTracksReceivedCount() async throws {
         let relayURL = "wss://missing-handler.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let event = try makeSignedEvent(content: "unhandled")
 
         context.manager.ensureConnections(to: [relayURL])
@@ -1073,7 +1073,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_noticeAndMalformedMessages_keepReceiveLoopAliveForLaterEvents() async throws {
         let relayURL = "wss://parser.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var receivedIDs: [String] = []
         let firstEvent = try makeSignedEvent(content: "after notice")
         let secondEvent = try makeSignedEvent(content: "after malformed")
@@ -1107,7 +1107,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_okMessages_clearPendingGiftWrapIDs() async throws {
         let relayURL = "wss://ok.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         let successID = "gift-wrap-success"
         let failureID = "gift-wrap-failure"
 
@@ -1136,7 +1136,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_eoseCallback_waitsForAllTargetedRelays() async throws {
         let relayOne = "wss://one.example"
         let relayTwo = "wss://two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -1165,7 +1165,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_eoseTimeout_invokesCallbackOnceAndIgnoresLateEOSE() async throws {
         let relayURL = "wss://timeout.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -1197,7 +1197,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_eose_completesWhenRelayDisconnectsBeforeEOSE() async throws {
         let relayOne = "wss://eose-drop-one.example"
         let relayTwo = "wss://eose-drop-two.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var eoseCount = 0
 
         context.manager.subscribe(
@@ -1227,7 +1227,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_reconnect_replaysActiveSubscriptionsAndDeliversEvents() async throws {
         let relayURL = "wss://replay.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         var received: [NostrEvent] = []
 
         context.manager.subscribe(
@@ -1264,7 +1264,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_disconnectThenConnect_restoresSubscriptions() async {
         let relayURL = "wss://restore.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.subscribe(filter: makeFilter(), id: "restore-sub", relayUrls: [relayURL], handler: { _ in })
         let subscribed = await waitUntil {
@@ -1286,7 +1286,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_subscriptionSendFailure_retriesOnReconnect() async {
         let relayURL = "wss://flaky-send.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.sessionFactory.sendErrorByURL[relayURL] = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
 
         context.manager.subscribe(filter: makeFilter(), id: "flaky-sub", relayUrls: [relayURL], handler: { _ in })
@@ -1314,7 +1314,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_staleSendCompletionFromDeadSocket_doesNotBlockReplayOnNextConnection() async {
         let relayURL = "wss://stale-completion.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.subscribe(filter: makeFilter(), id: "stale-sub", relayUrls: [relayURL], handler: { _ in })
         // The connection exists synchronously; its REQ flush lands on a later
@@ -1350,7 +1350,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_permanentFailure_decaysAfterCooldownAndRetries() async {
         let relayURL = "wss://cooldown.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.sessionFactory.pingErrorByURL[relayURL] = NSError(
             domain: NSURLErrorDomain,
             code: NSURLErrorCannotFindHost,
@@ -1382,7 +1382,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_receiveFailure_schedulesReconnectWithBackoff() async {
         let relayURL = "wss://retry.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let firstConnected = await waitUntil {
@@ -1411,7 +1411,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_receiveFailure_whenActivationBecomesDisallowedDoesNotScheduleReconnect() async {
         let relayURL = "wss://no-retry.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let connected = await waitUntil {
@@ -1435,7 +1435,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_disconnect_invalidatesScheduledReconnectGeneration() async {
         let relayURL = "wss://disconnect.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let firstConnected = await waitUntil {
@@ -1459,7 +1459,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_retryConnection_cancelsActiveConnectionBeforeReconnecting() async {
         let relayURL = "wss://retry-now.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let connected = await waitUntil {
@@ -1487,7 +1487,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_staleSocketFailureCannotFailConfirmedSendOnReplacementConnection() async throws {
         let relayURL = "wss://retry-stale-confirmation.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.manager.ensureConnections(to: [relayURL])
         let initiallyConnected = await waitUntil {
             context.manager.relays.first(where: { $0.url == relayURL })?.isConnected == true
@@ -1519,7 +1519,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_retryConnection_whenTorReadinessFailsDoesNotReconnect() async {
         let relayURL = "wss://retry-tor.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: true)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: true)
 
         context.manager.ensureConnections(to: [relayURL])
         let connected = await waitUntil {
@@ -1548,7 +1548,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_resetAllConnections_clearsRelayStateAndReconnects() async {
         let relayURL = "wss://reset.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let connected = await waitUntil {
@@ -1583,7 +1583,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let relayOne = "wss://flush-one.example"
         let relayTwo = "wss://flush-two.example"
         let context = makeContext(
-            permission: .denied,
+            defaultRelaysAllowed: false,
             userTorEnabled: true,
             torEnforced: true,
             torIsReady: true,
@@ -1611,7 +1611,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_dnsPingFailure_marksRelayPermanentCallsEOSEImmediatelyAndManualRetryReconnects() async {
         let relayURL = "wss://dns-failure.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
         context.sessionFactory.pingErrorByURL[relayURL] = NSError(
             domain: NSURLErrorDomain,
             code: NSURLErrorCannotFindHost,
@@ -1650,7 +1650,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_pendingSubscriptions_perRelayCapEvictsOldestByInsertionOrder() async {
         let relayURL = "wss://pending-cap.example"
         // Tor stalled: nothing flushes, so every REQ stays pending.
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         let cap = TransportConfig.nostrPendingSubscriptionsPerRelayCap
 
         for i in 0..<(cap + 3) {
@@ -1671,7 +1671,7 @@ final class NostrRelayManagerTests: XCTestCase {
     func test_pendingSubscriptions_staleEntriesSweptOnConnectAttempt() async {
         let relayURL = "wss://pending-sweep.example"
         // Tor stalled: the REQ stays pending and no socket ever opens.
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
 
         context.manager.subscribe(filter: makeFilter(), id: "stale-pending-sub", relayUrls: [relayURL], handler: { _ in })
         XCTAssertEqual(context.manager.debugPendingSubscriptionCount(for: relayURL), 1)
@@ -1689,7 +1689,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_resetForPanicWipe_dropsSessionRelayStateWithoutFiringCallbacks() async throws {
         let relayURL = "wss://panic-reset.example"
-        let context = makeContext(permission: .denied, userTorEnabled: true, torEnforced: true, torIsReady: false)
+        let context = makeContext(defaultRelaysAllowed: false, userTorEnabled: true, torEnforced: true, torIsReady: false)
         let event = try makeSignedEvent(content: "queued before panic")
         var handledEvents = 0
         var eoseCount = 0
@@ -1732,7 +1732,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_resetForPanicWipe_marksConnectedRelaysDisconnected() async {
         let relayURL = "wss://panic-connected.example"
-        let context = makeContext(permission: .denied)
+        let context = makeContext(defaultRelaysAllowed: false)
 
         context.manager.ensureConnections(to: [relayURL])
         let connected = await waitUntil {
@@ -1753,7 +1753,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let relayURL = "wss://jitter-bounds.example"
         // Pin the jitter source to the extremes and the midpoint of [0, 1).
         let jitter = JitterSequence([0.0, 1.0.nextDown, 0.25])
-        let context = makeContext(permission: .denied, jitterUnit: { jitter.next() })
+        let context = makeContext(defaultRelaysAllowed: false, jitterUnit: { jitter.next() })
         // Persistent ping failure: every connect attempt fails and schedules
         // the next reconnect with an increasing attempt count.
         context.sessionFactory.pingErrorByURL[relayURL] = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
@@ -1776,7 +1776,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
     func test_reconnectBackoff_realRandomJitterStaysInBoundsAndVaries() async {
         let relayURL = "wss://jitter-random.example"
-        let context = makeContext(permission: .denied, jitterUnit: { Double.random(in: 0..<1) })
+        let context = makeContext(defaultRelaysAllowed: false, jitterUnit: { Double.random(in: 0..<1) })
         context.sessionFactory.pingErrorByURL[relayURL] = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
 
         context.manager.ensureConnections(to: [relayURL])
@@ -1810,7 +1810,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let center = NotificationCenter()
         let custom = MutableRelayList(urls: [])
         let context = makeContext(
-            permission: .authorized,
+            defaultRelaysAllowed: true,
             notificationCenter: center,
             customRelays: custom
         )
@@ -1835,7 +1835,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let center = NotificationCenter()
         let custom = MutableRelayList(urls: ["wss://added.example.com"])
         let context = makeContext(
-            permission: .authorized,
+            defaultRelaysAllowed: true,
             notificationCenter: center,
             customRelays: custom
         )
@@ -1859,7 +1859,7 @@ final class NostrRelayManagerTests: XCTestCase {
     @MainActor
     func testWeshPinnedRelaysAreTheOnlyRelaysEverContacted() async {
         let context = makeContext(
-            permission: .denied,
+            defaultRelaysAllowed: false,
             customRelays: MutableRelayList(urls: ["wss://added.example.com"]),
             weshPinnedRelays: WeshInternetPolicy.pinnedRelays
         )
@@ -1876,7 +1876,7 @@ final class NostrRelayManagerTests: XCTestCase {
     @MainActor
     func testWeshNeverConnectsBeforeTorIsReadyEvenWithTorPreferenceOff() async throws {
         let context = makeContext(
-            permission: .denied,
+            defaultRelaysAllowed: false,
             userTorEnabled: false,
             torEnforced: true,
             torIsReady: false,
@@ -1898,7 +1898,7 @@ final class NostrRelayManagerTests: XCTestCase {
     }
 
     private func makeContext(
-        permission: LocationChannelManager.PermissionState,
+        defaultRelaysAllowed: Bool,
         favorites: Set<Data> = [],
         activationAllowed: Bool = true,
         userTorEnabled: Bool = false,
@@ -1910,8 +1910,7 @@ final class NostrRelayManagerTests: XCTestCase {
         weshPinnedRelays: [String]? = nil,
         jitterUnit: @escaping () -> Double = { 0.5 } // 0.5 -> jitter factor 1.0 (no jitter)
     ) -> RelayManagerTestContext {
-        let permissionSubject = CurrentValueSubject<LocationChannelManager.PermissionState, Never>(permission)
-        let favoritesSubject = CurrentValueSubject<Set<Data>, Never>(favorites)
+                let favoritesSubject = CurrentValueSubject<Set<Data>, Never>(defaultRelaysAllowed && favorites.isEmpty ? [Data([0x01])] : favorites)
         let sessionFactory = MockRelaySessionFactory()
         let scheduler = MockRelayScheduler()
         let clock = MutableClock(now: Date(timeIntervalSince1970: 1_700_000_000))
@@ -1923,9 +1922,7 @@ final class NostrRelayManagerTests: XCTestCase {
                 activationAllowed: { activationFlag.value },
                 userTorEnabled: { userTorEnabled },
                 hasMutualFavorites: { !favoritesSubject.value.isEmpty },
-                hasLocationPermission: { permissionSubject.value == .authorized },
                 mutualFavoritesPublisher: favoritesSubject.eraseToAnyPublisher(),
-                locationPermissionPublisher: permissionSubject.eraseToAnyPublisher(),
                 torEnforced: { torEnforced },
                 torIsReady: { torWaiter.isReady },
                 torIsForeground: { torForeground.value },
@@ -1943,7 +1940,7 @@ final class NostrRelayManagerTests: XCTestCase {
         )
         return RelayManagerTestContext(
             manager: manager,
-            permissionSubject: permissionSubject,
+            favoritesSubject: favoritesSubject,
             sessionFactory: sessionFactory,
             scheduler: scheduler,
             clock: clock,
@@ -1996,7 +1993,7 @@ final class NostrRelayManagerTests: XCTestCase {
 @MainActor
 private struct RelayManagerTestContext {
     let manager: NostrRelayManager
-    let permissionSubject: CurrentValueSubject<LocationChannelManager.PermissionState, Never>
+    let favoritesSubject: CurrentValueSubject<Set<Data>, Never>
     let sessionFactory: MockRelaySessionFactory
     let scheduler: MockRelayScheduler
     let clock: MutableClock

@@ -7,10 +7,10 @@
 // `ChatViewModel`, following the `ChatDeliveryCoordinatorContextTests` /
 // `ChatPrivateConversationCoordinatorContextTests` exemplars.
 //
-// Scope note: haptics (UIApplication) are not exercised here. Geographic raw
-// refusal is tested with a throwing injected identity seam, before shared
-// relay adapters could be reached. Mention notifications, mesh raw sends,
-// and timeline/store/blocking flows use the injected context.
+// Scope note: haptics (UIApplication) are not exercised here. Geographic
+// ingress and raw-send refusal are checked through observable store and
+// transport effects. Mention notifications and ordinary mesh sends use
+// the injected context.
 //
 
 import Testing
@@ -26,7 +26,6 @@ import BitFoundation
 private final class MockChatPublicConversationContext: ChatPublicConversationContext {
     // Channel state
     var activeChannel: ChannelID = .mesh
-    var currentGeohash: String?
     var nickname = "me"
     var myPeerID = PeerID(str: "0011223344556677")
     private(set) var isBatchingPublic = false
@@ -37,7 +36,6 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
 
     // Public conversation store (single-writer intents)
     var conversations: [ConversationID: [BitchatMessage]] = [:]
-    private(set) var queuedGeohashSystemMessages: [String] = []
 
     func publicMessages(in conversationID: ConversationID) -> [BitchatMessage] {
         conversations[conversationID] ?? []
@@ -56,10 +54,6 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
         conversations[conversationID]?.contains(where: { $0.id == messageID }) == true
     }
 
-    func removePublicMessages(fromGeohash geohash: String, where predicate: (BitchatMessage) -> Bool) {
-        conversations[.geohash(geohash.lowercased())]?.removeAll(where: predicate)
-    }
-
     private(set) var clearedConversations: [ConversationID] = []
     private(set) var archivePurgeCount = 0
 
@@ -70,10 +64,6 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
 
     func purgeArchivedPublicMessages() {
         archivePurgeCount += 1
-    }
-
-    func queueGeohashSystemMessage(_ content: String) {
-        queuedGeohashSystemMessages.append(content)
     }
 
     // Private chats
@@ -88,10 +78,7 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
     }
 
     // Geohash participants & presence
-    var geoNicknames: [String: String] = [:]
-    var isTeleported = false
     var nostrKeyMapping: [PeerID: String] = [:]
-    var geoPeople: [GeoPerson] = []
     var geoParticipantCounts: [String: Int] = [:]
     private(set) var removedGeoParticipants: [String] = []
 
@@ -101,30 +88,8 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
         }
     }
 
-    func visibleGeoPeople() -> [GeoPerson] {
-        geoPeople
-    }
-
-    func geoParticipantCount(for geohash: String) -> Int {
-        geoParticipantCounts[geohash] ?? 0
-    }
-
-    func removeGeoParticipant(pubkeyHex: String) {
-        removedGeoParticipants.append(pubkeyHex)
-    }
-
     // Nostr identity & blocking
     var blockedNostrPubkeys: Set<String> = []
-    var rejectGeographicIdentityDerivation = false
-    private(set) var geographicIdentityDerivations: [String] = []
-
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        geographicIdentityDerivations.append(geohash)
-        if rejectGeographicIdentityDerivation {
-            throw GeographicFixtureError.forbiddenDerivation
-        }
-        return Self.dummyIdentity
-    }
 
     private enum GeographicFixtureError: Error {
         case forbiddenDerivation
@@ -211,12 +176,6 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
         mentionNotifications.append((sender, message))
     }
 
-    static let dummyIdentity = NostrIdentity(
-        privateKey: Data(repeating: 0x11, count: 32),
-        publicKey: Data(repeating: 0x22, count: 32),
-        npub: "npub1mock",
-        createdAt: Date(timeIntervalSince1970: 0)
-    )
 }
 
 // MARK: - Helpers
@@ -293,7 +252,6 @@ struct ChatPublicConversationCoordinatorContextTests {
         let context = MockChatPublicConversationContext()
         let coordinator = ChatPublicConversationCoordinator(context: context)
         let geohash = "u4pruy"
-        context.currentGeohash = geohash
         let senderHex = String(repeating: "ab", count: 32)
         let geoMessage = makePublicMessage(
             id: "geo-msg-1",
@@ -301,15 +259,15 @@ struct ChatPublicConversationCoordinatorContextTests {
             senderPeerID: PeerID(nostr: senderHex)
         )
 
-        // On mesh channel: a background-channel arrival lands in the geohash
-        // conversation immediately, with no pipeline batching.
+        // A legacy geographic arrival is rejected while mesh is selected;
+        // it must reach neither timeline nor the batching pipeline.
         context.activeChannel = .mesh
         coordinator.handlePublicMessage(geoMessage)
-        #expect(context.publicMessages(in: .geohash(geohash)).map(\.id) == ["geo-msg-1"])
+        #expect(context.publicMessages(in: .geohash(geohash)).isEmpty)
         #expect(context.publicMessages(in: .mesh).isEmpty)
         #expect(context.enqueuedMessageIDs.isEmpty)
 
-        // On the matching location channel: enqueued for the batched flush.
+        // A historical geographic selection cannot reopen the retired ingress.
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: geohash))
         let second = makePublicMessage(
             id: "geo-msg-2",
@@ -317,8 +275,8 @@ struct ChatPublicConversationCoordinatorContextTests {
             senderPeerID: PeerID(nostr: senderHex)
         )
         coordinator.handlePublicMessage(second)
-        #expect(context.enqueuedMessages.map(\.messageID) == ["geo-msg-2"])
-        #expect(context.enqueuedMessages.first?.conversationID == .geohash(geohash))
+        #expect(context.enqueuedMessages.isEmpty)
+        #expect(context.publicMessages(in: .mesh).isEmpty)
     }
 
     /// A peer-chosen wire timestamp near UInt64.max comes back from Date as
@@ -413,40 +371,6 @@ struct ChatPublicConversationCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func blockGeohashUser_purgesMessagesMappingsAndPrivateChats() async {
-        let context = MockChatPublicConversationContext()
-        let coordinator = ChatPublicConversationCoordinator(context: context)
-        let geohash = "u4pruy"
-        let hex = String(repeating: "cd", count: 32)
-        let senderPeerID = PeerID(nostr: hex)
-        let convKey = PeerID(nostr_: hex)
-        let geoMessage = makePublicMessage(id: "geo-bad-1", sender: "rude", senderPeerID: senderPeerID)
-
-        context.currentGeohash = geohash
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: geohash))
-        context.conversations[.geohash(geohash)] = [geoMessage]
-        context.nostrKeyMapping = [senderPeerID: hex, convKey: hex]
-        context.privateChats[convKey] = [geoMessage]
-        context.unreadPrivateMessages = [convKey]
-
-        coordinator.blockGeohashUser(pubkeyHexLowercased: hex, displayName: "rude#abcd")
-
-        #expect(context.blockedNostrPubkeys.contains(hex))
-        #expect(context.removedGeoParticipants == [hex])
-        #expect(context.privateChats[convKey] == nil)
-        #expect(context.unreadPrivateMessages.isEmpty)
-        #expect(context.nostrKeyMapping.isEmpty)
-        // The blocked user's message is purged from the geohash conversation
-        // (the visible timeline is the same conversation now); a system
-        // notice was appended to the active conversation.
-        #expect(!context.publicMessages(in: .geohash(geohash)).contains(where: { $0.id == "geo-bad-1" }))
-        #expect(context.publicMessages(in: .geohash(geohash)).last?.sender == "system")
-
-        coordinator.unblockGeohashUser(pubkeyHexLowercased: hex, displayName: "rude#abcd")
-        #expect(!context.blockedNostrPubkeys.contains(hex))
-    }
-
-    @Test @MainActor
     func addPublicSystemMessage_appendsToActiveConversationAndRecordsContentKey() async {
         let context = MockChatPublicConversationContext()
         let coordinator = ChatPublicConversationCoordinator(context: context)
@@ -457,9 +381,6 @@ struct ChatPublicConversationCoordinatorContextTests {
         #expect(context.publicMessages(in: .mesh).first?.sender == "system")
         #expect(context.recordedContentKeys.map(\.key) == ["tor ready"])
 
-        // On mesh, geohash-only system messages are queued for the next geo visit.
-        coordinator.addGeohashOnlySystemMessage("geo notice")
-        #expect(context.queuedGeohashSystemMessages == ["geo notice"])
     }
 
     @Test @MainActor
@@ -477,18 +398,16 @@ struct ChatPublicConversationCoordinatorContextTests {
     func sendPublicRaw_onRetiredGeographicChannel_refusesBeforeIdentityOrMeshFallback() async {
         let context = MockChatPublicConversationContext()
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
-        // Baseline delivery must throw before any shared relay/directory access.
-        context.rejectGeographicIdentityDerivation = true
+        // The retained entry point refuses the historical destination.
         let coordinator = ChatPublicConversationCoordinator(context: context)
 
         coordinator.sendPublicRaw("synthetic retired geographic payload")
-        // The actual raw-send Task is enqueued on MainActor before this main
-        // queue fence; its derivation has no suspension before the injected throw.
+        // Drain the main queue before checking that no deferred send or
+        // local echo appeared.
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async { continuation.resume() }
         }
 
-        #expect(context.geographicIdentityDerivations.isEmpty)
         #expect(context.sentMeshMessages.isEmpty)
         #expect(context.conversations.isEmpty)
     }
@@ -520,33 +439,6 @@ struct ChatPublicConversationCoordinatorContextTests {
         #expect(context.isBatchingPublic)
     }
 
-    @Test @MainActor
-    func currentPublicSenderAndDisplayName_deriveGeoSuffixedIdentity() async {
-        let context = MockChatPublicConversationContext()
-        let coordinator = ChatPublicConversationCoordinator(context: context)
-        let identityHex = MockChatPublicConversationContext.dummyIdentity.publicKeyHex
-        let suffix = String(identityHex.suffix(4))
-
-        // Mesh: plain nickname and mesh peer ID.
-        let meshSender = coordinator.currentPublicSender()
-        #expect(meshSender.name == "me")
-        #expect(meshSender.peerID == context.myPeerID)
-
-        // Location channel: suffixed nickname and nostr peer ID.
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruy"))
-        let geoSender = coordinator.currentPublicSender()
-        #expect(geoSender.name == "me#\(suffix)")
-        #expect(geoSender.peerID == PeerID(nostr: identityHex))
-
-        // Display names: own geo identity, known nickname, and anon fallback.
-        context.currentGeohash = "u4pruy"
-        #expect(coordinator.displayNameForNostrPubkey(identityHex) == "me#\(suffix)")
-        let otherHex = String(repeating: "ef", count: 32)
-        context.geoNicknames[otherHex] = "bob"
-        #expect(coordinator.displayNameForNostrPubkey(otherHex) == "bob#" + otherHex.suffix(4))
-        let unknownHex = String(repeating: "12", count: 32)
-        #expect(coordinator.displayNameForNostrPubkey(unknownHex) == "anon#" + unknownHex.suffix(4))
-    }
     @Test @MainActor
     func checkForMentions_postsMentionNotificationOnlyForOthersMentioningMe() async {
         let context = MockChatPublicConversationContext()

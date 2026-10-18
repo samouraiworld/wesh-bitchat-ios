@@ -77,9 +77,7 @@ final class ChatViewModelBootstrapper {
         startRuntimeServices()
         bindPeerService()
         configureNoiseCallbacks()
-        configureGeoChannels()
         viewModel.messageRouter.startOutboxMaintenance()
-        bindTeleportState()
         requestNotifications()
         registerObservers()
     }
@@ -137,7 +135,6 @@ private extension ChatViewModelBootstrapper {
         }
         viewModel.commandProcessor.contextProvider = viewModel
         viewModel.commandProcessor.meshService = viewModel.meshService
-        viewModel.participantTracker.configure(context: viewModel)
     }
 
     func bindFeatureObjectChanges() {
@@ -151,22 +148,6 @@ private extension ChatViewModelBootstrapper {
         // `ConversationStore` intents and its `changes` subject; selection
         // is owned by the store too (`PrivateChatManager.selectedPeer` is a
         // read-only mirror), so no selection bridge is needed here.
-        viewModel.participantTracker.objectWillChange
-            .sink { [weak viewModel] _ in
-                viewModel?.objectWillChange.send()
-            }
-            .store(in: &viewModel.cancellables)
-
-        viewModel.participantTracker.$visiblePeople
-            .receive(on: DispatchQueue.main)
-            .sink { [weak viewModel] people in
-                Task { @MainActor [weak viewModel] in
-                    let visible = Set(people.map { $0.id })
-                    viewModel?.locationPresenceStore.retainTeleportedGeo(keeping: visible)
-                    viewModel?.locationPresenceStore.retainGeoNicknames(keeping: visible)
-                }
-            }
-            .store(in: &viewModel.cancellables)
     }
 
     func loadPersistedViewState() {
@@ -305,42 +286,6 @@ private extension ChatViewModelBootstrapper {
 
     func configureNoiseCallbacks() {
         viewModel.setupNoiseCallbacks()
-    }
-
-    func configureGeoChannels() {
-        viewModel.geoChannelCoordinator = GeoChannelCoordinator(
-            locationManager: viewModel.locationManager,
-            context: viewModel
-        )
-    }
-
-    func bindTeleportState() {
-        viewModel.locationManager.$teleported
-            .receive(on: DispatchQueue.main)
-            .sink { [weak viewModel] isTeleported in
-                guard let viewModel else { return }
-                Task { @MainActor [weak viewModel] in
-                    guard let viewModel,
-                          case .location(let channel) = viewModel.activeChannel,
-                          let identity = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash)
-                    else {
-                        return
-                    }
-
-                    let key = identity.publicKeyHex.lowercased()
-                    let hasRegional = !viewModel.locationManager.availableChannels.isEmpty
-                    let inRegional = viewModel.locationManager.availableChannels.contains {
-                        $0.geohash == channel.geohash
-                    }
-
-                    if isTeleported && hasRegional && !inRegional {
-                        viewModel.locationPresenceStore.markTeleported(key)
-                    } else {
-                        viewModel.locationPresenceStore.clearTeleported(key)
-                    }
-                }
-            }
-            .store(in: &viewModel.cancellables)
     }
 
     func requestNotifications() {

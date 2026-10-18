@@ -242,7 +242,6 @@ private final class DiagnosticsMockContext: CommandContextProvider {
         nicknameToPeerID[nickname]
     }
 
-    func getVisibleGeoParticipants() -> [CommandGeoParticipant] { [] }
     func nostrPubkeyForDisplayName(_ displayName: String) -> String? { nil }
     func startPrivateChat(with peerID: PeerID) {}
     func sendPrivateMessage(_ content: String, to peerID: PeerID) {}

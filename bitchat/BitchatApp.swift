@@ -44,7 +44,6 @@ struct BitchatApp: App {
                     .environmentObject(runtime.privateConversationModel)
                     .environmentObject(runtime.verificationModel)
                     .environmentObject(runtime.conversationUIModel)
-                    .environmentObject(runtime.locationChannelsModel)
                     .environmentObject(runtime.peerListModel)
                     .environmentObject(runtime.appChromeModel)
                     .environmentObject(runtime.sharedContentImportModel)

@@ -91,21 +91,6 @@ struct NotificationRedactionTests {
         #expect(!content.body.contains("regroup"))
     }
 
-    @Test func redactedGeohashActivityWithholdsTheGeohash() throws {
-        let (service, deliverer) = makeService(hidePreviews: true)
-
-        service.sendGeohashActivityNotification(
-            geohash: "u4pruyd",
-            bodyPreview: "someone said something"
-        )
-
-        let content = try #require(deliverer.requests.first).content
-        #expect(!content.title.contains("u4pruyd"))
-        #expect(!content.body.contains("someone said"))
-        // The deep link still carries it: tapping must land in the channel.
-        #expect(content.userInfo["deeplink"] as? String == "wesh://geohash/u4pruyd")
-    }
-
     @Test func previewsShownWhenTheSettingIsOff() {
         let (service, deliverer) = makeService(hidePreviews: false)
 
@@ -114,17 +99,10 @@ struct NotificationRedactionTests {
             message: "meet at the north gate",
             peerID: PeerID(str: "00112233445566ff")
         )
-        service.sendGeohashActivityNotification(
-            geohash: "u4pruyd",
-            bodyPreview: "someone said something"
-        )
 
-        #expect(deliverer.requests.count == 2)
+        #expect(deliverer.requests.count == 1)
         let dm = deliverer.requests[0].content
         #expect(dm.title.contains("alice"))
         #expect(dm.body == "meet at the north gate")
-        let geo = deliverer.requests[1].content
-        #expect(geo.title.contains("u4pruyd"))
-        #expect(geo.body == "someone said something")
     }
 }

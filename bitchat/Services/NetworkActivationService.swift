@@ -25,11 +25,8 @@ extension NostrRelayManager: NetworkActivationRelayControlling {}
 extension TorURLSession: NetworkActivationProxyControlling {}
 
 /// Coordinates when the app is allowed to start Tor and connect to Nostr relays.
-/// Policy: permit start when (location permissions are authorized OR there
-/// exists at least one mutual favorite) AND the device has a usable network
-/// path. When there is provably no network at all we do not bootstrap Tor or
-/// spin relay reconnects — that only wastes battery on a mesh-only/offline
-/// device. BLE mesh is entirely independent of this gate.
+/// Explicit Internet opt-in and a usable network path are both required.
+/// Internet always uses Tor; BLE mesh is independent of this gate.
 @MainActor
 final class NetworkActivationService: ObservableObject {
     static let shared = NetworkActivationService()
@@ -49,18 +46,10 @@ final class NetworkActivationService: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var started = false
-    /// Storage key for the Tor preference. Exposed as a `nonisolated` constant
-    /// so off-main callers can read the preference without hopping to the main
-    /// actor; see `persistedTorPreference(in:)`.
+    /// Legacy preference erased at start; it can no longer enable direct routing.
     nonisolated static let torPreferenceKey = "networkActivationService.userTorEnabled"
     private var torAutoStartDesired: Bool = false
     private let storage: UserDefaults
-    private let locationPermissionPublisher: AnyPublisher<LocationChannelManager.PermissionState, Never>
-    private let mutualFavoritesPublisher: AnyPublisher<Set<Data>, Never>
-    private let selectedChannelPublisher: AnyPublisher<ChannelID, Never>
-    private let permissionProvider: () -> LocationChannelManager.PermissionState
-    private let mutualFavoritesProvider: () -> Set<Data>
-    private let locationChannelSelectedProvider: () -> Bool
     private let reachabilityMonitor: NetworkReachabilityMonitoring
     private let torController: NetworkActivationTorControlling
     // Resolved lazily: NostrRelayManager.init() reads NetworkActivationService.shared
@@ -69,88 +58,39 @@ final class NetworkActivationService: ObservableObject {
     private lazy var relayController: NetworkActivationRelayControlling = relayControllerProvider()
     private let relayControllerProvider: () -> NetworkActivationRelayControlling
     private let proxyController: NetworkActivationProxyControlling
-    private let notificationCenter: NotificationCenter
     /// Wesh Internet mode: the opt-in toggle is the whole policy and Tor is
     /// mandatory. The stored direct-mode preference is ignored and erased, and
     /// the proxy never switches to the direct session.
-    private let weshInternetPolicy: Bool
 
     private init() {
-        weshInternetPolicy = true
         storage = .standard
-        locationPermissionPublisher = LocationChannelManager.shared.$permissionState.eraseToAnyPublisher()
-        mutualFavoritesPublisher = FavoritesPersistenceService.shared.$mutualFavorites.eraseToAnyPublisher()
-        selectedChannelPublisher = LocationChannelManager.shared.$selectedChannel.eraseToAnyPublisher()
-        permissionProvider = { LocationChannelManager.shared.permissionState }
-        mutualFavoritesProvider = { FavoritesPersistenceService.shared.mutualFavorites }
-        locationChannelSelectedProvider = {
-            if case .location = LocationChannelManager.shared.selectedChannel { return true }
-            return false
-        }
         reachabilityMonitor = NWPathReachabilityMonitor()
         torController = TorManager.shared
         relayControllerProvider = { NostrRelayManager.shared }
         proxyController = TorURLSession.shared
-        notificationCenter = .default
     }
 
     internal init(
         storage: UserDefaults,
-        locationPermissionPublisher: AnyPublisher<LocationChannelManager.PermissionState, Never>,
-        mutualFavoritesPublisher: AnyPublisher<Set<Data>, Never>,
-        permissionProvider: @escaping () -> LocationChannelManager.PermissionState,
-        mutualFavoritesProvider: @escaping () -> Set<Data>,
-        selectedChannelPublisher: AnyPublisher<ChannelID, Never> = Empty().eraseToAnyPublisher(),
-        locationChannelSelectedProvider: @escaping () -> Bool = { false },
         reachabilityMonitor: NetworkReachabilityMonitoring,
         torController: NetworkActivationTorControlling,
         relayController: NetworkActivationRelayControlling,
-        proxyController: NetworkActivationProxyControlling,
-        notificationCenter: NotificationCenter = .default,
-        weshInternetPolicy: Bool = false
+        proxyController: NetworkActivationProxyControlling
     ) {
-        self.weshInternetPolicy = weshInternetPolicy
         self.storage = storage
-        self.locationPermissionPublisher = locationPermissionPublisher
-        self.mutualFavoritesPublisher = mutualFavoritesPublisher
-        self.permissionProvider = permissionProvider
-        self.mutualFavoritesProvider = mutualFavoritesProvider
-        self.selectedChannelPublisher = selectedChannelPublisher
-        self.locationChannelSelectedProvider = locationChannelSelectedProvider
         self.reachabilityMonitor = reachabilityMonitor
         self.torController = torController
         self.relayControllerProvider = { relayController }
         self.proxyController = proxyController
-        self.notificationCenter = notificationCenter
-    }
-
-    /// Whether Tor routing is switched on, read without main-actor isolation.
-    ///
-    /// This is the *preference*, not live Tor readiness. Background work that
-    /// must decide whether waiting for Tor is even meaningful needs the
-    /// preference: when someone has deliberately turned Tor off, requests are
-    /// intended to go direct, so waiting on a client that has been shut down
-    /// would only burn the bootstrap timeout. When the preference is on, callers
-    /// must still wait for readiness rather than falling back to clearnet.
-    nonisolated static func persistedTorPreference(
-        in defaults: UserDefaults = .standard
-    ) -> Bool {
-        defaults.object(forKey: torPreferenceKey) as? Bool ?? true
     }
 
     func start() {
         guard !started else { return }
         started = true
 
-        if weshInternetPolicy {
-            // Off-main readers (`persistedTorPreference`) must never see "direct".
-            storage.removeObject(forKey: Self.torPreferenceKey)
-            userTorEnabled = true
-        } else if let stored = storage.object(forKey: Self.torPreferenceKey) as? Bool {
-            userTorEnabled = stored
-        } else {
-            userTorEnabled = true
-        }
+        // Retired direct-mode preferences cannot opt this service out of Tor.
+        storage.removeObject(forKey: Self.torPreferenceKey)
+        userTorEnabled = true
 
         // Begin (idempotent) reachability monitoring and seed initial state.
         reachabilityMonitor.start()
@@ -167,32 +107,6 @@ final class NetworkActivationService: ObservableObject {
         } else {
             relayController.disconnect()
         }
-
-        // React to location permission changes
-        locationPermissionPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.reevaluate()
-            }
-            .store(in: &cancellables)
-
-        // React to mutual favorites changes
-        mutualFavoritesPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.reevaluate()
-            }
-            .store(in: &cancellables)
-
-        // React to entering or leaving a location channel, which can flip the
-        // gate on its own for someone with no location permission and no
-        // mutual favorites.
-        selectedChannelPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.reevaluate()
-            }
-            .store(in: &cancellables)
 
         // React to network reachability changes (debounced, unsatisfied-only).
         reachabilityMonitor.reachabilityPublisher
@@ -223,19 +137,6 @@ final class NetworkActivationService: ObservableObject {
         applyTorState(torDesired: false)
     }
 
-    func setUserTorEnabled(_ enabled: Bool) {
-        // Wesh: Tor cannot be switched off; `userTorEnabled` stays true.
-        guard !weshInternetPolicy, enabled != userTorEnabled else { return }
-        userTorEnabled = enabled
-        storage.set(enabled, forKey: Self.torPreferenceKey)
-        notificationCenter.post(
-            name: .TorUserPreferenceChanged,
-            object: nil,
-            userInfo: ["enabled": enabled]
-        )
-        reevaluate()
-    }
-
     private func reevaluate() {
         guard started else { return }
         let allowed = effectiveAllowed()
@@ -263,30 +164,14 @@ final class NetworkActivationService: ObservableObject {
         }
     }
 
-    /// Base policy: who is allowed to use the network at all (permission or a
-    /// mutual favorite), ignoring current link state.
-    private func basePolicyAllowed() -> Bool {
-        if weshInternetPolicy { return true }
-        let permOK = permissionProvider() == .authorized
-        let hasMutual = !mutualFavoritesProvider().isEmpty
-        // Being in a location channel counts too. Teleporting into a geohash
-        // needs no location permission, so someone who denied location and has
-        // no mutual favorites could sit in a channel that never connects: the
-        // gate suppressed Tor and the relays, and nothing said why. The channel
-        // is itself an internet feature in active use, which is exactly what
-        // this gate is meant to detect.
-        let inLocationChannel = locationChannelSelectedProvider()
-        return permOK || hasMutual || inLocationChannel
-    }
-
     /// Effective gate: base policy AND a usable network path. When there is
     /// provably no network, Tor bootstrap and relay reconnects are suppressed.
     private func effectiveAllowed() -> Bool {
-        userInternetEnabled && basePolicyAllowed() && reachabilityMonitor.isReachable
+        userInternetEnabled && reachabilityMonitor.isReachable
     }
 
     private func applyTorState(torDesired: Bool) {
-        proxyController.setProxyMode(useTor: torDesired || weshInternetPolicy)
+        proxyController.setProxyMode(useTor: true)
         if torDesired {
             torController.startIfNeeded()
         } else {

@@ -169,14 +169,12 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         displayNamesByPubkey[pubkeyHex] ?? "anon"
     }
 
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity { Self.dummyIdentity }
     func currentNostrIdentity() -> NostrIdentity? { Self.dummyIdentity }
 
     // Routing & acknowledgements
     private(set) var routedPrivateMessages: [(content: String, peerID: PeerID, messageID: String)] = []
     private(set) var routedReadReceipts: [(messageID: String, peerID: PeerID)] = []
     private(set) var meshReadReceipts: [(messageID: String, peerID: PeerID)] = []
-    private(set) var geoPrivateMessages: [(content: String, recipientHex: String, messageID: String)] = []
     private(set) var nostrDeliveryAcks: [(messageID: String, recipientHex: String)] = []
     private(set) var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
     var queuedMessageIDsByPeerID: [PeerID: Set<String>] = [:]
@@ -211,10 +209,6 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
 
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
         meshReadReceipts.append((receipt.originalMessageID, peerID))
-    }
-
-    func sendNostrIdentityPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        geoPrivateMessages.append((content, recipientHex, messageID))
     }
 
     func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
@@ -265,6 +259,40 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         npub: "npub1mock",
         createdAt: Date(timeIntervalSince1970: 0)
     )
+}
+
+/// Real private-send routing against an injected context, with no live VM,
+/// keychain, location owner, relay manager or device state.
+@MainActor
+struct GeographicPrivateTransportRetirementTests {
+    @Test
+    func genericPrivateSendRefusesLegacyGeographicRecipientWithoutDerivingEchoingOrRerouting() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let recipientHex = String(repeating: "ab", count: 32)
+        let legacyPeer = PeerID(nostr_: recipientHex)
+        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
+        context.nostrKeyMapping[legacyPeer] = recipientHex
+
+        coordinator.sendPrivateMessage("Synthetic retired geographic private message", to: legacyPeer)
+
+        #expect(context.privateChats.isEmpty)
+        #expect(context.routedPrivateMessages.isEmpty, "Retired content must not fall back to an account or mesh recipient")
+    }
+
+    @Test
+    func genericPrivateSendKeepsTheFullNoiseKeyAccountRecipientAndRetainedRoute() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let accountPeer = PeerID(hexData: Data(repeating: 0xA1, count: 32))
+        context.nicknamesByPeerID[accountPeer] = "Synthetic account contact"
+
+        coordinator.sendPrivateMessage("Synthetic ordinary account message", to: accountPeer)
+
+        #expect(context.routedPrivateMessages.map(\.peerID) == [accountPeer])
+        #expect(context.routedPrivateMessages.map(\.content) == ["Synthetic ordinary account message"])
+        #expect(context.privateChats[accountPeer]?.map(\.content) == ["Synthetic ordinary account message"])
+    }
 }
 
 // MARK: - Helpers

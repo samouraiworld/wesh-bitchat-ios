@@ -7,10 +7,10 @@
 // `ChatDeliveryCoordinatorContextTests` /
 // `ChatPrivateConversationCoordinatorContextTests` exemplars.
 //
-// Scope note: the GeoDM read pass, the favorites-backed mesh/Nostr
-// read-receipt branch (favorites are injected through the context), message
-// merging, DM screenshot notices, and lifecycle persistence flows are
-// covered here. Screenshots are never announced to public channels.
+// Scope note: historical geographic read passes are refused; ordinary
+// mesh/account receipts, message merging, private screenshot notices and
+// lifecycle persistence use the injected context. Screenshots are never
+// announced to public channels.
 //
 
 import Testing
@@ -94,7 +94,6 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
     // Routing & receipts
     private(set) var routedPrivateMessages: [(content: String, peerID: PeerID, recipientNickname: String)] = []
     private(set) var routedReadReceipts: [(messageID: String, peerID: PeerID)] = []
-    private(set) var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
 
     func routePrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
         routedPrivateMessages.append((content, peerID, recipientNickname))
@@ -105,13 +104,6 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
         routedReadReceipts.append((receipt.originalMessageID, peerID))
         return routeReadReceiptResult
     }
-
-    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        nostrReadReceipts.append((messageID, recipientHex))
-    }
-
-    // Nostr & geohash
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity { Self.dummyIdentity }
 
     // Favorites
     var favoriteRelationshipsByNoiseKey: [Data: FavoritesPersistenceService.FavoriteRelationship] = [:]
@@ -132,12 +124,6 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
         return true
     }
 
-    static let dummyIdentity = NostrIdentity(
-        privateKey: Data(repeating: 0x11, count: 32),
-        publicKey: Data(repeating: 0x22, count: 32),
-        npub: "npub1mock",
-        createdAt: Date(timeIntervalSince1970: 0)
-    )
 }
 
 // MARK: - Helpers
@@ -221,7 +207,7 @@ struct ChatLifecycleCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func markPrivateMessagesAsRead_geoDM_sendsReadReceiptsOnce() async {
+    func markPrivateMessagesAsRead_historicalGeographicPeerRefusesReceipts() async {
         let context = MockChatLifecycleContext()
         let coordinator = ChatLifecycleCoordinator(context: context)
         let convKey = PeerID(nostr_: "feedface00112233")
@@ -239,14 +225,16 @@ struct ChatLifecycleCoordinatorContextTests {
         coordinator.markPrivateMessagesAsRead(from: convKey)
 
         #expect(context.managerReadMarks == [convKey])
-        // Only the peer's own un-acked, non-relay message gets a READ.
-        #expect(context.nostrReadReceipts.map(\.messageID) == ["m1"])
-        #expect(context.nostrReadReceipts.first?.recipientHex == recipientHex)
-        #expect(context.sentReadReceipts.contains("m1"))
+        // Historical geography cannot send receipts or claim a new receipt was sent.
+        #expect(context.routedReadReceipts.isEmpty)
+        #expect(!context.sentReadReceipts.contains("m1"))
+        #expect(context.sentReadReceipts == ["already-acked"])
 
-        // Second pass: nothing new to send.
         coordinator.markPrivateMessagesAsRead(from: convKey)
-        #expect(context.nostrReadReceipts.count == 1)
+        #expect(context.managerReadMarks == [convKey, convKey])
+        #expect(context.routedReadReceipts.isEmpty)
+        #expect(!context.sentReadReceipts.contains("m1"))
+        #expect(context.sentReadReceipts == ["already-acked"])
     }
 
     @Test @MainActor
@@ -355,56 +343,25 @@ struct ChatLifecycleCoordinatorContextTests {
 
 // MARK: - Screenshot Routing
 
-/// Pins `AppRuntime`'s screenshot decision table: the geohash warn path,
-/// the App Info exemption, and the deliberate mesh silence. Combined with
-/// `handleScreenshotCaptured_publicChannel_staysSilent` above, this proves
-/// location + screenshot → local privacy alert, and nothing sent anywhere.
+/// Pins the retained screenshot routing: App Info is exempt, while chat
+/// screenshots reach the lifecycle coordinator. Its public-channel test
+/// above verifies that this never announces a screenshot on public mesh.
 struct ScreenshotCaptureRoutingTests {
-
-    @Test("Location channels warn locally; the sheet warns everywhere")
-    func locationScreenshotsWarnLocally() {
-        // Geohash timeline, no DM open: warn the person, tell no one.
-        #expect(AppRuntime.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: false,
-            isAppInfoPresented: false,
-            hasPrivateChatOpen: false,
-            isLocationChannelActive: true
-        ) == .warnLocally)
-
-        // The channel sheet reveals location regardless of active channel.
-        #expect(AppRuntime.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: true,
-            isAppInfoPresented: false,
-            hasPrivateChatOpen: true,
-            isLocationChannelActive: false
-        ) == .warnLocally)
-    }
 
     @Test("App Info is exempt; mesh and DMs forward to the chat layer")
     func nonLocationScreenshotsForwardOrIgnore() {
         #expect(AppRuntime.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: false,
-            isAppInfoPresented: true,
-            hasPrivateChatOpen: false,
-            isLocationChannelActive: true
+            isAppInfoPresented: true
         ) == .ignore)
 
-        // Mesh timeline: forwarded, where the coordinator stays silent for
-        // public channels — no local alert either (nothing is sent and no
-        // place is revealed; see ScreenshotCaptureResponse docs).
+        // Chat screenshots reach the coordinator, whose public path stays silent.
         #expect(AppRuntime.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: false,
-            isAppInfoPresented: false,
-            hasPrivateChatOpen: false,
-            isLocationChannelActive: false
+            isAppInfoPresented: false
         ) == .forwardToChat)
 
-        // An open DM keeps its peer notice even from a location channel.
+        // The same routing permits the coordinator's secure-DM notice path.
         #expect(AppRuntime.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: false,
-            isAppInfoPresented: false,
-            hasPrivateChatOpen: true,
-            isLocationChannelActive: true
+            isAppInfoPresented: false
         ) == .forwardToChat)
     }
 }

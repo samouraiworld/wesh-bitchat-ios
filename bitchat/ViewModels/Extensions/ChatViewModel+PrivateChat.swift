@@ -19,11 +19,6 @@ extension ChatViewModel {
     }
 
     @MainActor
-    func sendGeohashDM(_ content: String, to peerID: PeerID) {
-        privateConversationCoordinator.sendGeohashDM(content, to: peerID)
-    }
-
-    @MainActor
     func handlePrivateMessage(
         _ payload: NoisePayload,
         senderPubkey: String,

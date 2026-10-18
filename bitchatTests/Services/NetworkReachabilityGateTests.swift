@@ -113,7 +113,7 @@ final class NetworkReachabilityGateTests: XCTestCase {
     // MARK: - Service gating
 
     func test_start_whenUnreachable_suppressesTorAndRelays() {
-        let ctx = makeService(permission: .authorized, reachable: false)
+        let ctx = makeService(reachable: false)
         ctx.service.start()
 
         XCTAssertFalse(ctx.service.activationAllowed)
@@ -126,7 +126,7 @@ final class NetworkReachabilityGateTests: XCTestCase {
     }
 
     func test_start_whenReachable_allowsTorAndRelays() {
-        let ctx = makeService(permission: .authorized, reachable: true)
+        let ctx = makeService(reachable: true)
         ctx.service.start()
 
         XCTAssertTrue(ctx.service.activationAllowed)
@@ -135,7 +135,7 @@ final class NetworkReachabilityGateTests: XCTestCase {
     }
 
     func test_reachabilityRecovery_resumesTorAndRelays() async {
-        let ctx = makeService(permission: .authorized, reachable: false)
+        let ctx = makeService(reachable: false)
         ctx.service.start()
         XCTAssertFalse(ctx.service.activationAllowed)
 
@@ -148,7 +148,7 @@ final class NetworkReachabilityGateTests: XCTestCase {
     }
 
     func test_reachabilityLoss_disconnectsRelaysAndStopsTor() async {
-        let ctx = makeService(permission: .authorized, reachable: true)
+        let ctx = makeService(reachable: true)
         ctx.service.start()
         XCTAssertTrue(ctx.service.activationAllowed)
         let disconnectsBefore = ctx.relayController.disconnectCallCount
@@ -165,30 +165,22 @@ final class NetworkReachabilityGateTests: XCTestCase {
     // MARK: - Harness
 
     private func makeService(
-        permission: LocationChannelManager.PermissionState,
         reachable: Bool
     ) -> Context {
         let suiteName = "NetworkReachabilityGateTests-\(UUID().uuidString)"
         let storage = UserDefaults(suiteName: suiteName)!
         storage.removePersistentDomain(forName: suiteName)
 
-        let permissionSubject = CurrentValueSubject<LocationChannelManager.PermissionState, Never>(permission)
-        let favoritesSubject = CurrentValueSubject<Set<Data>, Never>([])
         let reachability = ControllableReachabilityMonitor(initial: reachable)
         let torController = GateMockTorController()
         let relayController = GateMockRelayController()
         let proxyController = GateMockProxyController()
         let service = NetworkActivationService(
             storage: storage,
-            locationPermissionPublisher: permissionSubject.eraseToAnyPublisher(),
-            mutualFavoritesPublisher: favoritesSubject.eraseToAnyPublisher(),
-            permissionProvider: { permissionSubject.value },
-            mutualFavoritesProvider: { favoritesSubject.value },
             reachabilityMonitor: reachability,
             torController: torController,
             relayController: relayController,
-            proxyController: proxyController,
-            notificationCenter: NotificationCenter()
+            proxyController: proxyController
         )
         return Context(
             service: service,

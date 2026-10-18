@@ -76,64 +76,7 @@ final class PerformanceBaselineTests: XCTestCase {
 
     // MARK: - 1a. Nostr inbound event handling (fresh events)
 
-    /// `NostrInboundPipeline.handleNostrEvent` for never-seen geo events
-    /// (kind 20000): dedup record, presence/nickname bookkeeping, and
-    /// public-message ingest scheduling. Schnorr signature verification is
-    /// NOT part of this path anymore — it runs exactly once, off the main
-    /// actor, in `NostrRelayManager` before delivery.
-    func testNostrInboundEventHandling_freshEvents() throws {
-        let events = try Self.makeSignedGeohashEvents(count: 500)
-        // A fresh context per measure pass so every event takes the
-        // first-seen path on every iteration. Kept alive so the weakly
-        // captured Task hops stay valid.
-        var keepAlive: [(PerfNostrContext, ChatNostrCoordinator)] = []
-        var samples: [TimeInterval] = []
-
-        measure {
-            let context = PerfNostrContext()
-            let coordinator = ChatNostrCoordinator(context: context)
-            keepAlive.append((context, coordinator))
-            let start = Date()
-            for event in events {
-                coordinator.inbound.handleNostrEvent(event)
-            }
-            samples.append(Date().timeIntervalSince(start))
-            XCTAssertEqual(context.processedEventCount, events.count)
-        }
-
-        reportThroughput("nostrInbound.fresh", samples: samples, operations: events.count, unit: "events")
-    }
-
     // MARK: - 1b. Nostr inbound event handling (duplicate events)
-
-    /// The dedup-hit path: identical events replayed. Duplicates dominate
-    /// real relay traffic (the same event arrives from several relays), so
-    /// this path runs hundreds of times a minute in busy geohashes. It is a
-    /// pure dedup lookup: no crypto (verification happens upstream in
-    /// `NostrRelayManager`, and only for the first-seen copy).
-    func testNostrInboundEventHandling_duplicateEvents() throws {
-        let events = try Self.makeSignedGeohashEvents(count: 500)
-        let context = PerfNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-        // Pre-warm: every event is now recorded as processed.
-        for event in events {
-            coordinator.inbound.handleNostrEvent(event)
-        }
-        XCTAssertEqual(context.processedEventCount, events.count)
-        var samples: [TimeInterval] = []
-
-        measure {
-            let start = Date()
-            for event in events {
-                coordinator.inbound.handleNostrEvent(event)
-            }
-            samples.append(Date().timeIntervalSince(start))
-        }
-
-        // Dedup held: nothing was re-processed.
-        XCTAssertEqual(context.processedEventCount, events.count)
-        reportThroughput("nostrInbound.duplicate", samples: samples, operations: events.count, unit: "events")
-    }
 
     // MARK: - 2. BLE inbound packet pipeline (decode + dedup)
 
@@ -601,28 +544,6 @@ final class PerformanceBaselineTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    /// Builds deterministic signed kind-20000 geohash events. Content cycles
-    /// through realistic chat lines; a handful of sender identities mimics a
-    /// busy channel.
-    private static func makeSignedGeohashEvents(count: Int) throws -> [NostrEvent] {
-        let senders = try (0..<8).map { _ in try NostrIdentity.generate() }
-        let lines = [
-            "hello from the geohash",
-            "anyone near the station?",
-            "@bob#0042 are you on mesh too?",
-            "check this out https://example.com/p/123 #bitchat",
-            "teleport check, who's local?"
-        ]
-        return try (0..<count).map { i in
-            try NostrProtocol.createEphemeralGeohashEvent(
-                content: "\(lines[i % lines.count]) [\(i)]",
-                geohash: "u4pruyd",
-                senderIdentity: senders[i % senders.count],
-                nickname: "peer\(i % senders.count)",
-                teleported: i % 25 == 0
-            )
-        }
-    }
 }
 
 // MARK: - Deterministic RNG
@@ -646,99 +567,6 @@ private struct SeededGenerator: RandomNumberGenerator {
 /// (mirrors `ChatNostrCoordinatorContextTests`).
 /// Callbacks are cheap dictionary/array operations so the measured cost is
 /// the coordinator's own pipeline.
-@MainActor
-private final class PerfNostrContext: ChatNostrContext {
-    var activeChannel: ChannelID = .location(GeohashChannel(level: .neighborhood, geohash: "u4pruyd"))
-    var currentGeohash: String? = "u4pruyd"
-    var geoSubscriptionID: String?
-    var geoDmSubscriptionID: String?
-    var geoSamplingSubs: [String: String] = [:]
-    var lastGeoNotificationAt: [String: Date] = [:]
-    func subscribeAccountMailbox(filter: NostrFilter, id: String, handler: @escaping (NostrEvent) -> Void) {}
-
-    func setGeoChatSubscriptionID(_ id: String?) { geoSubscriptionID = id }
-    func setGeoDmSubscriptionID(_ id: String?) { geoDmSubscriptionID = id }
-    func addGeoSamplingSub(_ subID: String, forGeohash geohash: String) { geoSamplingSubs[subID] = geohash }
-    func removeGeoSamplingSub(_ subID: String) { geoSamplingSubs.removeValue(forKey: subID) }
-
-    func clearGeoSamplingSubs() -> [String] {
-        defer { geoSamplingSubs.removeAll() }
-        return Array(geoSamplingSubs.keys)
-    }
-
-    var messages: [BitchatMessage] = []
-    func flushPublicMessagePipeline() {}
-    func refreshVisibleMessages(from channel: ChannelID?) {}
-    func addPublicSystemMessage(_ content: String) {}
-    func drainPendingGeohashSystemMessages() -> [String] { [] }
-    func appendGeohashMessageIfAbsent(_ message: BitchatMessage, toGeohash geohash: String) -> Bool { true }
-
-    private(set) var handledPublicMessageCount = 0
-    func handlePublicMessage(_ message: BitchatMessage, powBits: Int) { handledPublicMessageCount += 1 }
-    func checkForMentions(_ message: BitchatMessage) {}
-    func sendHapticFeedback(for message: BitchatMessage) {}
-    func parseMentions(from content: String) -> [String] {
-        MessageFormattingEngine.extractMentions(from: content)
-    }
-
-    var selectedPrivateChatPeer: PeerID?
-    var nostrKeyMapping: [PeerID: String] = [:]
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID) { nostrKeyMapping[peerID] = pubkey }
-    func handlePrivateMessage(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID, id: NostrIdentity, messageTimestamp: Date) {}
-    func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {}
-    func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {}
-    func startPrivateChat(with peerID: PeerID) {}
-
-    private struct NoIdentity: Error {}
-    var geohashIdentities: [String: NostrIdentity] = [:]
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        guard let identity = geohashIdentities[geohash] else { throw NoIdentity() }
-        return identity
-    }
-    func currentNostrIdentity() -> NostrIdentity? { nil }
-    func isNostrBlocked(pubkeyHexLowercased: String) -> Bool { false }
-    func displayNameForNostrPubkey(_ pubkeyHex: String) -> String { "anon#\(pubkeyHex.prefix(4))" }
-
-    private var processedNostrEventIDs: Set<String> = []
-    var processedEventCount: Int { processedNostrEventIDs.count }
-    func hasProcessedNostrEvent(_ eventID: String) -> Bool { processedNostrEventIDs.contains(eventID) }
-    func recordProcessedNostrEvent(_ eventID: String) { processedNostrEventIDs.insert(eventID) }
-    func clearProcessedNostrEvents() { processedNostrEventIDs.removeAll() }
-
-    var geoNicknames: [String: String] = [:]
-    private var teleportedKeys: Set<String> = []
-    var teleportedGeoCount: Int { teleportedKeys.count }
-    func startGeoParticipantRefreshTimer() {}
-    func stopGeoParticipantRefreshTimer() {}
-    func setActiveParticipantGeohash(_ geohash: String?) {}
-    private(set) var participantRecords = 0
-    func recordGeoParticipant(pubkeyHex: String) { participantRecords += 1 }
-    func recordGeoParticipant(pubkeyHex: String, geohash: String) { participantRecords += 1 }
-    func geoParticipantCount(for geohash: String) -> Int { 0 }
-    func setGeoNickname(_ nickname: String, forPubkey pubkeyHex: String) { geoNicknames[pubkeyHex.lowercased()] = nickname }
-    func markGeoTeleported(_ pubkeyHexLowercased: String) { teleportedKeys.insert(pubkeyHexLowercased) }
-    func clearGeoTeleported(_ pubkeyHexLowercased: String) { teleportedKeys.remove(pubkeyHexLowercased) }
-    func clearTeleportedGeo() { teleportedKeys.removeAll() }
-    func clearGeoNicknames() { geoNicknames.removeAll() }
-    func visibleGeohashPeople() -> [GeoPerson] { [] }
-
-    var isTeleported = false
-    func isGeohashOutsideRegionalChannels(_ geohash: String) -> Bool { false }
-
-    func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {}
-    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
-    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
-
-    func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? { nil }
-    func allFavoriteRelationships() -> [FavoritesPersistenceService.FavoriteRelationship] { [] }
-    func notifyGeohashActivity(geohash: String, bodyPreview: String) {}
-}
-
-// MARK: - Mock ChatDeliveryContext
-
-/// Minimal `ChatDeliveryContext` over a real `ConversationStore` (the
-/// coordinator is a thin mapper onto store intents, so the measured cost is
-/// the store's ID-map delivery path).
 @MainActor
 private final class PerfDeliveryContext: ChatDeliveryContext {
     let store = ConversationStore()
@@ -867,10 +695,6 @@ private final class PerfPipelineFixture {
         let identityManager = MockIdentityManager(keychain)
         let transport = MockTransport()
         let conversations = ConversationStore()
-        let locationSuite = "PerformanceBaselineTests.\(UUID().uuidString)"
-        let locationStorage = UserDefaults(suiteName: locationSuite) ?? .standard
-        locationStorage.removePersistentDomain(forName: locationSuite)
-        let locationManager = LocationChannelManager(storage: locationStorage)
 
         self.conversations = conversations
         self.viewModel = ChatViewModel(
@@ -879,7 +703,6 @@ private final class PerfPipelineFixture {
             identityManager: identityManager,
             transport: transport,
             conversations: conversations,
-            locationManager: locationManager
         )
         self.privateInbox = PrivateInboxModel(conversations: conversations)
         self.publicChat = PublicChatModel(conversations: conversations)

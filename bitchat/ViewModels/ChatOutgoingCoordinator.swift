@@ -16,7 +16,6 @@ protocol ChatOutgoingContext: AnyObject {
     var myPeerID: PeerID { get }
     var activeChannel: ChannelID { get }
     var selectedPrivateChatPeer: PeerID? { get }
-    var isTeleported: Bool { get }
 
     // MARK: Commands & private messages
     func handleCommand(_ command: String)
@@ -29,7 +28,6 @@ protocol ChatOutgoingContext: AnyObject {
     /// (immediate: the local echo must render without batching).
     @discardableResult
     func appendPublicMessage(_ message: BitchatMessage, to conversationID: ConversationID) -> Bool
-    func addSystemMessage(_ content: String)
 
     // MARK: Content dedup
     func normalizedContentKey(_ content: String) -> String
@@ -39,48 +37,18 @@ protocol ChatOutgoingContext: AnyObject {
     /// Stamps "now" as the channel's last public activity (background nudges).
     /// (Single mutation path for the owner's `lastPublicActivityAt`; this
     /// coordinator never reads it.)
-    func recordPublicActivity(forChannelKey key: String)
     func sendMeshMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date)
-    func sendGeohash(context: ChatViewModel.GeoOutgoingContext)
     // MARK: Geohash identity (shared with the other contexts)
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
 }
 
-extension ChatViewModel: ChatOutgoingContext {
-    // `nickname`, `myPeerID`, `activeChannel`, `selectedPrivateChatPeer`,
-    // `isTeleported`, `handleCommand(_:)`, `updatePrivateChatPeerIfNeeded()`,
-    // `sendPrivateMessage(_:to:)`, `parseMentions(from:)`,
-    // `appendPublicMessage(_:to:)`, `addSystemMessage(_:)`,
-    // `normalizedContentKey(_:)`, `recordContentKey(_:timestamp:)`,
-    // `sendMeshMessage(_:mentions:messageID:timestamp:)`,
-    // `sendGeohash(context:)`, and `deriveNostrIdentity(forGeohash:)` are
-    // shared requirements with the other contexts or satisfied by existing
-    // `ChatViewModel` members. The single-writer intent op below lives next to
-    // its backing state's owner.
-
-    func recordPublicActivity(forChannelKey key: String) {
-        lastPublicActivityAt[key] = Date()
-    }
-}
+extension ChatViewModel: ChatOutgoingContext {}
 
 @MainActor
 final class ChatOutgoingCoordinator {
     private unowned let context: any ChatOutgoingContext
 
-    /// In-flight NIP-13 mining for the most recent geohash send. A newer send
-    /// (or leaving the channel) cancels it, which only expedites the mining —
-    /// the message still goes out at the difficulty already reached.
-    /// (Read access is internal so tests can await the send's completion.)
-    private(set) var geohashMiningTask: Task<Void, Never>?
-
     init(context: any ChatOutgoingContext) {
         self.context = context
-    }
-
-    /// Finish any in-flight geohash PoW mining early (the pending message
-    /// still sends, at whatever committed difficulty it reached).
-    func expeditePendingGeohashMining() {
-        geohashMiningTask?.cancel()
     }
 
     func sendMessage(_ content: String, allowCommands: Bool = true) {
@@ -132,7 +100,6 @@ private extension ChatOutgoingCoordinator {
         )
 
         appendLocalEcho(message, to: .mesh)
-        context.recordPublicActivity(forChannelKey: "mesh")
         context.sendMeshMessage(
             originalContent,
             mentions: mentions,

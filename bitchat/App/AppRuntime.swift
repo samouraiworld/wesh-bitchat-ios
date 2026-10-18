@@ -23,7 +23,6 @@ final class AppRuntime: ObservableObject {
     let privateConversationModel: PrivateConversationModel
     let verificationModel: VerificationModel
     let conversationUIModel: ConversationUIModel
-    let locationChannelsModel: LocationChannelsModel
     let peerListModel: PeerListModel
     let appChromeModel: AppChromeModel
     let sharedContentImportModel: SharedContentImportModel
@@ -33,7 +32,6 @@ final class AppRuntime: ObservableObject {
     private var started = false
     private var weshInternetStarted = false
     private var lastNostrRelayConnectedState = false
-    private var didHandleInitialNostrConnection = false
 
     #if os(iOS)
     private var didHandleInitialActive = false
@@ -47,8 +45,6 @@ final class AppRuntime: ObservableObject {
     ) {
         let conversations = ConversationStore()
         let peerIdentityStore = PeerIdentityStore()
-        let locationPresenceStore = LocationPresenceStore()
-        let locationManager = LocationChannelManager.shared
         self.conversations = conversations
         let resolvedSharedContentStore: SharedContentStore?
         if let sharedContentStore {
@@ -70,17 +66,13 @@ final class AppRuntime: ObservableObject {
             identityManager: SecureIdentityStateManager(keychain),
             conversations: conversations,
             peerIdentityStore: peerIdentityStore,
-            locationPresenceStore: locationPresenceStore,
-            locationManager: locationManager,
             panicPersistentStoreWipes: persistentWipes
         )
         self.publicChatModel = PublicChatModel(conversations: conversations)
         self.privateInboxModel = PrivateInboxModel(conversations: conversations)
-        self.locationChannelsModel = LocationChannelsModel(manager: locationManager)
         self.privateConversationModel = PrivateConversationModel(
             chatViewModel: self.chatViewModel,
             conversations: conversations,
-            locationChannelsModel: self.locationChannelsModel,
             peerIdentityStore: peerIdentityStore
         )
         self.verificationModel = VerificationModel(
@@ -92,9 +84,7 @@ final class AppRuntime: ObservableObject {
         self.peerListModel = PeerListModel(
             chatViewModel: self.chatViewModel,
             conversations: conversations,
-            locationChannelsModel: self.locationChannelsModel,
-            peerIdentityStore: peerIdentityStore,
-            locationPresenceStore: locationPresenceStore
+            peerIdentityStore: peerIdentityStore
         )
         let sharedContentImportModel = SharedContentImportModel(store: resolvedSharedContentStore)
         self.sharedContentImportModel = sharedContentImportModel
@@ -147,7 +137,6 @@ final class AppRuntime: ObservableObject {
         started = true
         NotificationDelegate.shared.runtime = self
         VerificationService.shared.configure(with: chatViewModel.meshService)
-        announceInitialTorStatusIfNeeded()
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
@@ -164,8 +153,6 @@ final class AppRuntime: ObservableObject {
         if WeshMode.isActive {
             // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
             if WeshWelcome.isDone() { startWeshInternet() } else { WeshInternetMode.shared.clearArtiWhileOff() }
-        } else if NetworkActivationService.shared.userInternetEnabled {
-            GeohashPresenceService.shared.start()
         }
         checkForSharedContent()
         performMediaMaintenance()
@@ -226,7 +213,6 @@ final class AppRuntime: ObservableObject {
             WeshInternetMode.shared.appDidEnterBackground()
             TorManager.shared.setAppForeground(false)
             TorManager.shared.goDormantOnBackground()
-            chatViewModel.endGeohashSampling()
             NostrRelayManager.shared.disconnect()
             didEnterBackground = true
 
@@ -313,14 +299,6 @@ final class AppRuntime: ObservableObject {
                 return []
             }
             return [.banner, .sound]
-        }
-
-        if identifier.hasPrefix("geo-activity-"),
-           let deepLink = userInfo["deeplink"] as? String,
-           let geohash = deepLink.components(separatedBy: "/").last,
-           case .location(let channel) = locationChannelsModel.selectedChannel,
-           channel.geohash == geohash {
-            return []
         }
 
         return [.banner, .sound]
@@ -421,7 +399,7 @@ private extension AppRuntime {
         SharedContentDestination.resolve(
             selectedPrivatePeerID: privateConversationModel.selectedPeerID,
             privateDisplayName: privateConversationModel.selectedHeaderState?.displayName,
-            activeChannel: locationChannelsModel.selectedChannel
+            activeChannel: chatViewModel.activeChannel
         )
     }
 
@@ -435,50 +413,18 @@ private extension AppRuntime {
               started,
               becameConnected else { return }
 
-        let isInitialConnection = !didHandleInitialNostrConnection
-        didHandleInitialNostrConnection = true
-
         if !chatViewModel.nostrHandlersSetup {
             chatViewModel.setupNostrMessageHandling()
             chatViewModel.nostrHandlersSetup = true
         }
 
-        guard !isInitialConnection else { return }
-
-        chatViewModel.resubscribeCurrentGeohash()
-        chatViewModel.geoChannelCoordinator?.refreshSampling()
-    }
-
-    func announceInitialTorStatusIfNeeded() {
-        if TorManager.shared.torEnforced &&
-            !chatViewModel.torStatusAnnounced &&
-            TorManager.shared.isAutoStartAllowed() {
-            chatViewModel.torStatusAnnounced = true
-            chatViewModel.addGeohashOnlySystemMessage(
-                String(localized: "system.tor.starting", comment: "System message when Tor is starting")
-            )
-        } else if !TorManager.shared.torEnforced && !chatViewModel.torStatusAnnounced {
-            chatViewModel.torStatusAnnounced = true
-            chatViewModel.addGeohashOnlySystemMessage(
-                String(localized: "system.tor.dev_bypass", comment: "System message when Tor bypass is enabled in development")
-            )
-        }
     }
 
     func handleScreenshotCaptured() {
-        let isLocationChannelActive: Bool = {
-            if case .location = chatViewModel.activeChannel { return true }
-            return false
-        }()
 
         switch Self.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: appChromeModel.isLocationChannelsSheetPresented,
-            isAppInfoPresented: appChromeModel.isAppInfoPresented,
-            hasPrivateChatOpen: chatViewModel.selectedPrivateChatPeer != nil,
-            isLocationChannelActive: isLocationChannelActive
+            isAppInfoPresented: appChromeModel.isAppInfoPresented
         ) {
-        case .warnLocally:
-            appChromeModel.triggerScreenshotPrivacyWarning()
         case .ignore:
             break
         case .forwardToChat:
@@ -496,37 +442,13 @@ private extension AppRuntime {
 // MARK: - Screenshot routing
 
 extension AppRuntime {
-    /// What a screenshot triggers. Nothing on this table sends anything to
-    /// a public channel (see `ChatLifecycleCoordinator.handleScreenshotCaptured`).
     enum ScreenshotCaptureResponse: Equatable {
-        /// Show the local location-privacy alert; nothing is sent anywhere.
-        case warnLocally
-        /// Do nothing. App Info holds no conversation or location content.
         case ignore
-        /// Hand to the chat layer: a DM notice goes to the peer when a
-        /// secure session exists; public timelines stay silent. Mesh
-        /// deliberately gets no local alert either — a mesh screenshot
-        /// reveals no place and triggers no send, so there is nothing to
-        /// warn about, and alerting on every screenshot would train people
-        /// to dismiss the one alert that matters (the location one).
         case forwardToChat
     }
 
-    /// Pure decision table so the screenshot routing is testable without a
-    /// runtime.
-    nonisolated static func resolveScreenshotResponse(
-        isLocationChannelsSheetPresented: Bool,
-        isAppInfoPresented: Bool,
-        hasPrivateChatOpen: Bool,
-        isLocationChannelActive: Bool
-    ) -> ScreenshotCaptureResponse {
-        if isLocationChannelsSheetPresented { return .warnLocally }
-        if isAppInfoPresented { return .ignore }
-        // A geohash timeline screenshot still reveals a place — warn the
-        // person taking it, locally, with the same alert the channel sheet
-        // uses.
-        if !hasPrivateChatOpen, isLocationChannelActive { return .warnLocally }
-        return .forwardToChat
+    nonisolated static func resolveScreenshotResponse(isAppInfoPresented: Bool) -> ScreenshotCaptureResponse {
+        isAppInfoPresented ? .ignore : .forwardToChat
     }
 }
 

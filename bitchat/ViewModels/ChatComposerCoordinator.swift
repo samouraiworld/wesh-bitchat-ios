@@ -33,12 +33,8 @@ protocol ChatComposerContext: AnyObject {
     func meshPeerNicknames() -> [PeerID: String]
     /// True when this mesh nickname belongs to a blocked peer.
     func isMeshNicknameBlocked(_ nickname: String) -> Bool
-    /// True when this geohash pubkey is blocked for location chats.
-    func isNostrBlocked(pubkeyHexLowercased: String) -> Bool
 
     // MARK: Geohash identity (shared with the other contexts)
-    var geoNicknames: [String: String] { get }
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
 }
 
 extension ChatViewModel: ChatComposerContext {
@@ -151,17 +147,8 @@ private extension ChatComposerCoordinator {
                 nick != context.meshNickname && !context.isMeshNicknameBlocked(nick)
             })
 
-        case .location(let channel):
-            var tokens = Set<String>()
-            for (pubkey, nick) in context.geoNicknames {
-                guard !context.isNostrBlocked(pubkeyHexLowercased: pubkey) else { continue }
-                tokens.insert("\(nick)#\(pubkey.suffix(4))")
-            }
-            if let identity = try? context.deriveNostrIdentity(forGeohash: channel.geohash) {
-                let myToken = context.nickname + "#" + String(identity.publicKeyHex.suffix(4))
-                tokens.remove(myToken)
-            }
-            return Array(tokens)
+        case .location:
+            return []
         }
     }
 }

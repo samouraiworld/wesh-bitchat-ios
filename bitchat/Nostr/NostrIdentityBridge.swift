@@ -1,6 +1,5 @@
 import BitFoundation
 import Foundation
-import CryptoKit
 
 /// Bridge between Noise and Nostr identities
 final class NostrIdentityBridge {
@@ -16,11 +15,6 @@ final class NostrIdentityBridge {
     private let keychainService = "chat.bitchat.nostr"
     private let currentIdentityKey = "nostr-current-identity"
     private let deviceSeedKey = "nostr-device-seed"
-    // In-memory cache to avoid transient keychain access issues
-    private var deviceSeedCache: Data?
-    // Cache derived identities to avoid repeated crypto during view rendering
-    private var derivedIdentityCache: [String: NostrIdentity] = [:]
-    private let cacheLock = NSLock()
 
     private let keychain: KeychainManagerProtocol
 
@@ -116,39 +110,6 @@ final class NostrIdentityBridge {
         // would wipe the developer's real Nostr identity on every test run.
         keychain.deleteAll(service: keychainService)
 
-        deviceSeedCache = nil
-        // Also drop the in-memory derived per-geohash identities. These hold the
-        // actual secp256k1 private keys; if left cached, post-panic geohash
-        // messages would still be signed with pre-panic keys (linkable across the
-        // wipe) until the app is force-quit.
-        cacheLock.lock()
-        derivedIdentityCache.removeAll()
-        cacheLock.unlock()
-    }
-
-    // MARK: - Per-Geohash Identities (Location Channels)
-
-    /// Returns a stable device seed used to derive unlinkable per-geohash identities.
-    /// Stored only on device keychain.
-    private func getOrCreateDeviceSeed() throws -> Data {
-        if let cached = deviceSeedCache { return cached }
-        switch keychain.loadWithResult(key: deviceSeedKey, service: keychainService) {
-        case .success(let existing):
-            guard existing.count == 32 else { throw StorageError.invalidStoredIdentity }
-            deviceSeedCache = existing
-            return existing
-        case .itemNotFound:
-            break
-        case .accessDenied, .deviceLocked, .authenticationFailed, .otherError:
-            throw StorageError.unavailable
-        }
-        // CryptoKit key generation cannot fail, unlike SecRandomCopyBytes —
-        // a discarded failure here would persist an all-zero identity seed.
-        let seed = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        // Ensure availability after first unlock to prevent unintended rotation when locked
-        try saveAndConfirm(seed, forKey: deviceSeedKey, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
-        deviceSeedCache = seed
-        return seed
     }
 
     /// The legacy custom-service save has no result. Do not expose a new
@@ -161,53 +122,4 @@ final class NostrIdentityBridge {
         }
     }
 
-    /// Derive a deterministic, unlinkable Nostr identity for a given geohash.
-    /// Uses HMAC-SHA256(deviceSeed, geohash) as private key material, with fallback rehashing
-    /// if the candidate is not a valid secp256k1 private key.
-    func deriveIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        // Check cache first to avoid repeated crypto + keychain I/O during view rendering
-        cacheLock.lock()
-        if let cached = derivedIdentityCache[geohash] {
-            cacheLock.unlock()
-            return cached
-        }
-        cacheLock.unlock()
-
-        let seed = try getOrCreateDeviceSeed()
-        guard let msg = geohash.data(using: .utf8) else {
-            throw NSError(domain: "NostrIdentity", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid geohash string"])
-        }
-
-        func candidateKey(iteration: UInt32) -> Data {
-            var input = Data(msg)
-            var iterBE = iteration.bigEndian
-            withUnsafeBytes(of: &iterBE) { bytes in
-                input.append(contentsOf: bytes)
-            }
-            let code = HMAC<SHA256>.authenticationCode(for: input, using: SymmetricKey(data: seed))
-            return Data(code)
-        }
-
-        // Try a few iterations to ensure a valid key can be formed
-        for i in 0..<10 {
-            let keyData = candidateKey(iteration: UInt32(i))
-            if let identity = try? NostrIdentity(privateKeyData: keyData) {
-                // Cache the result
-                cacheLock.lock()
-                derivedIdentityCache[geohash] = identity
-                cacheLock.unlock()
-                return identity
-            }
-        }
-        // As a final fallback, hash the seed+msg and try again
-        let fallback = (seed + msg).sha256Hash()
-        let identity = try NostrIdentity(privateKeyData: fallback)
-
-        // Cache the result
-        cacheLock.lock()
-        derivedIdentityCache[geohash] = identity
-        cacheLock.unlock()
-
-        return identity
-    }
 }

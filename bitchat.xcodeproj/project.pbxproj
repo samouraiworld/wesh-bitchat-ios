@@ -16,8 +16,6 @@
 		A6E3E5722E7703760032EA8A /* BitLogger in Frameworks */ = {isa = PBXBuildFile; productRef = A6E3E5712E7703760032EA8A /* BitLogger */; };
 		A6E3EA7F2E7706720032EA8A /* Tor in Frameworks */ = {isa = PBXBuildFile; productRef = A6E3EA7E2E7706720032EA8A /* Tor */; };
 		A6E3EA812E7706A80032EA8A /* Tor in Frameworks */ = {isa = PBXBuildFile; productRef = A6E3EA802E7706A80032EA8A /* Tor */; };
-		E0A1B2C3D4E5F6012345678D /* relays/online_relays_gps.csv in Resources */ = {isa = PBXBuildFile; fileRef = E0A1B2C3D4E5F6012345678A /* relays/online_relays_gps.csv */; };
-		E0A1B2C3D4E5F6012345678E /* relays/online_relays_gps.csv in Resources */ = {isa = PBXBuildFile; fileRef = E0A1B2C3D4E5F6012345678A /* relays/online_relays_gps.csv */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,13 +61,13 @@
 		96D0D41CA19EE5A772AA8434 /* bitchat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bitchat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6F183FC2E948783006A9046 /* tor-nolzma.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "tor-nolzma.xcframework"; path = "localPackages/Tor/Frameworks/tor-nolzma.xcframework"; sourceTree = "<group>"; };
 		C0DB1DE27F0AAB5092663E8E /* bitchatTests_iOS.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = bitchatTests_iOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		E0A1B2C3D4E5F6012345678A /* relays/online_relays_gps.csv */ = {isa = PBXFileReference; lastKnownFileType = text; path = relays/online_relays_gps.csv; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		A6E32D1B2E762EA70032EA8A /* Exceptions for "bitchat" folder in "bitchatShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ViewModels/Extensions/README.md,
 				Services/SharedContentHandoff.swift,
 				Services/TransportConfig.swift,
 			);
@@ -78,6 +76,7 @@
 		A6E32D1C2E762EA70032EA8A /* Exceptions for "bitchat" folder in "bitchat_iOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ViewModels/Extensions/README.md,
 				Info.plist,
 			);
 			target = AF077EA0474EDEDE2C72716C /* bitchat_iOS */;
@@ -85,6 +84,7 @@
 		A6E32D1D2E762EA70032EA8A /* Exceptions for "bitchat" folder in "bitchat_macOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ViewModels/Extensions/README.md,
 				Info.plist,
 				LaunchScreen.storyboard,
 			);
@@ -178,7 +178,6 @@
 			isa = PBXGroup;
 			children = (
 				A6E32C972E762EA70032EA8A /* bitchat */,
-				E0A1B2C3D4E5F6012345678A /* relays/online_relays_gps.csv */,
 				A6E32D212E762EAB0032EA8A /* bitchatShareExtension */,
 				A6E32D412E762EAE0032EA8A /* bitchatTests */,
 				A6E367C92E76469E0032EA8A /* Configs */,
@@ -375,7 +374,6 @@
 		0214973A876129753D39EB47 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
-				E0A1B2C3D4E5F6012345678D /* relays/online_relays_gps.csv in Resources */,
 			);
 		};
 		7E9B64F63F93443FB7BA12DF /* Resources */ = {
@@ -396,7 +394,6 @@
 		CD6E8F32BC38357473954F97 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
-				E0A1B2C3D4E5F6012345678E /* relays/online_relays_gps.csv in Resources */,
 			);
 		};
 /* End PBXResourcesBuildPhase section */

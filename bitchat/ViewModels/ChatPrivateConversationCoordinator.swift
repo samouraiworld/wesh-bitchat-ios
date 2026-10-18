@@ -78,7 +78,6 @@ protocol ChatPrivateConversationContext: AnyObject {
     // MARK: Nostr identity
     func isNostrBlocked(pubkeyHexLowercased: String) -> Bool
     func displayNameForNostrPubkey(_ pubkeyHex: String) -> String
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
     func currentNostrIdentity() -> NostrIdentity?
 
     // MARK: Routing & acknowledgements
@@ -91,7 +90,6 @@ protocol ChatPrivateConversationContext: AnyObject {
     @discardableResult
     func markMessageDelivered(_ messageID: String, for peerIDs: [PeerID]) -> Bool
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID)
-    func sendNostrIdentityPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String)
     func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
     func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
 
@@ -176,10 +174,6 @@ extension ChatViewModel: ChatPrivateConversationContext {
         identityManager.isNostrBlocked(pubkeyHexLowercased: pubkeyHexLowercased)
     }
 
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        try idBridge.deriveIdentity(forGeohash: geohash)
-    }
-
     /// Read-only in Wesh: an inbound DM, a read receipt or a view never creates key material.
     func currentNostrIdentity() -> NostrIdentity? {
         idBridge.messagingIdentity(weshActive: weshPrivatePolicyEnabled)
@@ -206,15 +200,6 @@ extension ChatViewModel: ChatPrivateConversationContext {
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {
         guard messageRouter.admitsControlMessage(to: peerID) else { return }
         meshService.sendReadReceipt(receipt, to: peerID)
-    }
-
-    func sendNostrIdentityPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        makePrivateNostrTransport().sendPrivateMessageForNostrIdentity(
-            content: content,
-            toRecipientHex: recipientHex,
-            from: identity,
-            messageID: messageID
-        )
     }
 
     func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
@@ -360,8 +345,7 @@ final class ChatPrivateConversationCoordinator {
             return
         }
 
-        if peerID.isGeoDM {
-            sendGeohashDM(content, to: peerID)
+        if peerID.isGeoDM || peerID.isGeoChat {
             return
         }
 
@@ -420,95 +404,6 @@ final class ChatPrivateConversationCoordinator {
         // Otherwise the message stays "sending"; router callbacks move it to
         // carried (📦) when a courier/bridge copy ships, delivered/read on
         // acks, or failed when the outbox TTL expires.
-    }
-
-    func sendGeohashDM(_ content: String, to peerID: PeerID) {
-        guard case .location(let channel) = context.activeChannel else {
-            // The failure happened inside a geoDM thread — surface it there,
-            // not on the public timeline (matches the sibling blocked/unknown
-            // errors routed into the thread by #1415).
-            context.addLocalPrivateSystemMessage(
-                String(localized: "system.location.not_in_channel", comment: "System message when attempting to send without being in a location channel"),
-                to: peerID
-            )
-            return
-        }
-
-        let messageID = UUID().uuidString
-        let message = BitchatMessage(
-            id: messageID,
-            sender: context.nickname,
-            content: content,
-            timestamp: Date(),
-            isRelay: false,
-            isPrivate: true,
-            recipientNickname: context.nickname,
-            senderPeerID: context.myPeerID,
-            deliveryStatus: .sending
-        )
-
-        context.appendPrivateMessage(message, to: peerID)
-        context.notifyUIChanged()
-
-        guard let recipientHex = context.nostrKeyMapping[peerID] else {
-            context.setPrivateDeliveryStatus(
-                .failed(
-                    reason: String(localized: "content.delivery.reason.unknown_recipient", comment: "Failure reason when the recipient is unknown")
-                ),
-                forMessageID: messageID,
-                peerID: peerID
-            )
-            return
-        }
-
-        if context.isNostrBlocked(pubkeyHexLowercased: recipientHex) {
-            context.setPrivateDeliveryStatus(
-                .failed(
-                    reason: String(localized: "content.delivery.reason.blocked", comment: "Failure reason when the user is blocked")
-                ),
-                forMessageID: messageID,
-                peerID: peerID
-            )
-            context.addLocalPrivateSystemMessage(
-                String(localized: "system.dm.blocked_generic", comment: "System message when sending fails because the person is blocked"),
-                to: peerID
-            )
-            return
-        }
-
-        do {
-            let identity = try context.deriveNostrIdentity(forGeohash: channel.geohash)
-            if recipientHex.lowercased() == identity.publicKeyHex.lowercased() {
-                context.setPrivateDeliveryStatus(
-                    .failed(
-                        reason: String(localized: "content.delivery.reason.self", comment: "Failure reason when attempting to message yourself")
-                    ),
-                    forMessageID: messageID,
-                    peerID: peerID
-                )
-                return
-            }
-
-            SecureLogger.debug(
-                "GeoDM: local send mid=\(messageID.prefix(8))… to=\(recipientHex.prefix(8))… conv=\(peerID)",
-                category: .session
-            )
-            context.sendNostrIdentityPrivateMessage(
-                content,
-                toRecipientHex: recipientHex,
-                from: identity,
-                messageID: messageID
-            )
-            context.setPrivateDeliveryStatus(.sent, forMessageID: messageID, peerID: peerID)
-        } catch {
-            context.setPrivateDeliveryStatus(
-                .failed(
-                    reason: String(localized: "content.delivery.reason.send_error", comment: "Failure reason for a generic send error")
-                ),
-                forMessageID: messageID,
-                peerID: peerID
-            )
-        }
     }
 
     func handlePrivateMessage(
