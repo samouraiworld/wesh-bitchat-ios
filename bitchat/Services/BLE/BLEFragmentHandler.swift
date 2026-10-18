@@ -15,8 +15,9 @@ struct BLEFragmentHandlerEnvironment {
     let trackPacketSeen: (BitchatPacket) -> Void
     /// Appends the fragment to the assembly buffer (collections barrier write).
     let appendFragment: (BLEFragmentHeader) -> BLEFragmentAssemblyBuffer.AppendResult
-    /// Ingress acceptance check for the reassembled inner packet.
-    let isAcceptedIngressPayload: (_ packet: BitchatPacket, _ innerSender: PeerID) -> Bool
+    /// Rechecks freshness and the live sync window. RSR packets use the
+    /// actual ingress responder; ordinary packets use their original author.
+    let isAcceptedIngressPayload: (_ packet: BitchatPacket, _ validationPeerID: PeerID) -> Bool
     /// Re-enters the receive pipeline with the reassembled packet (TTL already zeroed).
     let processReassembledPacket: (_ packet: BitchatPacket, _ from: PeerID) -> Void
 }
@@ -41,7 +42,7 @@ final class BLEFragmentHandler {
         // them. Record them as seen — the next round's filter then covers
         // them and the redelivery stops — but skip assembly: we authored
         // the original, there is nothing to reassemble.
-        if peerID == env.localPeerID() {
+        if PeerID(hexData: packet.senderID) == env.localPeerID() {
             if header.isBroadcastFragment {
                 env.trackPacketSeen(packet)
             }
@@ -65,7 +66,16 @@ final class BLEFragmentHandler {
             // the inner type into every fragment, and the assembly was sized
             // for that claim, so a packet of any other type is forged.
             let innerSender = PeerID(hexData: originalPacket.senderID)
-            if originalPacket.type != completedHeader.originalType {
+            let fragmentSender = withUnsafeBytes(of: completedHeader.key.sender.bigEndian) { Data($0) }
+            if originalPacket.senderID != fragmentSender {
+                // Both fragmenters preserve the original author. The ingress
+                // responder may differ during sync, but the fragment author
+                // must not wrap a packet claiming someone else's identity.
+                SecureLogger.warning(
+                    "🚫 Reassembled packet id=\(completedHeader.idLogString) has a different sender than its fragments",
+                    category: .security
+                )
+            } else if originalPacket.type != completedHeader.originalType {
                 SecureLogger.warning(
                     "🚫 Reassembled packet id=\(completedHeader.idLogString) is type \(originalPacket.type), fragments claimed \(completedHeader.originalType)",
                     category: .security
@@ -86,7 +96,11 @@ final class BLEFragmentHandler {
                 )
             } else if BLERetiredFragmentPolicy.isRetired(reassembled: originalPacket) {
                 SecureLogger.debug("🚫 Reassembled packet id=\(completedHeader.idLogString) is a retired type \(originalPacket.type)", category: .session)
-            } else if !env.isAcceptedIngressPayload(originalPacket, innerSender) {
+            } else if originalPacket.isRSR && !packet.isRSR {
+                // A solicited replay may waive the inner packet's past-age
+                // limit only when it arrived as a solicited fragment too.
+                SecureLogger.warning("🚫 Reassembled RSR packet arrived inside a non-RSR fragment", category: .security)
+            } else if !env.isAcceptedIngressPayload(originalPacket, originalPacket.isRSR ? peerID : innerSender) {
                 // Cleanup below
             } else {
                 SecureLogger.debug("✅ Reassembled packet id=\(completedHeader.idLogString) type=\(originalPacket.type) bytes=\(reassembled.count)", category: .session)

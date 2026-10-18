@@ -291,7 +291,7 @@ final class BLEService: NSObject {
     private var gossipSyncManager: GossipSyncManager?
     // periphery:ignore - retains the delegate; GossipSyncManager.delegate is weak
     private var gossipDelegate: GossipDelegate?
-    private let requestSyncManager = RequestSyncManager()
+    private let requestSyncManager: RequestSyncManager
     
     // MARK: - Maintenance Timer
     
@@ -342,9 +342,11 @@ final class BLEService: NSObject {
         deferBluetoothPrompt: Bool = false,
         noiseResponderHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
-        engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
+        engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler(),
+        requestSyncManager: RequestSyncManager = RequestSyncManager()
     ) {
         self.engineScheduler = engineScheduler
+        self.requestSyncManager = requestSyncManager
         self.keychain = keychain
         self.idBridge = idBridge
         self.shouldInitializeBluetoothManagers = initializeBluetoothManagers
@@ -2302,7 +2304,8 @@ extension BLEService {
         _ peerID: PeerID,
         nickname: String,
         capabilities: PeerCapabilities? = nil,
-        noisePublicKey: Data? = nil
+        noisePublicKey: Data? = nil,
+        signingPublicKey: Data? = nil
     ) {
         peerRegistry.mutate {
             $0.upsert(BLEPeerInfo(
@@ -2310,7 +2313,7 @@ extension BLEService {
                 nickname: nickname,
                 isConnected: true,
                 noisePublicKey: noisePublicKey,
-                signingPublicKey: nil,
+                signingPublicKey: signingPublicKey,
                 isVerifiedNickname: true,
                 lastSeen: Date(),
                 capabilities: capabilities ?? [],
@@ -4276,8 +4279,8 @@ extension BLEService {
                     self.fragmentAssemblyBuffer.append(header, maxInFlightAssemblies: self.maxInFlightAssemblies)
                 }
             },
-            isAcceptedIngressPayload: { [weak self] packet, innerSender in
-                self?.isAcceptedIngressPayload(packet, from: innerSender) ?? false
+            isAcceptedIngressPayload: { [weak self] packet, validationPeerID in
+                self?.isAcceptedIngressPayload(packet, from: validationPeerID) ?? false
             },
             processReassembledPacket: { [weak self] packet, peerID in
                 self?.handleReceivedPacket(packet, from: peerID)
@@ -4608,8 +4611,9 @@ extension BLEService {
             
         case .fragment:
             // Fragments of retired types (files included) were settled by
-            // BLERetiredFragmentPolicy above.
-            handleFragment(packet, from: senderID)
+            // BLERetiredFragmentPolicy above. Preserve the ingress link's
+            // peer: a sync responder may replay another author's packet.
+            handleFragment(packet, from: peerID)
 
         case .fileTransfer:
             // Wesh has no media: a BitChat file is never stored or shown. A
