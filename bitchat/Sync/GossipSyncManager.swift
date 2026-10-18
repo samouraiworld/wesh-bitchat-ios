@@ -209,6 +209,7 @@ final class GossipSyncManager {
     }
 
     func onPublicPacketSeen(_ packet: BitchatPacket) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         queue.async { [weak self] in
             self?._onPublicPacketSeen(packet)
         }

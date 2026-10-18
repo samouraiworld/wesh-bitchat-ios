@@ -128,7 +128,7 @@ struct WeshNativeUITests {
             let store = CourierStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "bridge":
-            let store = BridgeDropDedupStore(fileURL: url, wipeFileManager: files)
+            let store = RetiredBridgeDropStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "prekeys":
             let store = PrekeyBundleStore(fileURL: url, wipeFileManager: files)

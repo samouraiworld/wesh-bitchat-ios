@@ -71,10 +71,6 @@ final class PublicMessagePipeline {
         }
     }
 
-    func containsMessage(withID messageID: String) -> Bool {
-        buffer.contains { $0.message.id == messageID }
-    }
-
     func flushIfNeeded() {
         flushBuffer()
     }

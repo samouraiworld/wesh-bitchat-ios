@@ -69,14 +69,6 @@ struct LocalFileProtectionTests {
         #expect(LocalFileProtection.isExcludedFromBackup(url))
     }
 
-    @Test func bridgeDropDedupRecordIsExcluded() throws {
-        let root = Root()
-        let url = root.url.appendingPathComponent("courier/bridge-drop-dedup.json")
-        BridgeDropDedupStore(fileURL: url).save(.init(publishedDropKeys: ["drop": Date()], seenDropEventIDs: [:]))
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        #expect(LocalFileProtection.isExcludedFromBackup(url))
-    }
-
     @Test func privateOutboxIsExcluded() throws {
         let root = Root()
         let url = root.url.appendingPathComponent("outbox/outbox.enc")

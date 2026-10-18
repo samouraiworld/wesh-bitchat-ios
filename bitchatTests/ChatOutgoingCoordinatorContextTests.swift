@@ -87,10 +87,6 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
         sentGeohashContexts.append(context)
     }
 
-    private(set) var bridgedMessages: [(content: String, senderPeerID: PeerID, timestamp: Date)] = []
-    func bridgeOutgoingPublicMessage(_ content: String, senderPeerID: PeerID, timestamp: Date) {
-        bridgedMessages.append((content, senderPeerID, timestamp))
-    }
 
     // Geohash identity
     struct IdentityUnavailable: Error {}

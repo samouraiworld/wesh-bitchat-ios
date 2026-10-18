@@ -30,10 +30,7 @@ struct NostrProtocol {
         case ephemeralEvent = 20000
         case geohashPresence = 20001
         case deletion = 5 // NIP-09 event deletion request
-        /// Sealed courier envelope parked on relays under its rotating
-        /// recipient tag (`#x`). Regular (stored) kind so it survives until
-        /// its NIP-40 expiration — the whole point is store-and-forward.
-        case courierDrop = 1401
+        // Kind 1401 remains reserved for retired bridge courier drops.
     }
 
     /// Bound work before Base64-decoding either encrypted layer of an inbound
@@ -329,94 +326,6 @@ struct NostrProtocol {
             kind: .geohashPresence,
             tags: tags,
             content: ""
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
-
-    // MARK: - Mesh bridge (rendezvous) events
-
-    /// Create a mesh-bridge public message (kind 20000) for a geohash-cell
-    /// rendezvous. The distinct `r` tag keeps bridge traffic out of geohash
-    /// channel subscriptions (which filter on `#g`); `m` is
-    /// `[stable ID, mesh sender ID, wire timestamp in ms]`. Element 1 is the
-    /// content-stable mesh message ID (`MeshMessageIdentity`) for v1.7.0
-    /// parsers, which key their dedup on `m[1]` unconditionally and need it
-    /// per-message-unique. Current parsers key bridge rows by the authenticated
-    /// event ID and recompute elements 2-3 only as a radio-copy hint; the mesh
-    /// coordinates are public and cannot authenticate the Nostr signer.
-    static func createBridgeMeshEvent(
-        content: String,
-        cell: String,
-        senderIdentity: NostrIdentity,
-        nickname: String? = nil,
-        meshSenderID: String? = nil,
-        meshTimestampMs: UInt64? = nil
-    ) throws -> NostrEvent {
-        var tags = [["r", cell]]
-        if let nickname = nickname?.trimmedOrNilIfEmpty {
-            tags.append(["n", nickname])
-        }
-        if let meshSenderID = meshSenderID?.trimmedOrNilIfEmpty, let meshTimestampMs {
-            let stableID = MeshMessageIdentity.stableID(
-                senderIDHex: meshSenderID,
-                timestampMs: meshTimestampMs,
-                content: content
-            )
-            tags.append(["m", stableID, meshSenderID, String(meshTimestampMs)])
-        }
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .ephemeralEvent,
-            tags: tags,
-            content: content
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
-
-    /// Create a mesh-bridge presence heartbeat (kind 20001) on a rendezvous
-    /// cell: empty content, `r` tag only — the bridge analogue of geohash
-    /// presence, counted into "people across the bridge".
-    static func createBridgePresenceEvent(
-        cell: String,
-        senderIdentity: NostrIdentity
-    ) throws -> NostrEvent {
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .geohashPresence,
-            tags: [["r", cell]],
-            content: ""
-        )
-        let schnorrKey = try senderIdentity.schnorrSigningKey()
-        return try event.sign(with: schnorrKey)
-    }
-
-    /// Create a courier drop (kind 1401): an opaque sealed courier envelope
-    /// parked on relays. `x` is the hex recipient tag the recipient (or a
-    /// gateway acting for them) subscribes for; the NIP-40 expiration tracks
-    /// the envelope expiry so honoring relays garbage-collect the drop. The
-    /// signing identity should be a throwaway — the envelope authenticates
-    /// its sender internally via Noise-X, and linking drops to a stable
-    /// publisher key would leak courier traffic patterns.
-    static func createCourierDropEvent(
-        envelope: Data,
-        recipientTagHex: String,
-        expiresAt: Date,
-        senderIdentity: NostrIdentity
-    ) throws -> NostrEvent {
-        let tags = [
-            ["x", recipientTagHex],
-            ["expiration", String(Int(expiresAt.timeIntervalSince1970))]
-        ]
-        let event = NostrEvent(
-            pubkey: senderIdentity.publicKeyHex,
-            createdAt: Date(),
-            kind: .courierDrop,
-            tags: tags,
-            content: envelope.base64EncodedString()
         )
         let schnorrKey = try senderIdentity.schnorrSigningKey()
         return try event.sign(with: schnorrKey)

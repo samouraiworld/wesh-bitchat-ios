@@ -130,7 +130,6 @@ struct BLEServiceCoreTests {
         ble.startServices()
         ble.sendAnnounce(forceSend: true)
         ble.sendMessage("synthetic unavailable send")
-        ble.broadcastNostrCarrier(Data([1]))
         await ble._test_drainNoiseMessagePipeline()
 
         #expect(!ble.isTransportIdentityAvailable)
@@ -198,7 +197,6 @@ struct BLEServiceCoreTests {
         ble.stopServices()
         ble.sendMessage("synthetic stopped message")
         ble.sendAnnounce(forceSend: true)
-        ble.broadcastNostrCarrier(Data([1]))
         scheduler.advance(by: TransportConfig.bleInitialAnnounceDelaySeconds + 1)
         await ble._test_drainNoiseMessagePipeline()
         #expect(ble.isTransportIdentityAvailable)
@@ -241,7 +239,6 @@ struct BLEServiceCoreTests {
         ble.completePanicReset(restartServices: false)
         ble.recoverNoiseIdentityForForeground()
         ble.sendAnnounce(forceSend: true)
-        ble.broadcastNostrCarrier(Data([1]))
         await ble._test_drainNoiseMessagePipeline()
 
         #expect(!ble.isPanicSuspended)
@@ -963,10 +960,10 @@ struct BLEServiceCoreTests {
     }
 
     @Test
-    func replayedDirectAnnounceWithStaleVictimSessionCannotBridgeThroughForeignLink() async throws {
+    func replayedDirectAnnounceRetainsOriginalMailDuringSpeculativeForwarding() async throws {
         let ble = makeService()
-        // Keep announce handling out of the carried-mail path: the regression
-        // is specifically BridgeCourierService's direct delivery preflight.
+        defer { ble.stopServices() }
+        // Exercise ordinary carried-mail handover through the real announce path.
         ble.courierStore = CourierStore(persistsToDisk: false)
         let attackerPeerID = PeerID(str: "1122334455667788")
         let attackerLink = "central-attacker-stale-victim-session"
@@ -1006,21 +1003,6 @@ struct BLEServiceCoreTests {
             ttl: 7
         )
         let replay = try #require(victim.signPacket(unsigned), "Failed to sign replayed announce")
-        #expect(ble._test_recordIngressIfNew(packet: replay, linkID: attackerLink))
-        ble._test_handlePacket(replay, fromPeerID: victimPeerID, preseedPeer: false)
-
-        // The rebind, its Noise-proof retirement, and the ordinary
-        // reconnect preparation are one engine slot: no observer can see
-        // the new binding while the victim's stale sending keys are still
-        // available. Once the binding is visible, the keys must already be
-        // gone.
-        let rebound = await TestHelpers.waitUntil(
-            { ble._test_centralBinding(attackerLink) == victimPeerID },
-            timeout: TestConstants.longTimeout
-        )
-        try #require(rebound)
-        #expect(!ble.canDeliverSecurely(to: victimPeerID))
-
         let outbound = OutboundPacketTap()
         ble._test_onOutboundPacket = { outbound.record($0) }
         let envelope = CourierEnvelope(
@@ -1029,14 +1011,30 @@ struct BLEServiceCoreTests {
                 epochDay: CourierEnvelope.epochDay(for: Date())
             ),
             expiry: UInt64(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000),
-            ciphertext: Data(repeating: 0xA5, count: 128)
+            ciphertext: Data(repeating: 0xA5, count: 128),
+            copies: 4
         )
 
-        #expect(!ble.deliverBridgedEnvelope(envelope, to: victimPeerID))
-        // Reject before even entering the outbound pipeline: otherwise a
-        // real attacker CBCentral could accept the opaque courier packet and
-        // cause the relay drop's persisted seen ID to be consumed forever.
-        #expect(outbound.count(ofType: .courierEnvelope) == 0)
+        #expect(ble.courierStore.deposit(envelope, from: Data(repeating: 0xC3, count: 32)))
+
+        #expect(ble._test_recordIngressIfNew(packet: replay, linkID: attackerLink))
+        ble._test_handlePacket(replay, fromPeerID: victimPeerID, preseedPeer: false)
+
+        // Fence the whole announce path, including its later courier work;
+        // observing the earlier binding flip alone would race that work.
+        await ble._test_drainFragmentPipeline()
+        await ble._test_drainNoiseMessagePipeline()
+        #expect(ble._test_centralBinding(attackerLink) == victimPeerID)
+        #expect(!ble.canDeliverSecurely(to: victimPeerID))
+        #expect(!ble._test_isNoiseAuthenticatedCentral(attackerLink, for: victimPeerID))
+
+        // A speculative directed copy is allowed, but carries no spray budget
+        // and must not consume or reduce the retained original without Noise
+        // ownership of the physical ingress link.
+        let copies = outbound.snapshot().filter { $0.type == MessageType.courierEnvelope.rawValue }
+        try #require(copies.count == 1)
+        #expect(CourierEnvelope.decode(copies[0].payload) == envelope.withCopies(1))
+        #expect(ble.courierStore.takeEnvelopes(for: announcement.noisePublicKey) == [envelope])
     }
 
     @Test

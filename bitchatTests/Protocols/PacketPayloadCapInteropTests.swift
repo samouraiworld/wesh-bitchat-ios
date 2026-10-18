@@ -153,10 +153,14 @@ struct PacketPayloadCapInteropTests {
         let prefix = Data(#"{"content":""#.utf8)
         let suffix = Data(#""}"#.utf8)
         var json = prefix
-        json.append(Data(repeating: 0x61, count: NostrCarrierPacket.maxEventJSONBytes - prefix.count - suffix.count))
+        json.append(Data(repeating: 0x61, count: 16 * 1024 - prefix.count - suffix.count))
         json.append(suffix)
-        let carrier = try #require(NostrCarrierPacket(direction: .fromGateway, geohash: "9q8yyk8yuv12", eventJSON: json))
-        return try #require(carrier.encode())
+        // Frozen retired payload; keeping the wire-size contract does not restore
+        // a production carrier codec or make the type eligible for BLE ingress.
+        func tlv(_ type: UInt8, _ value: Data) -> Data {
+            Data([type, UInt8(value.count >> 8), UInt8(value.count & 255)]) + value
+        }
+        return tlv(1, Data([2])) + tlv(2, Data("000000000000".utf8)) + tlv(3, json)
     }
 
     private func maxRequestSync() -> Data {

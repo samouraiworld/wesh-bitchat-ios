@@ -161,13 +161,6 @@ final class NostrIdentityBridge {
         }
     }
 
-    /// Derive a deterministic, unlinkable Nostr identity for a mesh-bridge
-    /// rendezvous cell. Distinct HMAC label keeps it unlinkable from the
-    /// geohash-chat identity for the same cell string.
-    func deriveIdentity(forBridgeRendezvous cell: String) throws -> NostrIdentity {
-        try deriveIdentity(forGeohash: "bridge|" + cell)
-    }
-
     /// Derive a deterministic, unlinkable Nostr identity for a given geohash.
     /// Uses HMAC-SHA256(deviceSeed, geohash) as private key material, with fallback rehashing
     /// if the candidate is not a valid secp256k1 private key.

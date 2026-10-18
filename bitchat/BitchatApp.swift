@@ -28,8 +28,6 @@ struct BitchatApp: App {
         // Wesh Internet mode is opt-in (default off); WeshInternetMode forces Tor.
         // Before the welcome's terms are accepted, even an Internet mode left on stays off.
         NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled() && WeshWelcome.isDone())
-        BridgeService.shared.setEnabled(false)
-        GatewayService.shared.setEnabled(false)
         _runtime = StateObject(wrappedValue: AppRuntime())
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }

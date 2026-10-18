@@ -34,8 +34,8 @@ public enum MessageType: UInt8 {
     case ping = 0x26            // Directed echo request (nonce + origin TTL)
     case pong = 0x27            // Directed echo reply (echoed nonce + origin TTL)
 
-    // Gateway mode: signed Nostr event ferried between a mesh-only peer and
-    // an internet gateway peer.
+    // Retired Gateway/Bridge carrier. Never sent, accepted or relayed; keep
+    // the wire value reserved for compatibility.
     case nostrCarrier = 0x28
 
     // BitChat live voice: one signed push-to-talk burst packet (ephemeral

@@ -109,16 +109,6 @@ final class BLEService: NSObject {
     // Engine-confined.
     private var pendingPrekeyBundles: [PeerID: BitchatPacket] = [:]
     private static let pendingPrekeyBundleCap = 64
-    // Gateway mode: sink for received nostrCarrier packets (set by app
-    // wiring, called on the main actor after transport-level checks) and the
-    // runtime-toggled capability bits ORed into `PeerCapabilities.localSupported`
-    // for every announce. `directedToUs` distinguishes an uplink deposit
-    // addressed to this device from a downlink broadcast.
-    var onNostrCarrierPacket: (@MainActor (_ payload: Data, _ from: PeerID, _ directedToUs: Bool) -> Void)?
-    /// Fired (off-main) when a signature-verified announce is processed —
-    /// the bridge courier watch refreshes its tag set on new arrivals.
-    var onVerifiedPeerAnnounce: ((_ peerID: PeerID) -> Void)?
-
     #if DEBUG
     // Test-only tap on the outbound pipeline so multi-node tests can ferry
     // packets between in-process service instances.
@@ -1135,37 +1125,6 @@ final class BLEService: NSObject {
         peerRegistry.capabilities(for: peerID)
     }
 
-    /// Enables or disables a runtime-advertised capability bit (e.g. the
-    /// internet-gateway toggle) and re-announces so peers learn promptly.
-    /// Build-time bits stay in `PeerCapabilities.localSupported`.
-    func setLocalCapability(_ capability: PeerCapabilities, enabled: Bool) {
-        guard localIdentityState.setCapability(capability, enabled: enabled) else { return }
-        sendAnnounce(forceSend: true)
-    }
-
-    /// Reachable peers currently advertising the `.gateway` capability.
-    func reachableGatewayPeers() -> [PeerID] {
-        peerRegistry.reachablePeers(advertising: .gateway, now: Date())
-    }
-
-    /// Reachable peers currently advertising the `.bridge` capability.
-    func reachableBridgePeers() -> [PeerID] {
-        peerRegistry.reachablePeers(advertising: .bridge, now: Date())
-    }
-
-    /// A rendezvous cell advertised by a bridge-capable peer's announce.
-    func advertisedBridgeGeohash() -> String? {
-        peerRegistry.advertisedBridgeGeohash()
-    }
-
-    /// The rendezvous cell this device advertises in its own announces while
-    /// bridging with the gateway toggle on. Set from the main actor; the
-    /// value rides the next (forced) announce.
-    func setLocalBridgeGeohash(_ cell: String?) {
-        guard localIdentityState.setBridgeGeohash(cell) else { return }
-        sendAnnounce(forceSend: true)
-    }
-
     func getPeerNicknames() -> [PeerID: String] {
         peerRegistry.displayNicknames(selfNickname: myNickname)
     }
@@ -1376,6 +1335,7 @@ final class BLEService: NSObject {
     // MARK: - Packet Broadcasting
     
     private func broadcastPacket(_ packet: BitchatPacket) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         guard isTransportTrafficAllowed else { return }
         // Apply route if recipient exists (centralized route application)
         let packetToSend: BitchatPacket
@@ -1679,6 +1639,7 @@ final class BLEService: NSObject {
         requireDirectPeerLink: Bool = false,
         requireNoiseAuthenticatedPeerLink: Bool = false
     ) -> Bool {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return false }
         #if DEBUG
         _test_onOutboundPacket?(packet)
         #endif
@@ -1960,14 +1921,12 @@ final class BLEService: NSObject {
         let connectedPeerIDs = peerRegistry.connectedRoutingData
         let localIdentity = localIdentityState.snapshot()
         let advertisedCapabilities = localIdentity.advertisedCapabilities
-        let advertisedBridgeCell = localIdentity.advertisedBridgeGeohash
         let announcement = AnnouncementPacket(
             nickname: localIdentity.nickname,
             noisePublicKey: noisePub,
             signingPublicKey: signingPub,
             directNeighbors: connectedPeerIDs,
-            capabilities: advertisedCapabilities,
-            bridgeGeohash: advertisedBridgeCell
+            capabilities: advertisedCapabilities
         )
         
         guard let payload = announcement.encode() else {
@@ -3225,101 +3184,6 @@ extension BLEService {
         return true
     }
 
-    // MARK: Courier over the bridge
-
-    /// Seals `content` into a courier envelope for relay parking (a bridge
-    /// courier drop). Same sealing rules as `sendCourierMessage` — prekey
-    /// (v2) when a verified bundle is cached, static Noise X (v1) otherwise —
-    /// but carry-only: a relay copy never sprays.
-    func sealBridgeCourierEnvelope(_ content: String, messageID: String, recipientNoiseKey: Data) -> CourierEnvelope? {
-        guard let typedPayload = BLENoisePayloadFactory.privateMessage(content: content, messageID: messageID) else {
-            return nil
-        }
-        do {
-            let now = Date()
-            let sealed: Data
-            let prekeyID: UInt32?
-            if let prekey = assignRecipientPrekey(messageID: messageID, recipientNoiseKey: recipientNoiseKey) {
-                sealed = try noiseService.sealPrekeyPayload(typedPayload, recipientPrekey: prekey)
-                prekeyID = prekey.id
-            } else {
-                sealed = try noiseService.sealCourierPayload(typedPayload, recipientStaticKey: recipientNoiseKey)
-                prekeyID = nil
-            }
-            return CourierEnvelope(
-                recipientTag: CourierEnvelope.recipientTag(
-                    noiseStaticKey: recipientNoiseKey,
-                    epochDay: CourierEnvelope.epochDay(for: now)
-                ),
-                expiry: UInt64((now.timeIntervalSince1970 + CourierEnvelope.maxLifetimeSeconds) * 1000),
-                ciphertext: sealed,
-                copies: 1,
-                prekeyID: prekeyID
-            )
-        } catch {
-            SecureLogger.error("Failed to seal bridge courier envelope: \(error)", category: .encryption)
-            return nil
-        }
-    }
-
-    /// Opens a courier envelope that arrived as a bridge drop (relay fetch,
-    /// not a directed mesh packet). Returns false when the rotating tag does
-    /// not match our static key — a drop for someone else, or a stale tag.
-    /// The inner Noise X seal authenticates the sender; there is no packet
-    /// signature to check on this path.
-    @discardableResult
-    func openBridgedCourierEnvelope(_ envelope: CourierEnvelope) -> Bool {
-        guard !envelope.isExpired else { return false }
-        guard let myKey = noiseService.getStaticPublicKeyData() else { return false }
-        guard CourierEnvelope.candidateTags(noiseStaticKey: myKey, around: Date()).contains(envelope.recipientTag) else {
-            return false
-        }
-        return openCourierEnvelope(envelope)
-    }
-
-    /// Hands a bridge-fetched envelope directly to the matching local peer
-    /// as a directed courier packet. Delivery-only by design: the recipient's
-    /// tag matched, so this never lands in a stranger's carry quota.
-    /// Returns true only if a current Noise-authenticated physical link
-    /// accepted the packet; a stale peer-level session, reachability record,
-    /// replay-rebound link, or process-local spool is not delivery.
-    @discardableResult
-    func deliverBridgedEnvelope(_ envelope: CourierEnvelope, to peerID: PeerID) -> Bool {
-        guard let payload = envelope.encode() else { return false }
-        let packet = makeCourierPacket(payload, to: peerID)
-        return onEngine {
-            // Engine slot: the auth-link check and the directed send see one
-            // consistent view of the identity domain.
-            guard hasCurrentNoiseAuthenticatedLink(to: peerID) else { return false }
-            return sendPacketDirected(
-                packet,
-                to: peerID,
-                requireDirectPeerLink: true,
-                requireNoiseAuthenticatedPeerLink: true
-            )
-        }
-    }
-
-    /// Our own Noise static public key (for computing our courier tags).
-    func myNoiseStaticPublicKey() -> Data {
-        noiseStaticPublicKeyData()
-    }
-
-    /// Verified reachable peers with known Noise keys — the set a bridge
-    /// gateway watches courier drops for.
-    func verifiedPeersWithNoiseKeys() -> [(peerID: PeerID, noiseKey: Data)] {
-        guard isTransportIdentityAvailable else { return [] }
-        let now = Date()
-        return onEngine {
-            peerRegistry.snapshotByID.values.compactMap { info in
-                guard info.isVerifiedNickname,
-                      let key = info.noisePublicKey, key.count == 32,
-                      peerRegistry.isReachable(info.peerID, now: now) else { return nil }
-                return (info.peerID, key)
-            }
-        }
-    }
-
     /// The prekey to seal a courier message with, or nil to fall back to
     /// static sealing. The real signal is a verified, unexpired bundle with a
     /// spare prekey; the advertised `.prekeys` capability only acts as a veto
@@ -3706,82 +3570,6 @@ extension BLEService {
             }
         }
         return nil
-    }
-
-    // MARK: Gateway carrier (nostrCarrier)
-
-    /// Sign and send an encoded `toGateway` carrier payload directed at a
-    /// gateway peer. The packet is signed so the gateway can key its uplink
-    /// quotas to an authenticated depositor; the carried Nostr event has its
-    /// own Schnorr signature for content authenticity. Returns false when
-    /// the gateway is not reachable or signing fails.
-    func sendNostrCarrier(_ payload: Data, to gatewayPeer: PeerID) -> Bool {
-        guard isTransportTrafficAllowed else { return false }
-        guard isPeerReachable(gatewayPeer) else { return false }
-        let packet = BitchatPacket(
-            type: MessageType.nostrCarrier.rawValue,
-            senderID: myPeerIDData,
-            recipientID: Data(hexString: gatewayPeer.id),
-            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-            payload: payload,
-            signature: nil,
-            ttl: messageTTL
-        )
-        guard let signed = noiseService.signPacket(packet) else { return false }
-        messageQueue.async { [weak self] in
-            // broadcastPacket applies a known route when one exists and
-            // otherwise floods the directed packet like a DM, so a gateway
-            // that is reachable but multi-hop still gets the deposit.
-            self?.broadcastPacket(signed)
-        }
-        return true
-    }
-
-    /// Broadcast an encoded `fromGateway` carrier payload on the mesh with
-    /// the default TTL. Unsigned at the packet layer — receivers verify the
-    /// carried event's own Schnorr signature.
-    func broadcastNostrCarrier(_ payload: Data) {
-        let packet = BitchatPacket(
-            type: MessageType.nostrCarrier.rawValue,
-            senderID: myPeerIDData,
-            recipientID: nil,
-            timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
-            payload: payload,
-            signature: nil,
-            ttl: messageTTL
-        )
-        messageQueue.async { [weak self] in
-            self?.broadcastPacket(packet)
-        }
-    }
-
-    /// Transport-level handling for a received nostrCarrier packet; policy
-    /// (verification of the carried event, quotas, loop prevention) lives in
-    /// `GatewayService` behind `onNostrCarrierPacket`.
-    private func handleNostrCarrier(_ packet: BitchatPacket, from _: PeerID) {
-        let senderID = PeerID(hexData: packet.senderID)
-        let directedToUs: Bool
-        if let recipientID = packet.recipientID {
-            // Carriers addressed elsewhere ride the generic relay path untouched.
-            guard recipientID == myPeerIDData else { return }
-            // Uplink deposit: quotas are keyed by the depositor, so the
-            // packet signature must verify against the sender's announced
-            // signing key. Unlike courier deposits the depositor may be
-            // multi-hop away, so ingress-link identity is not required.
-            let signingKey = peerRegistry.info(for: senderID)?.signingPublicKey
-            guard let signingKey,
-                  noiseService.verifyPacketSignature(packet, publicKey: signingKey) else {
-                SecureLogger.debug("🌐 nostrCarrier uplink from \(senderID.id.prefix(8))… rejected (missing/invalid packet signature)", category: .security)
-                return
-            }
-            directedToUs = true
-        } else {
-            directedToUs = false
-        }
-        let payload = packet.payload
-        notifyUI { [weak self] in
-            self?.onNostrCarrierPacket?(payload, senderID, directedToUs)
-        }
     }
 
     // MARK: Link capability snapshots
@@ -4409,6 +4197,7 @@ extension BLEService {
         link: BLEIngressLinkID,
         linkDescription: String
     ) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         guard let lifecycleGeneration = capturePanicLifecycleGeneration() else { return }
         messageQueue.async { [weak self] in
             guard let self,
@@ -4429,6 +4218,7 @@ extension BLEService {
         link: BLEIngressLinkID,
         linkDescription: String
     ) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         let claimedSenderID = PeerID(hexData: packet.senderID)
         let context = acceptedIngressContext(
             for: packet,
@@ -4467,6 +4257,7 @@ extension BLEService {
     }
 
     private func handleReceivedPacket(_ packet: BitchatPacket, from peerID: PeerID) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         let isNoisePacket = packet.type == MessageType.noiseHandshake.rawValue
             || packet.type == MessageType.noiseEncrypted.rawValue
 
@@ -4520,6 +4311,7 @@ extension BLEService {
         _ packet: BitchatPacket,
         from peerID: PeerID
     ) {
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         let context = BLEReceivePipeline.context(for: packet, localPeerID: myPeerID)
         let senderID = context.senderID
         let messageID = context.messageID
@@ -4621,7 +4413,7 @@ extension BLEService {
             // Invalid or deleted posts must not spread; skip the relay step.
             guard handleBoardPost(packet, from: senderID) else { return }
         case .nostrCarrier:
-            handleNostrCarrier(packet, from: peerID)
+            return // Wire type stays reserved after Gateway/Bridge retirement.
 
         case .voiceFrame:
             // Wesh has no live voice: a BitChat voice frame is neither shown
@@ -4735,12 +4527,6 @@ extension BLEService {
         if let result, result.isVerified, result.isDirectAnnounce {
             rebindLinkAfterVerifiedDirectAnnounce(packet, to: result.peerID)
             retireRedundantPeripheralLinks(packet, to: result.peerID)
-        }
-
-        // Bridge courier watch: a verified announce may add a peer whose
-        // relay-parked drops we should start watching for.
-        if let result, result.isVerified {
-            onVerifiedPeerAnnounce?(result.peerID)
         }
 
         // Courier work: an announce is the moment we learn a peer's Noise
@@ -5105,11 +4891,10 @@ extension BLEService {
                         // Propagate `nil` (registry refused the announce because it
                         // carries a signing key different from the pinned one) so
                         // the handler's guard rejects it instead of overwriting the
-                        // pinned identity. Main's capabilities/bridgeGeohash are
+                        // pinned identity. The capabilities are
                         // preserved.
                         now: now,
-                        capabilities: announcement.capabilities,
-                        bridgeGeohash: announcement.bridgeGeohash
+                        capabilities: announcement.capabilities
                     )
                 }
             },

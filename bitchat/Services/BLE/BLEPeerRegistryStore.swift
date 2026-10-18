@@ -61,24 +61,11 @@ final class BLEPeerRegistryStore: @unchecked Sendable {
         read { $0.capabilities(for: peerID) }
     }
 
-    func advertisedBridgeGeohash() -> String? {
-        read { $0.advertisedBridgeGeohash() }
-    }
-
     func displayNicknames(selfNickname: String) -> [PeerID: String] {
         read { $0.displayNicknames(selfNickname: selfNickname) }
     }
 
     func transportSnapshots(selfNickname: String) -> [TransportPeerSnapshot] {
         read { $0.transportSnapshots(selfNickname: selfNickname) }
-    }
-
-    /// Peers advertising `capability` that are reachable now, in one
-    /// consistent view.
-    func reachablePeers(advertising capability: PeerCapabilities, now: Date) -> [PeerID] {
-        read { registry in
-            registry.peers(advertising: capability)
-                .filter { registry.isReachable($0, now: now) }
-        }
     }
 }

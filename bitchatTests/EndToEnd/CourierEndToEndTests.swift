@@ -586,32 +586,34 @@ struct CourierEndToEndTests {
     /// copy delivers; duplicates must stop right after the decrypt — no
     /// second delivery, no second ack/handshake trigger downstream.
     @Test func duplicateCourierCopiesDeliverInnerMessageOnce() async throws {
-        let alice = makeService()
+        let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = makeService()
+        defer { bob.stopServices() }
         let bobDelegate = NoiseCaptureDelegate()
         bob.delegate = bobDelegate
-
         let bobKey = bob.noiseStaticPublicKeyData()
-        let first = try #require(alice.sealBridgeCourierEnvelope("once", messageID: "dup-1", recipientNoiseKey: bobKey))
-        let second = try #require(alice.sealBridgeCourierEnvelope("once", messageID: "dup-1", recipientNoiseKey: bobKey))
-        // Distinct seals: envelope-level dedup can never catch this pair.
-        #expect(first.ciphertext != second.ciphertext)
-
-        #expect(bob.openBridgedCourierEnvelope(first))
-        #expect(bob.openBridgedCourierEnvelope(second))
-
-        let delivered = await TestHelpers.waitUntil(
-            { !bobDelegate.snapshot().isEmpty },
-            timeout: TestConstants.settleTimeout
-        )
-        #expect(delivered)
-        // Give a duplicate delivery a chance to surface, then confirm the
-        // second copy never reached the delegate.
-        let duplicated = await TestHelpers.waitUntil(
-            { bobDelegate.snapshot().count > 1 },
-            timeout: TestConstants.negativeWaitWindow
-        )
-        #expect(!duplicated)
+        let sender = PeerID(publicKey: try #require(alice.getStaticPublicKeyData()))
+        let typedPayload = try #require(BLENoisePayloadFactory.privateMessage(content: "once", messageID: "dup-1"))
+        var ciphertexts: [Data] = []
+        for _ in 0..<2 {
+            let sealed = try alice.sealCourierPayload(typedPayload, recipientStaticKey: bobKey)
+            ciphertexts.append(sealed)
+            let envelope = CourierEnvelope(recipientTag: CourierEnvelope.recipientTag(
+                noiseStaticKey: bobKey, epochDay: CourierEnvelope.epochDay(for: Date())),
+                expiry: UInt64(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000),
+                ciphertext: sealed)
+            let packet = BitchatPacket(type: MessageType.courierEnvelope.rawValue,
+                senderID: try #require(Data(hexString: sender.id)),
+                recipientID: try #require(Data(hexString: bob.myPeerID.id)),
+                timestamp: UInt64(Date().timeIntervalSince1970 * 1000),
+                payload: try #require(envelope.encode()), signature: nil, ttl: 1)
+            bob._test_handlePacket(try #require(alice.signPacket(packet)), fromPeerID: sender,
+                signingPublicKey: try #require(alice.getSigningPublicKeyData()))
+        }
+        #expect(ciphertexts[0] != ciphertexts[1])
+        // Includes both decryptions and the MainActor delivery hop. The
+        // negative assertion cannot pass merely because delivery is pending.
+        await bob._test_drainFragmentPipeline()
         #expect(bobDelegate.snapshot().count == 1)
     }
 
@@ -758,50 +760,6 @@ struct MessageRouterCourierTests {
         #expect(transport.courierSends.first?.recipientKey == bobKey)
         #expect(transport.courierSends.first?.couriers == [carolID])
         #expect(carried == ["m1"])
-    }
-
-    /// Field-found: a DM sent while the recipient sits in the BLE
-    /// reachability retention window (radio gone, still "reachable" for a
-    /// minute) trusts the mesh and skips every deposit — and nothing
-    /// retried. The periodic sweep must publish the bridge drop once the
-    /// window lapses.
-    @Test @MainActor
-    func sweepDropsQueuedMessageOnceReachabilityLapses() {
-        let bobKey = Data(repeating: 0xB0, count: 32)
-        let bobID = PeerID(publicKey: bobKey)
-        let transport = CourierCaptureTransport()
-        transport.reachablePeers = [bobID] // retention window: stale but "reachable"
-        transport.promptDelivery = true
-
-        let directory = CourierDirectory(
-            noiseKey: { peerID in peerID == bobID ? bobKey : nil },
-            isTrustedCourier: { _ in false }
-        )
-        let router = MessageRouter(transports: [transport], courierDirectory: directory)
-        var drops: [(content: String, messageID: String, key: Data)] = []
-        router.bridgeCourierDeposit = { content, messageID, key, completion in
-            drops.append((content, messageID, key))
-            completion(true)
-        }
-        var carried: [String] = []
-        router.onMessageCarried = { messageID, _ in carried.append(messageID) }
-
-        router.sendPrivate("hi bob", to: bobID, recipientNickname: "bob", messageID: "m9")
-        #expect(drops.isEmpty) // send trusted the (stale) mesh reachability
-
-        // Still inside the window: the sweep must not spam relays.
-        router.retryBridgeCourierDeposits()
-        #expect(drops.isEmpty)
-
-        // Window lapses; the sweep publishes the retained copy as a drop and
-        // the sender's message shows "carried" (its ack has no radio route).
-        transport.reachablePeers = []
-        router.retryBridgeCourierDeposits()
-        #expect(drops.count == 1)
-        #expect(drops.first?.messageID == "m9")
-        #expect(drops.first?.content == "hi bob")
-        #expect(drops.first?.key == bobKey)
-        #expect(carried == ["m9"])
     }
 
     @Test @MainActor

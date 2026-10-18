@@ -705,12 +705,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.conversationsByID[conversationID]?.containsMessage(withID: messageID) ?? false
     }
 
-    @MainActor
-    func bridgeInjectedPublicMessageIsPresent(withID messageID: String) -> Bool {
-        publicMessagePipeline.containsMessage(withID: messageID) ||
-            publicConversationContainsMessage(withID: messageID, in: .mesh)
-    }
-
     /// Replaces an unauthenticated bridge alias with a later authenticated
     /// radio row. In addition to both storage layers, clear the content-window
     /// marker written by an already-flushed alias or it would suppress the
@@ -2088,14 +2082,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Handle incoming public message
     @MainActor
     func handlePublicMessage(_ message: BitchatMessage) {
-        // Bridge hints are unauthenticated and may never suppress a genuine
-        // BLE sender. Once the radio packet has passed BLE signature checks,
-        // replace any earlier bridge alias before this row is enqueued.
-        if !message.isBridged,
-           let senderPeerID = message.senderPeerID,
-           !senderPeerID.isGeoChat {
-            BridgeService.shared.handleAuthenticatedRadioMessage(messageID: message.id)
-        }
         publicConversationCoordinator.handlePublicMessage(message)
     }
 
