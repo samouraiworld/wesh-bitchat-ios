@@ -26,7 +26,7 @@ static ARTI_STATE: OnceCell<Arc<controller::Controller<TorClient<PreferredRuntim
 fn init_state() -> Result<(), &'static str> {
     ARTI_STATE.get_or_try_init(|| -> Result<Arc<controller::Controller<TorClient<PreferredRuntime>>>, &'static str> {
         Ok(Arc::new(controller::Controller::new(
-            std::time::Duration::from_millis(200),
+            std::time::Duration::from_secs(2),
             tokio::runtime::Runtime::new,
         )))
     })?;
@@ -41,11 +41,11 @@ fn init_state() -> Result<(), &'static str> {
 ///
 /// # Returns
 /// * 0 on success
-/// * -1 if already running
+/// * -1 if a session is active, stopping, or native quiescence is already unconfirmed
 /// * -2 if data_dir is invalid
 /// * -3 if runtime initialization failed
 /// * -4 if bootstrap failed
-/// * -5 if an earlier native teardown was incomplete
+/// * -5 if native teardown became unconfirmed while admitting this start; restart the process before starting again
 #[no_mangle]
 pub extern "C" fn arti_start(data_dir: *const c_char, socks_port: u16) -> c_int {
     if ARTI_STATE.get().is_some_and(|state| state.is_running()) {
@@ -88,7 +88,7 @@ pub extern "C" fn arti_start(data_dir: *const c_char, socks_port: u16) -> c_int 
 /// # Returns
 /// * 0 on success
 /// * -1 if not running
-/// * -5 if native teardown could not be confirmed
+/// * -5 if native quiescence could not be confirmed; the failure remains latched until process restart
 #[no_mangle]
 pub extern "C" fn arti_stop() -> c_int {
     ARTI_STATE.get().map_or(-1, |state| state.stop())
@@ -97,8 +97,8 @@ pub extern "C" fn arti_stop() -> c_int {
 /// Check if Arti is currently running.
 ///
 /// # Returns
-/// * 1 if running
-/// * 0 if not running
+/// * 1 if active or native quiescence is unconfirmed (including a latched teardown failure)
+/// * 0 only when native work is confirmed stopped
 #[no_mangle]
 pub extern "C" fn arti_is_running() -> c_int {
     i32::from(ARTI_STATE.get().is_some_and(|state| state.is_running()))
