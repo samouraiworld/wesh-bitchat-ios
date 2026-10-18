@@ -29,6 +29,7 @@ final class AppRuntime: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var started = false
+    var hasStarted: Bool { started }
     private var weshInternetStarted = false
     private var lastNostrRelayConnectedState = false
 
@@ -121,6 +122,22 @@ final class AppRuntime: ObservableObject {
             self?.chatViewModel.messageRouter.flushAllOutbox()
         }
         .store(in: &cancellables)
+    }
+
+    func panicEraseAction(report: @escaping (Bool) -> Void = { _ in }) -> () -> Bool {
+        makePanicEraseAction(
+            erase: { self.appChromeModel.panicClearAllData() },
+            report: report,
+            needsBootstrap: { !self.chatViewModel.bootstrapConfigured },
+            bootstrap: { self.chatViewModel.configureBootstrapIfNeeded() },
+            needsRuntimeStart: { !self.hasStarted },
+            startRuntime: { self.start() }
+        )
+    }
+
+    func retryStartupRetirement() {
+        guard chatViewModel.retryStartupRetirement() else { return }
+        start()
     }
 
     func start() {

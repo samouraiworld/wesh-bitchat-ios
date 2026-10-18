@@ -46,7 +46,7 @@ struct BitchatApp: App {
                     .environmentObject(runtime.conversationUIModel)
                     .environmentObject(runtime.peerListModel)
                     .environmentObject(runtime.appChromeModel)
-                    .paveEraseShortcut { runtime.appChromeModel.panicClearAllData() }
+                    .paveEraseShortcut(erase: runtime.panicEraseAction())
                     .onAppear {
                         appDelegate.runtime = runtime
                         runtime.start()
