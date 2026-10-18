@@ -1,6 +1,6 @@
-# Wesh Privacy Policy
+# Wesh Privacy Policy — UNPUBLISHED V1 candidate draft
 
-*Last updated: October 2026.* Wesh is a fork of BitChat. This file mirrors the policy published at https://wesh.samourai.app/en/privacy; the French version, https://wesh.samourai.app/confidentialite, is the reference.
+*Requires technical and device qualification before publication. Last updated: October 2026.* Wesh is a fork of BitChat. Reference pages: https://wesh.samourai.app/en/privacy; the French version, https://wesh.samourai.app/confidentialite, is the reference.
 
 ## 1. Who we are
 Wesh is a free, open source, non-profit app published by **Samouraï Coop**, SARL SCOP, 149 avenue du Maine, 75014 Paris, France.
@@ -24,12 +24,9 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 
 ## 4. Backups
 - **Android:** Wesh excludes all of its data from Google backups and from transfers to a new phone.
-- **iPhone:** Wesh's files and keys are excluded from iCloud and computer backups. These backups contain none of your messages, contacts, keys or nickname.
-- They may contain:
-  - the app's settings (appearance, notices accepted<!-- INTERNET:START -->, whether Internet mode is on<!-- INTERNET:END -->);
-  - today's count of the phones you passed: for each one, a hash of its peer ID, stored with the secret value used to compute it, and the time you last met. Because peer IDs are stable, someone who has this backup and a phone's peer ID can check that you passed that phone that day;
-  - for at most 24 hours, a text you shared to Wesh and have not used yet.
-- Restoring a backup therefore restores neither your identity, nor your contacts, nor your conversations.
+- **iPhone:** Wesh configures its sensitive files and keys to be excluded from iCloud and computer backups. App settings may be backed up (appearance, notices accepted<!-- INTERNET:START -->, whether Internet mode is on<!-- INTERNET:END -->).
+- This version no longer counts encountered phones and no longer receives text through the retired share extension. A backup made by an older version may still contain that count, its secret value, encounter times, old geographic-room preferences or unused shared text. A peer ID recorded elsewhere may allow a phone to be recognized in the old count.
+- Updating and emergency erase do not modify backups already made. Candidate V1 migration and restoration still require device qualification before publication; a general guarantee that an old backup contains no data has not been established.
 
 ## 5. What others see over Bluetooth
 - Any Bluetooth device in range can tell that a phone runs Wesh or BitChat.
@@ -39,7 +36,7 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
   - the features your app supports;
   - the IDs of the phones it is directly linked to.
 - These announcements are relayed from phone to phone, over at most 7 hops.
-- On Android, Wesh runs in the background by default and starts again after the phone restarts, without you opening it. No setting can turn this off today. To stop the announcements, turn Bluetooth off.
+- On Android, Wesh may continue running in the background after you open it. **Start after restart** allows startup after the phone restarts, if Android permits it. It defaults to OFF when no choice was recorded; an existing recorded choice is preserved. This setting does not change the current session.
 - **Your peer ID and public keys do not change until you use the emergency erase.** A device that records them can recognise your phone from one encounter to the next and see which phones it was linked to.
 - Signal strength lets others estimate how far away your phone is.
 - **Relaying:** your messages may pass through third-party phones (Wesh or BitChat). Each relaying phone sees the sender's and recipient's IDs, the time and the size of the message. It does not see the content of a private message, which is end-to-end encrypted.
@@ -63,7 +60,7 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 ## 8. Emergency erase
 - **Réglages → Tout effacer** (Settings → Erase everything), held for three seconds.
 - It erases from this phone: identity and keys, nickname, contacts, conversations, pending messages, drafts, meeting note, settings and notifications<!-- INTERNET:START -->, as well as the Internet key and Tor's files; Internet mode is turned off<!-- INTERNET:END -->.
-- A new identity is then created, with a new peer ID and new keys.
+- After erasure is confirmed, Wesh resumes with a new identity, peer ID and keys. If erasure cannot be confirmed, access stays closed and the app offers a retry.
 - It does not erase what others have received or recorded (local-room messages, Bluetooth announcements<!-- INTERNET:START -->, copies on Nostr relays<!-- INTERNET:END -->), nor iPhone backups already made (§4).
 - Uninstalling the app also deletes its data. On iPhone, keys left in the Keychain are erased at the next install.
 
