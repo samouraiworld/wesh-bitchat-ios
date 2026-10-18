@@ -9,6 +9,7 @@
 import BitLogger
 import BitFoundation
 import Foundation
+import LocalAuthentication
 import Security
 
 enum KeychainInstallLifecycleAction: Equatable {
@@ -190,6 +191,39 @@ final class KeychainManager: KeychainManagerProtocol {
             }
         }
         return completed
+    }
+
+    /// Retires only historical group-key accounts in the selected service.
+    /// Both operations are required so the checked path can use metadata-only
+    /// fixtures without constructing a manager or accessing the Keychain.
+    static func retireLegacyGroupKeys(
+        primaryService: String,
+        copyAttributes: ([String: Any]) -> (OSStatus, Any?),
+        deleteItem: ([String: Any]) -> OSStatus
+    ) -> Bool {
+        _ = primaryService
+        _ = copyAttributes
+        _ = deleteItem
+        return true
+    }
+
+    /// The ordinary-startup adapter never permits interactive authentication.
+    /// Test hosts must use the required injected operations above instead.
+    static func retireLegacyGroupKeysFromCurrentService() -> Bool {
+        guard !TestEnvironment.isRunningTests else { return false }
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return retireLegacyGroupKeys(primaryService: BitchatApp.bundleID, copyAttributes: { query in
+            var scoped = query
+            scoped[kSecUseAuthenticationContext as String] = context
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(scoped as CFDictionary, &result)
+            return (status, result)
+        }, deleteItem: { query in
+            var scoped = query
+            scoped[kSecUseAuthenticationContext as String] = context
+            return SecItemDelete(scoped as CFDictionary)
+        })
     }
 
     /// The app currently has an application-group entitlement, not a

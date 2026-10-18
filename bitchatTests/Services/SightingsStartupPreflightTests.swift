@@ -40,13 +40,13 @@ struct SightingsStartupPreflightTests {
             cleanupCalls += 1
             return cleanupSucceeds
         }
-        let failed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true })
+        let failed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true }, wipeLegacyGroupKeys: { true })
         #expect(failed.blockOrdinaryAdmission)
         #expect(failed.suspendTransport)
         #expect(!failed.replayPanic)
         cleanupSucceeds = true
 
-        let confirmed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true })
+        let confirmed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true }, wipeLegacyGroupKeys: { true })
 
         #expect(!confirmed.blockOrdinaryAdmission)
         #expect(!confirmed.suspendTransport)
@@ -56,14 +56,14 @@ struct SightingsStartupPreflightTests {
 
     @Test @MainActor
     func newlyPendingMarkerCannotBeClearedByOrdinaryCleanupRetry() {
-        let decision = PanicStartupDecision.retry(checkPending: { true }, wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true })
+        let decision = PanicStartupDecision.retry(checkPending: { true }, wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true }, wipeLegacyGroupKeys: { true })
         #expect(decision.replayPanic)
         #expect(decision.suspendTransport)
     }
 
     @Test @MainActor
     func unreadablePendingMarkerNeverReopensOrdinaryAdmission() {
-        let decision = PanicStartupDecision.retry(checkPending: { throw MarkerFailure.unavailable }, wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true })
+        let decision = PanicStartupDecision.retry(checkPending: { throw MarkerFailure.unavailable }, wipeSightings: { true }, wipeGeography: { true }, wipeSharedContent: { true }, wipeBoard: { true }, wipeBridge: { true }, wipeGroups: { true }, wipeMedia: { true }, wipeLegacyGroupKeys: { true })
         #expect(decision.replayPanic)
         #expect(decision.suspendTransport)
     }
