@@ -2134,6 +2134,10 @@ extension BLEService {
         emitLinkEvent(.frameDecoded(packet, link: link, linkDescription: "Simulated \(link)"))
     }
 
+    func _test_registerSyncRequest(to peerID: PeerID) {
+        requestSyncManager.registerRequest(to: peerID)
+    }
+
     /// Sends an unthrottled announce, exactly like the maintenance forced
     /// path. SimulatedMesh uses this as the deterministic discovery step.
     func _test_forceAnnounce() {
@@ -4386,6 +4390,16 @@ extension BLEService {
             break
 
         case .message:
+            // A sync peer may return our own history, but its open response
+            // window does not authenticate a packet claiming our identity.
+            // Genuine history retains our original packet signature.
+            if senderID == myPeerID {
+                guard let signingKey = noiseService.getSigningPublicKeyData(),
+                      noiseService.verifyPacketSignature(packet, publicKey: signingKey) else {
+                    SecureLogger.warning("🚫 Dropping self-authored public message without a valid local signature", category: .security)
+                    return
+                }
+            }
             handleMessage(packet, from: senderID)
             
         case .requestSync:
