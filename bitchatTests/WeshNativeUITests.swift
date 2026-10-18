@@ -179,7 +179,7 @@ struct WeshNativeUITests {
         #expect(current.load() == [fresh])
     }
 
-    @Test(arguments: ["courier", "bridge", "archive", "prekeys", "board", "share", "groups", "outbox"]) @MainActor
+    @Test(arguments: ["courier", "bridge", "archive", "prekeys", "board", "geography", "share", "groups", "outbox"]) @MainActor
     func everyPersistentStoreRefusalBlocksGlobalCommitAndAllStoresAreStillAttempted(failing: String) throws {
         var failed = true
         var attempts: [String] = []
@@ -187,7 +187,7 @@ struct WeshNativeUITests {
         let wipes = PanicPersistentStoreWipes(
             courier: { wipe("courier") }, bridge: { wipe("bridge") },
             publicArchive: { wipe("archive") }, prekeys: { wipe("prekeys") },
-            board: { wipe("board") }, legacyGroups: { wipe("groups") }, sharedContent: { wipe("share") }
+            board: { wipe("board") }, geography: { wipe("geography") }, legacyGroups: { wipe("groups") }, sharedContent: { wipe("share") }
         )
         let keychain = MockKeychain()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("global-checked-wipe-\(UUID().uuidString)", isDirectory: true)
@@ -209,7 +209,7 @@ struct WeshNativeUITests {
             panicPersistentStoreWipes: wipes)
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
-        #expect(attempts == ["courier", "bridge", "archive", "groups", "prekeys", "board", "share"])
+        #expect(attempts == ["geography", "courier", "bridge", "archive", "groups", "prekeys", "board", "share"])
         #expect(committed == 0 && vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts)
         #expect(vm.weshMeetingNote.isSuspended)
@@ -219,7 +219,7 @@ struct WeshNativeUITests {
         #expect(vm.panicClearAllData())
         #expect(committed == 1 && !vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts + 1)
-        #expect(attempts.count == 7)
+        #expect(attempts.count == 8)
     }
 
     @Test @MainActor func meetingNoteWipeRemovesEveryPersistedFieldAndRejectsOldEditorEvents() throws {

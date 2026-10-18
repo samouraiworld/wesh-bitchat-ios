@@ -7,11 +7,10 @@
 // `ChatViewModel`, following the `ChatDeliveryCoordinatorContextTests` /
 // `ChatPrivateConversationCoordinatorContextTests` exemplars.
 //
-// Scope note: haptics (UIApplication) and the geohash branch of
-// `sendPublicRaw` (NostrRelayManager.shared, GeoRelayDirectory.shared) are
-// intentionally not exercised here. `checkForMentions` posts through the
-// injected context (`notifyMention(from:message:)`) and is covered, as are
-// the mesh branch of `sendPublicRaw` and all timeline/store/blocking flows.
+// Scope note: haptics (UIApplication) are not exercised here. Geographic raw
+// refusal is tested with a throwing injected identity seam, before shared
+// relay adapters could be reached. Mention notifications, mesh raw sends,
+// and timeline/store/blocking flows use the injected context.
 //
 
 import Testing
@@ -116,9 +115,19 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
 
     // Nostr identity & blocking
     var blockedNostrPubkeys: Set<String> = []
+    var rejectGeographicIdentityDerivation = false
+    private(set) var geographicIdentityDerivations: [String] = []
 
     func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        Self.dummyIdentity
+        geographicIdentityDerivations.append(geohash)
+        if rejectGeographicIdentityDerivation {
+            throw GeographicFixtureError.forbiddenDerivation
+        }
+        return Self.dummyIdentity
+    }
+
+    private enum GeographicFixtureError: Error {
+        case forbiddenDerivation
     }
 
     func isNostrBlocked(pubkeyHexLowercased: String) -> Bool {
@@ -462,6 +471,26 @@ struct ChatPublicConversationCoordinatorContextTests {
 
         #expect(context.sentMeshMessages.count == 1)
         #expect(context.sentMeshMessages.first?.content == "raw mesh payload")
+    }
+
+    @Test @MainActor
+    func sendPublicRaw_onRetiredGeographicChannel_refusesBeforeIdentityOrMeshFallback() async {
+        let context = MockChatPublicConversationContext()
+        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
+        // Baseline delivery must throw before any shared relay/directory access.
+        context.rejectGeographicIdentityDerivation = true
+        let coordinator = ChatPublicConversationCoordinator(context: context)
+
+        coordinator.sendPublicRaw("synthetic retired geographic payload")
+        // The actual raw-send Task is enqueued on MainActor before this main
+        // queue fence; its derivation has no suspension before the injected throw.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+
+        #expect(context.geographicIdentityDerivations.isEmpty)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(context.conversations.isEmpty)
     }
 
     @Test @MainActor

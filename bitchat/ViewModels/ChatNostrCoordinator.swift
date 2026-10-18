@@ -55,7 +55,7 @@ final class ChatNostrCoordinator {
     init(context: any ChatNostrContext) {
         self.context = context
         let presence = GeoPresenceTracker(context: context)
-        let inbound = NostrInboundPipeline(context: context, presence: presence)
+        let inbound = NostrInboundPipeline(context: context)
         self.presence = presence
         self.inbound = inbound
         self.subscriptions = GeohashSubscriptionManager(context: context, inbound: inbound, presence: presence)

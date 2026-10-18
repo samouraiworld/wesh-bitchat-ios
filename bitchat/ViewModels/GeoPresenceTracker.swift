@@ -83,63 +83,12 @@ final class GeoPresenceTracker {
     /// inbound hot path free of presence-store writes).
     @MainActor
     func scheduleMarkPeerTeleported(_ key: String, logged: Bool) {
-        Task { @MainActor [weak context] in
-            guard let context else { return }
-            context.markGeoTeleported(key)
-            if logged {
-                SecureLogger.info(
-                    "GeoTeleport: mark peer teleported key=\(key.prefix(8))… total=\(context.teleportedGeoCount)",
-                    category: .session
-                )
-            }
-        }
+        // Retired public geographic callbacks cannot attribute a peer.
     }
 
     @MainActor
     func subscribeNostrEvent(_ event: NostrEvent, gh: String) {
-        guard let context else { return }
-        guard (event.kind == NostrProtocol.EventKind.ephemeralEvent.rawValue
-            || event.kind == NostrProtocol.EventKind.geohashPresence.rawValue)
-        else {
-            return
-        }
-        // The signature was already verified (exactly once, off the main
-        // actor) by NostrRelayManager before delivery.
-        guard shouldProcessGeoSamplingEvent(event.id) else { return }
-
-        let existingCount = context.geoParticipantCount(for: gh)
-        context.recordGeoParticipant(pubkeyHex: event.pubkey, geohash: gh)
-
-        guard let content = event.content.trimmedOrNilIfEmpty else { return }
-        if context.isNostrBlocked(pubkeyHexLowercased: event.pubkey.lowercased()) { return }
-        if let my = try? context.deriveNostrIdentity(forGeohash: gh),
-           my.publicKeyHex.lowercased() == event.pubkey.lowercased() {
-            return
-        }
-
-        // Non-empty content on a sampled event means an actual chat message
-        // (presence events are empty) — feed the nearby-conversation hint.
-        GeohashChatActivityTracker.shared.recordChatMessage(
-            geohash: gh,
-            senderName: Self.sampledSenderName(for: event, context: context),
-            content: content,
-            timestamp: Date(timeIntervalSince1970: TimeInterval(event.created_at))
-        )
-
-        guard existingCount == 0 else { return }
-
-        let eventTime = Date(timeIntervalSince1970: TimeInterval(event.created_at))
-        if Date().timeIntervalSince(eventTime) > 30 { return }
-
-        #if os(iOS)
-        guard UIApplication.shared.applicationState == .active else { return }
-        if case .location(let channel) = context.activeChannel, channel.geohash == gh { return }
-        #elseif os(macOS)
-        guard NSApplication.shared.isActive else { return }
-        if case .location(let channel) = context.activeChannel, channel.geohash == gh { return }
-        #endif
-
-        cooldownPerGeohash(gh, content: content, event: event)
+        // Drop legacy public sampling callbacks before attribution or storage.
     }
 
     /// Attribution for a sampled event: the event's own `n` tag wins (the
@@ -157,41 +106,7 @@ final class GeoPresenceTracker {
 
     @MainActor
     func cooldownPerGeohash(_ gh: String, content: String, event: NostrEvent) {
-        guard let context else { return }
-        let now = Date()
-        let last = context.lastGeoNotificationAt[gh] ?? .distantPast
-        if now.timeIntervalSince(last) < TransportConfig.uiGeoNotifyCooldownSeconds { return }
-
-        let preview: String = {
-            let maxLen = TransportConfig.uiGeoNotifySnippetMaxLen
-            if content.count <= maxLen { return content }
-            let idx = content.index(content.startIndex, offsetBy: maxLen)
-            return String(content[..<idx]) + "…"
-        }()
-
-        Task { @MainActor [weak context] in
-            guard let context else { return }
-            context.lastGeoNotificationAt[gh] = now
-            let senderSuffix = String(event.pubkey.suffix(4))
-            let nick = context.geoNicknames[event.pubkey.lowercased()]
-            let senderName = (nick?.isEmpty == false ? nick! : "anon") + "#" + senderSuffix
-
-            let rawTs = Date(timeIntervalSince1970: TimeInterval(event.created_at))
-            let ts = min(rawTs, Date())
-            let mentions = context.parseMentions(from: content)
-            let message = BitchatMessage(
-                id: event.id,
-                sender: senderName,
-                content: content,
-                timestamp: ts,
-                isRelay: false,
-                senderPeerID: PeerID(nostr: event.pubkey),
-                mentions: mentions.isEmpty ? nil : mentions
-            )
-            if context.appendGeohashMessageIfAbsent(message, toGeohash: gh) {
-                context.notifyGeohashActivity(geohash: gh, bodyPreview: preview)
-            }
-        }
+        // Retired samples cannot store messages, stamp state or notify.
     }
 
     /// First-seen check for sampled geohash events with LRU eviction so the

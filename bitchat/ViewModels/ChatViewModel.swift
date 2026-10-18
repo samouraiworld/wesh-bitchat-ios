@@ -100,7 +100,7 @@ struct PanicNetworkLifecycle {
     static var live: PanicNetworkLifecycle {
         PanicNetworkLifecycle(
             stop: {
-                GeohashPresenceService.shared.stopForPanic()
+                GeohashPresenceService.stopExistingForPanic()
                 NetworkActivationService.shared.stopForPanic()
                 return WeshMode.isActive ? WeshInternetMode.shared.wipeForPanic() : true
             },
@@ -1410,10 +1410,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         userDefaults.removeObject(forKey: "bitchat.noiseIdentityKey")
         userDefaults.removeObject(forKey: "bitchat.messageRetentionKey")
 
-        // Wipe persisted location state (selected channel, teleport set,
-        // bookmarks). For an activist-safety wipe, where the user has been is
-        // exactly the data an adversary inspecting the device wants.
-        LocationStateManager.shared.panicWipe()
+        // Delete legacy geographic state without loading it or creating a
+        // location manager; any unconfirmed erase keeps recovery blocked.
+        locationManager.retireForPanic()
+        GeoRelayDirectory.retireExistingForPanic()
+        nostrCoordinator.subscriptions.retireForPanic()
+        let geographyWipeCompleted = panicPersistentStoreWipes.geography()
 
         // Reset nickname to anonymous; the previous one must be gone from
         // the Keychain and from the legacy UserDefaults key.
@@ -1542,7 +1544,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 meetingNoteWipeCompleted,
                 qrContactsWipeCompleted, courierWipeCompleted,
                 bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
-                groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
+                groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted, geographyWipeCompleted,
                 sharedContentWipeCompleted].allSatisfy({ $0 }) {
                 try panicRecoveryOperations.complete()
                 panicCompleted = true

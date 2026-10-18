@@ -1,243 +1,76 @@
 import Combine
-import XCTest
+import Foundation
+import Testing
 @testable import bitchat
 
 @MainActor
-final class GeohashPresenceServiceTests: XCTestCase {
-    func test_start_schedulesHeartbeatUsingConfiguredInterval() {
+struct GeographicPresenceRetirementTests {
+    @Test
+    func retiredPresenceCannotScheduleDeriveOrPublish() {
         let scheduler = MockGeohashPresenceScheduler()
-        let service = makeService(scheduler: scheduler, loopMinInterval: 42, loopMaxInterval: 42)
-
-        service.start()
-
-        XCTAssertEqual(scheduler.intervals, [42])
-    }
-
-    func test_handleLocationChange_invalidatesExistingTimerAndSchedulesQuickRefresh() {
-        let scheduler = MockGeohashPresenceScheduler()
-        let service = makeService(scheduler: scheduler, loopMinInterval: 40, loopMaxInterval: 40)
-
-        service.start()
-        let originalTimer = scheduler.timers.first
-
-        service.handleLocationChange()
-
-        XCTAssertEqual(scheduler.intervals, [40, 5])
-        XCTAssertEqual(originalTimer?.invalidateCallCount, 1)
-    }
-
-    func test_handleConnectivityChange_onlySchedulesWhenExistingTimerIsMissingOrInvalid() {
-        let scheduler = MockGeohashPresenceScheduler()
-        let service = makeService(scheduler: scheduler, loopMinInterval: 33, loopMaxInterval: 33)
-
-        service.start()
-        service.handleConnectivityChange()
-        XCTAssertEqual(scheduler.intervals, [33])
-
-        scheduler.timers.last?.invalidate()
-        service.handleConnectivityChange()
-        XCTAssertEqual(scheduler.intervals, [33, 33])
-    }
-
-    func test_performHeartbeat_broadcastsOnlyAllowedPrecisionChannels() async throws {
-        let identity = try NostrIdentity.generate()
-        let scheduler = MockGeohashPresenceScheduler()
-        var sentGeohashes: [String] = []
-        var lookedUpGeohashes: [String] = []
-        var sleptNanoseconds: [UInt64] = []
-        let channels = [
-            GeohashChannel(level: .region, geohash: "9q"),
-            GeohashChannel(level: .province, geohash: "9q8y"),
-            GeohashChannel(level: .city, geohash: "9q8yy"),
-            GeohashChannel(level: .neighborhood, geohash: "9q8yyk"),
-            GeohashChannel(level: .block, geohash: "9q8yyk8"),
-            GeohashChannel(level: .building, geohash: "9q8yyk8y")
-        ]
-        let service = makeService(
-            scheduler: scheduler,
-            availableChannels: channels,
-            deriveIdentity: { _ in identity },
-            relayLookup: { geohash, _ in
-                lookedUpGeohashes.append(geohash)
-                return ["wss://\(geohash).example"]
-            },
-            relaySender: { event, _ in
-                let geohash = event.tags.first(where: { $0.first == "g" })?[1]
-                if let geohash {
-                    sentGeohashes.append(geohash)
-                }
-            },
-            sleeper: { nanoseconds in
-                sleptNanoseconds.append(nanoseconds)
-            },
-            loopMinInterval: 17,
-            loopMaxInterval: 17,
+        let locationChanges = PassthroughSubject<[GeohashChannel], Never>()
+        let torReady = PassthroughSubject<Void, Never>()
+        var derivations = 0
+        var lookups = 0
+        var publications = 0
+        let service = GeohashPresenceService(
+            availableChannelsProvider: { [GeohashChannel(level: .city, geohash: "00000")] },
+            locationChanges: locationChanges.eraseToAnyPublisher(),
+            torReadyPublisher: torReady.eraseToAnyPublisher(),
+            torIsReady: { true },
+            torIsForeground: { true },
+            deriveIdentity: { _ in derivations += 1; return try NostrIdentity.generate() },
+            relayLookup: { _, _ in lookups += 1; return ["wss://relay.invalid"] },
+            relaySender: { _, _ in publications += 1 },
+            sleeper: { _ in },
+            scheduleTimer: scheduler.schedule(interval:handler:),
+            loopMinInterval: 40,
+            loopMaxInterval: 40,
             burstMinDelay: 0,
             burstMaxDelay: 0
         )
+        defer { service.stopForPanic() }
 
         service.start()
-        service.performHeartbeat()
+        service.broadcastPresence(for: "00000")
 
-        let sentAllAllowedChannels = await waitUntil { sentGeohashes.count == 3 }
-        XCTAssertTrue(sentAllAllowedChannels)
-        XCTAssertEqual(Set(sentGeohashes), Set(["9q", "9q8y", "9q8yy"]))
-        XCTAssertEqual(Set(lookedUpGeohashes), Set(["9q", "9q8y", "9q8yy"]))
-        XCTAssertEqual(sleptNanoseconds.count, 3)
-        XCTAssertEqual(scheduler.intervals, [17, 17])
+        #expect(scheduler.intervals.isEmpty)
+        #expect(derivations == 0)
+        #expect(lookups == 0)
+        #expect(publications == 0)
     }
+}
 
-    func test_performHeartbeat_skipsBroadcastWhenTorIsNotReady() async {
+@MainActor
+struct GeohashPresenceServiceTests {
+    @Test(arguments: [false, true])
+    func everyLegacyTriggerStaysInertEvenWhenConnectivityChanges(ready: Bool) {
         let scheduler = MockGeohashPresenceScheduler()
-        var sendCount = 0
-        let service = makeService(
-            scheduler: scheduler,
-            torIsReady: { false },
-            relaySender: { _, _ in sendCount += 1 },
-            loopMinInterval: 21,
-            loopMaxInterval: 21
-        )
-
+        let location = PassthroughSubject<[GeohashChannel], Never>()
+        let tor = PassthroughSubject<Void, Never>()
+        var effects: [String] = []
+        let service = GeohashPresenceService(
+            availableChannelsProvider: { effects.append("channels"); return [] },
+            locationChanges: location.eraseToAnyPublisher(), torReadyPublisher: tor.eraseToAnyPublisher(),
+            torIsReady: { effects.append("tor"); return ready },
+            torIsForeground: { effects.append("foreground"); return true },
+            deriveIdentity: { _ in effects.append("derive"); return try NostrIdentity.generate() },
+            relayLookup: { _, _ in effects.append("lookup"); return ["wss://synthetic.invalid"] },
+            relaySender: { _, _ in effects.append("publish") },
+            sleeper: { _ in effects.append("sleep") }, scheduleTimer: scheduler.schedule(interval:handler:))
         service.start()
+        service.handleLocationChange()
+        service.handleConnectivityChange()
+        service.scheduleNextHeartbeat()
         service.performHeartbeat()
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        XCTAssertEqual(sendCount, 0)
-        XCTAssertEqual(scheduler.intervals, [21, 21])
-    }
-
-    func test_performHeartbeat_skipsBroadcastWhenAppIsBackgrounded() async {
-        let scheduler = MockGeohashPresenceScheduler()
-        var sendCount = 0
-        let service = makeService(
-            scheduler: scheduler,
-            torIsForeground: { false },
-            relaySender: { _, _ in sendCount += 1 },
-            loopMinInterval: 22,
-            loopMaxInterval: 22
-        )
-
-        service.start()
-        service.performHeartbeat()
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        XCTAssertEqual(sendCount, 0)
-        XCTAssertEqual(scheduler.intervals, [22, 22])
-    }
-
-    func test_stopForPanic_cancelsTimerAndSuppressesDelayedBroadcast() async throws {
-        let identity = try NostrIdentity.generate()
-        let scheduler = MockGeohashPresenceScheduler()
-        var sleeperContinuation: CheckedContinuation<Void, Never>?
-        var sendCount = 0
-        let service = makeService(
-            scheduler: scheduler,
-            deriveIdentity: { _ in identity },
-            relaySender: { _, _ in sendCount += 1 },
-            sleeper: { _ in
-                await withCheckedContinuation { continuation in
-                    sleeperContinuation = continuation
-                }
-            },
-            burstMinDelay: 1,
-            burstMaxDelay: 1
-        )
-
-        service.start()
-        service.performHeartbeat()
-        let delayStarted = await waitUntil {
-            sleeperContinuation != nil
-        }
-        XCTAssertTrue(delayStarted)
-
+        location.send([GeohashChannel(level: .city, geohash: "00000")])
+        tor.send(())
+        service.broadcastPresence(for: "00000")
         service.stopForPanic()
-        sleeperContinuation?.resume()
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        XCTAssertEqual(sendCount, 0)
-        XCTAssertEqual(scheduler.timers.first?.invalidateCallCount, 1)
-    }
-
-    func test_broadcastPresence_skipsSendWhenNoRelaysAreAvailable() async throws {
-        let identity = try NostrIdentity.generate()
-        var sendCount = 0
-        let service = makeService(
-            scheduler: MockGeohashPresenceScheduler(),
-            deriveIdentity: { _ in identity },
-            relayLookup: { _, _ in [] },
-            relaySender: { _, _ in sendCount += 1 }
-        )
-
-        service.broadcastPresence(for: "9q8yy")
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        XCTAssertEqual(sendCount, 0)
-    }
-
-    func test_broadcastPresence_skipsSendWhenIdentityDerivationFails() async {
-        enum PresenceError: Error { case failed }
-
-        var sendCount = 0
-        let service = makeService(
-            scheduler: MockGeohashPresenceScheduler(),
-            deriveIdentity: { _ in throw PresenceError.failed },
-            relaySender: { _, _ in sendCount += 1 }
-        )
-
-        service.broadcastPresence(for: "9q8yy")
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        XCTAssertEqual(sendCount, 0)
-    }
-
-    private func makeService(
-        scheduler: MockGeohashPresenceScheduler,
-        availableChannels: [GeohashChannel] = [
-            GeohashChannel(level: .city, geohash: "9q8yy")
-        ],
-        torIsReady: @escaping () -> Bool = { true },
-        torIsForeground: @escaping () -> Bool = { true },
-        deriveIdentity: @escaping (String) throws -> NostrIdentity = { _ in try NostrIdentity.generate() },
-        relayLookup: @escaping (String, Int) -> [String] = { geohash, _ in ["wss://\(geohash).example"] },
-        relaySender: @escaping (NostrEvent, [String]) -> Void = { _, _ in },
-        sleeper: @escaping (UInt64) async -> Void = { _ in },
-        loopMinInterval: TimeInterval = 40,
-        loopMaxInterval: TimeInterval = 40,
-        burstMinDelay: TimeInterval = 0,
-        burstMaxDelay: TimeInterval = 0
-    ) -> GeohashPresenceService {
-        let locationSubject = PassthroughSubject<[GeohashChannel], Never>()
-        let torReadySubject = PassthroughSubject<Void, Never>()
-        return GeohashPresenceService(
-            availableChannelsProvider: { availableChannels },
-            locationChanges: locationSubject.eraseToAnyPublisher(),
-            torReadyPublisher: torReadySubject.eraseToAnyPublisher(),
-            torIsReady: torIsReady,
-            torIsForeground: torIsForeground,
-            deriveIdentity: deriveIdentity,
-            relayLookup: relayLookup,
-            relaySender: relaySender,
-            sleeper: sleeper,
-            scheduleTimer: scheduler.schedule(interval:handler:),
-            loopMinInterval: loopMinInterval,
-            loopMaxInterval: loopMaxInterval,
-            burstMinDelay: burstMinDelay,
-            burstMaxDelay: burstMaxDelay
-        )
-    }
-
-    private func waitUntil(
-        timeout: TimeInterval = TestConstants.settleTimeout,
-        condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if condition() {
-                return true
-            }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        return condition()
+        service.start()
+        service.broadcastPresence(for: "zzzzz")
+        #expect(scheduler.intervals.isEmpty)
+        #expect(effects.isEmpty)
     }
 }
 

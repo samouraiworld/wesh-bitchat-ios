@@ -117,7 +117,7 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     @Published private(set) var permissionState: PermissionState = .notDetermined
     @Published private(set) var availableChannels: [GeohashChannel] = []
     @Published private(set) var selectedChannel: ChannelID = .mesh
-    @Published var teleported: Bool = false
+    @Published private(set) var teleported: Bool = false
     @Published private(set) var locationNames: [GeohashChannelLevel: String] = [:]
 
     // MARK: - Published State (Bookmarks)
@@ -131,6 +131,22 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     private var bookmarkMembership: Set<String> = []
     private var resolvingNames: Set<String> = []
     private let storage: UserDefaults
+    // Delegate/geocoder callbacks may arrive off Main. The recursive lock
+    // serializes retirement with every mutation, including synchronous fakes.
+    private let lifecycleLock = NSRecursiveLock()
+    private var retiredForPanic = false
+
+    private func beginActiveMutation() -> Bool {
+        lifecycleLock.lock()
+        guard !retiredForPanic else { lifecycleLock.unlock(); return false }
+        return true
+    }
+
+    private func withActiveState(_ body: () -> Void) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
+        body()
+    }
 
     /// Returns true if running in test environment
     private static var isRunningTests: Bool {
@@ -192,6 +208,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     private func loadPersistedState() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         // Load selected channel
         if let data = storage.data(forKey: selectedChannelKey),
            let channel = try? JSONDecoder().decode(ChannelID.self, from: data) {
@@ -232,6 +250,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     /// Correctly resolved names written after this migration must survive
     /// subsequent launches, so the migration is explicitly versioned.
     private func migrateBookmarkNamesIfNeeded() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         guard storage.integer(forKey: bookmarkNamesSchemaVersionKey) < bookmarkNamesCurrentSchemaVersion else {
             return
         }
@@ -247,6 +267,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     private func initializePermissionState() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let status = cl.authorizationStatus
         updatePermissionState(from: status)
 
@@ -266,29 +288,35 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     // MARK: - Public API (Permissions & Location)
 
     func enableLocationChannels() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let status = cl.authorizationStatus
         switch status {
         case .notDetermined:
             cl.requestWhenInUseAuthorization()
         case .restricted:
-            Task { @MainActor in self.permissionState = .restricted }
+            Task { @MainActor in self.withActiveState { self.permissionState = .restricted } }
         case .denied:
-            Task { @MainActor in self.permissionState = .denied }
+            Task { @MainActor in self.withActiveState { self.permissionState = .denied } }
         case .authorizedAlways, .authorizedWhenInUse, .authorized:
-            Task { @MainActor in self.permissionState = .authorized }
+            Task { @MainActor in self.withActiveState { self.permissionState = .authorized } }
             requestOneShotLocation()
         @unknown default:
-            Task { @MainActor in self.permissionState = .restricted }
+            Task { @MainActor in self.withActiveState { self.permissionState = .restricted } }
         }
     }
 
     func refreshChannels() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         if permissionState == .authorized {
             requestOneShotLocation()
         }
     }
 
     func beginLiveRefresh(interval _: TimeInterval = TransportConfig.locationLiveRefreshInterval) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         guard permissionState == .authorized else { return }
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -299,6 +327,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     func endLiveRefresh() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         refreshTimer?.invalidate()
         refreshTimer = nil
         cl.stopUpdatingLocation()
@@ -309,31 +339,37 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     // MARK: - Public API (Channel Selection)
 
     func select(_ channel: ChannelID) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         Task { @MainActor in
-            self.selectedChannel = channel
-            if let data = try? JSONEncoder().encode(channel) {
-                self.storage.set(data, forKey: self.selectedChannelKey)
-            }
+            self.withActiveState {
+                self.selectedChannel = channel
+                if let data = try? JSONEncoder().encode(channel) {
+                    self.storage.set(data, forKey: self.selectedChannelKey)
+                }
 
-            switch channel {
-            case .mesh:
-                self.teleported = false
-            case .location(let ch):
-                let inRegional = self.availableChannels.contains { $0.geohash == ch.geohash }
-                if inRegional {
+                switch channel {
+                case .mesh:
                     self.teleported = false
-                    if self.teleportedSet.contains(ch.geohash) {
-                        self.teleportedSet.remove(ch.geohash)
-                        self.persistTeleportedSet()
+                case .location(let ch):
+                    let inRegional = self.availableChannels.contains { $0.geohash == ch.geohash }
+                    if inRegional {
+                        self.teleported = false
+                        if self.teleportedSet.contains(ch.geohash) {
+                            self.teleportedSet.remove(ch.geohash)
+                            self.persistTeleportedSet()
+                        }
+                    } else {
+                        self.teleported = self.teleportedSet.contains(ch.geohash)
                     }
-                } else {
-                    self.teleported = self.teleportedSet.contains(ch.geohash)
                 }
             }
         }
     }
 
     func markTeleported(for geohash: String, _ flag: Bool) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         if flag {
             teleportedSet.insert(geohash)
         } else {
@@ -341,17 +377,21 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
         }
         persistTeleportedSet()
         if case .location(let ch) = selectedChannel, ch.geohash == geohash {
-            Task { @MainActor in self.teleported = flag }
+            Task { @MainActor in self.withActiveState { self.teleported = flag } }
         }
     }
 
     // MARK: - Public API (Bookmarks)
 
     func isBookmarked(_ geohash: String) -> Bool {
-        bookmarkMembership.contains(Self.normalizeGeohash(geohash))
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return bookmarkMembership.contains(Self.normalizeGeohash(geohash))
     }
 
     func toggleBookmark(_ geohash: String) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let gh = Self.normalizeGeohash(geohash)
         if bookmarkMembership.contains(gh) {
             removeBookmark(gh)
@@ -361,6 +401,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     func addBookmark(_ geohash: String) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let gh = Self.normalizeGeohash(geohash)
         guard !gh.isEmpty, !bookmarkMembership.contains(gh) else { return }
         bookmarks.insert(gh, at: 0)
@@ -370,6 +412,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     func removeBookmark(_ geohash: String) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let gh = Self.normalizeGeohash(geohash)
         guard bookmarkMembership.contains(gh) else { return }
         if let idx = bookmarks.firstIndex(of: gh) {
@@ -385,10 +429,14 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     // MARK: - CLLocationManagerDelegate
 
     private func requestOneShotLocation() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         cl.requestLocation()
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let newState = updatePermissionState(from: status)
         if newState == .authorized {
             requestOneShotLocation()
@@ -397,6 +445,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
 
     @available(iOS 14.0, macOS 11.0, *)
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let newState = updatePermissionState(from: manager.authorizationStatus)
         if newState == .authorized {
             requestOneShotLocation()
@@ -404,12 +454,16 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         guard let loc = locations.last else { return }
         computeChannels(from: loc.coordinate)
         reverseGeocodeLocation(loc)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         SecureLogger.error("LocationStateManager: location error: \(error.localizedDescription)", category: .session)
     }
 
@@ -417,6 +471,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
 
     @discardableResult
     private func updatePermissionState(from status: CLAuthorizationStatus) -> PermissionState {
+        guard beginActiveMutation() else { return .restricted }
+        defer { lifecycleLock.unlock() }
         let newState: PermissionState
         switch status {
         case .notDetermined: newState = .notDetermined
@@ -432,13 +488,15 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
         if newState != .authorized {
             endLiveRefresh()
         }
-        Task { @MainActor in self.permissionState = newState }
+        Task { @MainActor in self.withActiveState { self.permissionState = newState } }
         return newState
     }
 
     // MARK: - Private Helpers (Channel Computation)
 
     private func computeChannels(from coord: CLLocationCoordinate2D) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let levels = GeohashChannelLevel.allCases
         var result: [GeohashChannel] = []
         for level in levels {
@@ -446,20 +504,22 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
             result.append(GeohashChannel(level: level, geohash: gh))
         }
         Task { @MainActor in
-            self.availableChannels = result
-            switch self.selectedChannel {
-            case .mesh:
-                self.teleported = false
-            case .location(let ch):
-                let inRegional = result.contains { $0.geohash == ch.geohash }
-                if inRegional {
+            self.withActiveState {
+                self.availableChannels = result
+                switch self.selectedChannel {
+                case .mesh:
                     self.teleported = false
-                    if self.teleportedSet.contains(ch.geohash) {
-                        self.teleportedSet.remove(ch.geohash)
-                        self.persistTeleportedSet()
+                case .location(let ch):
+                    let inRegional = result.contains { $0.geohash == ch.geohash }
+                    if inRegional {
+                        self.teleported = false
+                        if self.teleportedSet.contains(ch.geohash) {
+                            self.teleportedSet.remove(ch.geohash)
+                            self.persistTeleportedSet()
+                        }
+                    } else {
+                        self.teleported = true
                     }
-                } else {
-                    self.teleported = true
                 }
             }
         }
@@ -468,12 +528,16 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     // MARK: - Private Helpers (Geocoding)
 
     private func reverseGeocodeLocation(_ location: CLLocation) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         geocoder.cancelGeocode()
         geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
             guard let self = self else { return }
+            guard self.beginActiveMutation() else { return }
+            defer { self.lifecycleLock.unlock() }
             if let pm = placemarks?.first {
                 let names = self.locationNamesByLevel(from: pm)
-                Task { @MainActor in self.locationNames = names }
+                Task { @MainActor in self.withActiveState { self.locationNames = names } }
             }
         }
     }
@@ -514,6 +578,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     func resolveBookmarkNameIfNeeded(for geohash: String) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         let gh = Self.normalizeGeohash(geohash)
         guard !gh.isEmpty, bookmarkNames[gh] == nil, !resolvingNames.contains(gh) else { return }
         resolvingNames.insert(gh)
@@ -533,11 +599,15 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
             let loc = CLLocation(latitude: center.lat, longitude: center.lon)
             geocoder.reverseGeocodeLocation(loc) { [weak self] placemarks, _ in
                 guard let self = self else { return }
+                guard self.beginActiveMutation() else { return }
+                defer { self.lifecycleLock.unlock() }
                 defer { self.resolvingNames.remove(gh) }
                 if let pm = placemarks?.first,
                    let name = Self.nameForGeohashLength(gh.count, from: pm),
                    !name.isEmpty {
                     DispatchQueue.main.async {
+                        guard self.beginActiveMutation() else { return }
+                        defer { self.lifecycleLock.unlock() }
                         self.bookmarkNames[gh] = name
                         self.persistBookmarkNames()
                     }
@@ -547,11 +617,15 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     }
 
     private func resolveCompositeAdminName(geohash gh: String, points: [CLLocation]) {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         var uniqueRegions: [String] = []
         var seenRegions = Set<String>()
         var idx = 0
 
         func step() {
+            guard self.beginActiveMutation() else { return }
+            defer { self.lifecycleLock.unlock() }
             if idx >= points.count {
                 let finalName: String? = {
                     if uniqueRegions.count >= 2 { return uniqueRegions[0] + " and " + uniqueRegions[1] }
@@ -559,6 +633,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
                 }()
                 if let finalName = finalName, !finalName.isEmpty {
                     DispatchQueue.main.async {
+                        guard self.beginActiveMutation() else { return }
+                        defer { self.lifecycleLock.unlock() }
                         self.bookmarkNames[gh] = finalName
                         self.persistBookmarkNames()
                     }
@@ -569,7 +645,8 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
             let loc = points[idx]
             idx += 1
             geocoder.reverseGeocodeLocation(loc) { [weak self] placemarks, _ in
-                guard self != nil else { return }
+                guard let self, self.beginActiveMutation() else { return }
+                defer { self.lifecycleLock.unlock() }
                 if let pm = placemarks?.first {
                     if let country = pm.country, !country.isEmpty {
                         if !seenRegions.contains(country) {
@@ -607,37 +684,62 @@ final class LocationStateManager: NSObject, CLLocationManagerDelegate, Observabl
     // MARK: - Private Helpers (Persistence)
 
     private func persistTeleportedSet() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         if let data = try? JSONEncoder().encode(Array(teleportedSet)) {
             storage.set(data, forKey: teleportedStoreKey)
         }
     }
 
     private func persistBookmarks() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         if let data = try? JSONEncoder().encode(bookmarks) {
             storage.set(data, forKey: bookmarksKey)
         }
     }
 
     private func persistBookmarkNames() {
+        guard beginActiveMutation() else { return }
+        defer { lifecycleLock.unlock() }
         if let data = try? JSONEncoder().encode(bookmarkNames) {
             storage.set(data, forKey: bookmarkNamesKey)
         }
     }
 
-    /// Removes all persisted location state and resets the in-memory view.
-    /// Used by the panic wipe — selected channel, teleport set and bookmarks
-    /// (which reveal where the user has been) must not survive on device.
-    func panicWipe() {
-        storage.removeObject(forKey: selectedChannelKey)
-        storage.removeObject(forKey: teleportedStoreKey)
-        storage.removeObject(forKey: bookmarksKey)
-        storage.removeObject(forKey: bookmarkNamesKey)
+    /// Permanently fences an already retained owner before checked disk erasure.
+    /// No singleton is constructed and delayed callbacks cannot revive this owner.
+    func retireForPanic() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        retiredForPanic = true
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        cl.delegate = nil
+        cl.stopUpdatingLocation()
+        geocoder.cancelGeocode()
+        resolvingNames.removeAll()
         teleportedSet.removeAll()
         bookmarkMembership.removeAll()
         bookmarks = []
         bookmarkNames = [:]
+        locationNames = [:]
+        availableChannels = []
+        permissionState = .restricted
         teleported = false
         selectedChannel = .mesh
+    }
+
+    /// Compatibility for existing injected callers. Global panic separately
+    /// verifies all seven legacy keys and both cache files with its disk eraser.
+    func panicWipe() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        retireForPanic()
+        storage.removeObject(forKey: selectedChannelKey)
+        storage.removeObject(forKey: teleportedStoreKey)
+        storage.removeObject(forKey: bookmarksKey)
+        storage.removeObject(forKey: bookmarkNamesKey)
     }
 
     private static func normalizeGeohash(_ s: String) -> String {

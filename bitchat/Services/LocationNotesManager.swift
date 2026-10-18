@@ -57,8 +57,8 @@ struct LocationNotesDependencies {
     )
 }
 
-/// Persistent location notes (Nostr kind 1) scoped to a building-level geohash (precision 8).
-/// Subscribes to and publishes notes for a given geohash and provides a send API.
+/// Retired geographic notes compatibility model. Public subscription and
+/// publication APIs refuse work while historical note decoding stays available.
 @MainActor
 final class LocationNotesManager: ObservableObject {
     enum State: Equatable {
@@ -111,69 +111,18 @@ final class LocationNotesManager: ObservableObject {
     @Published private(set) var initialLoadComplete: Bool = false
     @Published private(set) var state: State = .loading
     @Published private(set) var errorMessage: String?
-    private var subscriptionID: String?
-    private var noteIDs = Set<String>() // O(1) duplicate detection
-    private var directoryUpdateCancellable: AnyCancellable?
-    private var expiryPruneTimer: Timer?
-    private var connectivityRetryTimer: Timer?
     private let dependencies: LocationNotesDependencies
-    private let maxNotesInMemory = 500 // Defensive cap (relay limit is 200)
-
-    private enum Strings {
-        static let noRelays = String(localized: "location_notes.error.no_relays", comment: "Shown when no geo relays are available near the selected location")
-
-        static func failedToSend(_ detail: String) -> String {
-            String(
-                format: String(localized: "location_notes.error.failed_to_send", comment: "Shown when a location note fails to send"),
-                locale: .current,
-                detail
-            )
-        }
-    }
 
     init(geohash: String, dependencies: LocationNotesDependencies = .live) {
-        let norm = geohash.lowercased()
-        self.geohash = norm
+        self.geohash = geohash.lowercased()
         self.dependencies = dependencies
-        if !Geohash.isValidGeohash(norm) {
-            SecureLogger.warning("LocationNotesManager: invalid geohash '\(norm)' (expected 1-12 valid base32 chars)", category: .session)
-        }
-        subscribe()
-        // The relay directory may load after init (remote fetch over Tor);
-        // retry automatically instead of staying stuck on "no relays".
-        directoryUpdateCancellable = dependencies.relayDirectoryUpdates
-            .sink { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self, self.state == .noRelays else { return }
-                    self.subscribe()
-                }
-            }
-        // NIP-40 notes can expire while displayed (a 24h dead drop crossing
-        // its boundary); ingest-time filtering alone would keep it visible
-        // until the subscription is recreated.
-        expiryPruneTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.pruneExpiredNotes()
-            }
-        }
+        // Retired notes keep their compatibility state without creating a
+        // subscription, directory observer, timer or local echo.
+        state = .idle
+        initialLoadComplete = true
     }
 
-    deinit {
-        expiryPruneTimer?.invalidate()
-        connectivityRetryTimer?.invalidate()
-        // A live REQ must not outlive its manager: relays would keep
-        // streaming events nobody consumes. deinit is nonisolated, so hop to
-        // the main actor with just the captured closure and id.
-        if let sub = subscriptionID {
-            let unsubscribe = dependencies.unsubscribe
-            Task { @MainActor in
-                unsubscribe(sub)
-            }
-        }
-    }
-
-    /// Drops notes whose NIP-40 expiry has passed. Their ids stay in
-    /// `noteIDs` so a relay replay cannot resurrect them.
+    /// Drops expired notes from the retained historical presentation model.
     func pruneExpiredNotes() {
         let now = dependencies.now()
         let expired = notes.contains { note in
@@ -193,161 +142,23 @@ final class LocationNotesManager: ObservableObject {
     // acquire the new cell instead.
 
     func refresh() {
-        if let sub = subscriptionID {
-            dependencies.unsubscribe(sub)
-            subscriptionID = nil
-        }
-        // Set loading state before clearing to prevent empty state flicker
-        state = .loading
-        initialLoadComplete = false
-        errorMessage = nil
         notes.removeAll()
-        noteIDs.removeAll()
-        subscribe()
-    }
-
-    func clearError() {
+        state = .idle
+        initialLoadComplete = true
         errorMessage = nil
     }
 
-    private func subscribe() {
-        state = .loading
-        errorMessage = nil
-        connectivityRetryTimer?.invalidate()
-        connectivityRetryTimer = nil
-        if let sub = subscriptionID {
-            dependencies.unsubscribe(sub)
-            subscriptionID = nil
-        }
-        let subID = "locnotes-\(geohash)-\(UUID().uuidString.prefix(8))"
-        let relays = dependencies.relayLookup(geohash, TransportConfig.nostrGeoRelayCount)
-        guard !relays.isEmpty else {
-            subscriptionID = nil
-            initialLoadComplete = true
-            state = .noRelays
-            errorMessage = Strings.noRelays
-            SecureLogger.warning("LocationNotesManager: no geo relays for geohash=\(geohash)", category: .session)
-            return
-        }
-
-        subscriptionID = subID
-        initialLoadComplete = false
-
-        // Subscribe to center + 8 neighbors (± 1 grid)
-        let neighbors = Geohash.neighbors(of: geohash)
-        let allGeohashes = [geohash] + neighbors
-        let filter = NostrFilter.geohashNotes(allGeohashes, since: nil, limit: 200)
-
-        // Build a set of valid geohashes for tag matching (includes all 9 cells)
-        let validGeohashes = Set(allGeohashes.map { $0.lowercased() })
-
-        dependencies.subscribe(filter, subID, relays, { [weak self] event in
-            guard let self = self else { return }
-            guard event.kind == NostrProtocol.EventKind.textNote.rawValue else { return }
-            // Ensure matching tag - accept any of our 9 geohashes
-            guard event.tags.contains(where: { tag in
-                tag.count >= 2 && tag[0].lowercased() == "g" && validGeohashes.contains(tag[1].lowercased())
-            }) else { return }
-            guard !self.noteIDs.contains(event.id) else { return }
-            // NIP-40: relays are not required to enforce expiration — drop
-            // expired notes client-side so 24h dead drops actually vanish.
-            let expiresAt = Self.expirationDate(of: event)
-            if let expiresAt, expiresAt <= self.dependencies.now() { return }
-            self.noteIDs.insert(event.id)
-            let nick = event.tags.first(where: { $0.first?.lowercased() == "n" && $0.count >= 2 })?.dropFirst().first
-            // Keep the existing one-hour future-date clamp.
-            let latestAccepted = self.dependencies.now().addingTimeInterval(3_600)
-            let ts = min(Date(timeIntervalSince1970: TimeInterval(event.created_at)), latestAccepted)
-            let note = Note(id: event.id, pubkey: event.pubkey, content: event.content, createdAt: ts, nickname: nick, expiresAt: expiresAt)
-            self.notes.append(note)
-            self.notes.sort { $0.createdAt > $1.createdAt }
-            self.enforceMemoryCap()
-            self.state = .ready
-        }, { [weak self] in
-            guard let self = self else { return }
-            self.initialLoadComplete = true
-            guard self.state != .noRelays else { return }
-            // EOSE with no data and zero connected target relays means the
-            // 10s fallback fired while Tor was still warming up — showing
-            // "no notes" would be a lie. Wait visibly and retry.
-            if self.notes.isEmpty, !self.dependencies.anyRelayConnected(relays) {
-                self.state = .connecting
-                self.scheduleConnectivityRetry(relays: relays)
-            } else {
-                self.state = .ready
-            }
-        })
-    }
-
-    /// While `.connecting`, poll for a live target relay and re-subscribe as
-    /// soon as one appears (fresh REQ, fresh EOSE tracking). The poll dies
-    /// with the state: any subscribe/cancel invalidates it.
-    private func scheduleConnectivityRetry(relays: [String]) {
-        connectivityRetryTimer?.invalidate()
-        connectivityRetryTimer = Timer.scheduledTimer(
-            withTimeInterval: TransportConfig.uiGeoNotesConnectivityRetrySeconds,
-            repeats: true
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.retryIfRelaysAvailable(relays: relays)
-            }
-        }
-    }
+    func clearError() { errorMessage = nil }
 
     func retryIfRelaysAvailable(relays: [String]) {
-        guard state == .connecting else {
-            connectivityRetryTimer?.invalidate()
-            connectivityRetryTimer = nil
-            return
-        }
-        guard dependencies.anyRelayConnected(relays) else { return }
-        connectivityRetryTimer?.invalidate()
-        connectivityRetryTimer = nil
-        SecureLogger.debug("LocationNotesManager: relay came up, retrying notes fetch for \(geohash)", category: .session)
-        refresh()
+        // Old connectivity callbacks cannot revive a geographic subscription.
     }
 
     /// Send a location note for the current geohash using the per-geohash
     /// identity, optionally expiring via NIP-40 (dead drops pass 24h; the
     /// composer's ∞ option passes nil) and optionally tagged urgent.
     func send(content: String, nickname: String, expiresAt: Date? = nil, urgent: Bool = false) {
-        guard let trimmed = content.trimmedOrNilIfEmpty else { return }
-        let relays = dependencies.relayLookup(geohash, TransportConfig.nostrGeoRelayCount)
-        guard !relays.isEmpty else {
-            state = .noRelays
-            errorMessage = Strings.noRelays
-            SecureLogger.warning("LocationNotesManager: send blocked, no geo relays for geohash=\(geohash)", category: .session)
-            return
-        }
-        do {
-            let id = try dependencies.deriveIdentity(geohash)
-            let event = try NostrProtocol.createGeohashTextNote(
-                content: trimmed,
-                geohash: geohash,
-                senderIdentity: id,
-                nickname: nickname,
-                expiresAt: expiresAt,
-                urgent: urgent
-            )
-            dependencies.sendEvent(event, relays)
-            // Optimistic local-echo
-            let echo = Note(
-                id: event.id,
-                pubkey: id.publicKeyHex,
-                content: trimmed,
-                createdAt: Date(timeIntervalSince1970: TimeInterval(event.created_at)),
-                nickname: nickname,
-                expiresAt: expiresAt
-            )
-            self.noteIDs.insert(event.id)
-            self.notes.insert(echo, at: 0)
-            self.enforceMemoryCap()
-            self.state = .ready
-            self.errorMessage = nil
-        } catch {
-            SecureLogger.error("LocationNotesManager: failed to send note: \(error)", category: .session)
-            errorMessage = Strings.failedToSend(error.localizedDescription)
-        }
+        // Retired notes never derive identities, publish, or create a local echo.
     }
 
     /// The NIP-40 `expiration` tag as a date, if the event carries one.
@@ -358,18 +169,8 @@ final class LocationNotesManager: ObservableObject {
         return Date(timeIntervalSince1970: seconds)
     }
 
-    /// Enforces defensive memory cap on notes array (keeps newest).
-    private func enforceMemoryCap() {
-        if notes.count > maxNotesInMemory {
-            let removed = notes.count - maxNotesInMemory
-            notes = Array(notes.prefix(maxNotesInMemory))
-            SecureLogger.debug("LocationNotesManager: trimmed \(removed) old notes (cap: \(maxNotesInMemory))", category: .session)
-        }
-    }
-
-    /// One-shot dead-drop publish without holding a subscription: pins a
-    /// note to `geohash` that expires via NIP-40. Returns false when no geo
-    /// relays are known or signing fails.
+    /// Retained command boundary: geographic drops are refused without
+    /// resolving relay directories or identities.
     @MainActor
     static func postDrop(
         content: String,
@@ -378,39 +179,11 @@ final class LocationNotesManager: ObservableObject {
         expiry: TimeInterval = TransportConfig.locationDropExpirySeconds,
         dependencies: LocationNotesDependencies = .live
     ) -> Bool {
-        guard let trimmed = content.trimmedOrNilIfEmpty else { return false }
-        let relays = dependencies.relayLookup(geohash, TransportConfig.nostrGeoRelayCount)
-        guard !relays.isEmpty else {
-            SecureLogger.warning("LocationNotesManager: drop blocked, no geo relays for geohash=\(geohash)", category: .session)
-            return false
-        }
-        do {
-            let identity = try dependencies.deriveIdentity(geohash)
-            let event = try NostrProtocol.createGeohashTextNote(
-                content: trimmed,
-                geohash: geohash,
-                senderIdentity: identity,
-                nickname: nickname,
-                expiresAt: dependencies.now().addingTimeInterval(expiry)
-            )
-            dependencies.sendEvent(event, relays)
-            return true
-        } catch {
-            SecureLogger.error("LocationNotesManager: failed to post drop: \(error)", category: .session)
-            return false
-        }
+        // Legacy command callers cannot revive geographic publication.
+        return false
     }
 
-    /// Explicitly cancel the subscription. The prune timer stays alive (it
-    /// holds only a weak self) so a reused instance — the notices sheet
-    /// cancels on tab switch and refreshes on return — keeps pruning.
     func cancel() {
-        if let sub = subscriptionID {
-            dependencies.unsubscribe(sub)
-            subscriptionID = nil
-        }
-        connectivityRetryTimer?.invalidate()
-        connectivityRetryTimer = nil
         state = .idle
         errorMessage = nil
     }

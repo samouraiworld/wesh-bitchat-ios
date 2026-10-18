@@ -103,11 +103,6 @@ final class AppRuntime: ObservableObject {
             privateInboxModel: self.privateInboxModel,
             onPanicWipe: { sharedContentImportModel.discardAll() }
         )
-        let chatViewModel = self.chatViewModel
-        // Wesh Internet mode talks to its pinned relays only: no geo relay directory.
-        if !WeshMode.isActive && chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
-            GeoRelayDirectory.shared.prefetchIfNeeded()
-        }
         configureComposerDrafts()
         bindRuntimeObservers()
         NotificationDelegate.shared.runtime = self

@@ -105,6 +105,14 @@ extension ChatViewModel: GeohashSubscriptionContext {
     }
 }
 
+struct GeohashSubscriptionDependencies {
+    var torIsReady: @MainActor () -> Bool = { TorManager.shared.isReady }
+    var subscribe: @MainActor (NostrFilter, String, @escaping (NostrEvent) -> Void) -> Void = { filter, id, handler in
+        NostrRelayManager.shared.subscribe(filter: filter, id: id, handler: handler)
+    }
+    var unsubscribe: @MainActor (String) -> Void = { NostrRelayManager.shared.unsubscribe(id: $0) }
+}
+
 /// Owns subscription IDs and relay lifecycle for geohash channels, geohash
 /// DMs and background geohash sampling. Geographic inbound events are
 /// forwarded to `NostrInboundPipeline` / `GeoPresenceTracker`.
@@ -112,61 +120,34 @@ final class GeohashSubscriptionManager {
     private weak var context: (any GeohashSubscriptionContext)?
     private let inbound: NostrInboundPipeline
     private let presence: GeoPresenceTracker
+    private let dependencies: GeohashSubscriptionDependencies
+    private var retiredForPanic = false
 
-    init(context: any GeohashSubscriptionContext, inbound: NostrInboundPipeline, presence: GeoPresenceTracker) {
+    init(context: any GeohashSubscriptionContext, inbound: NostrInboundPipeline, presence: GeoPresenceTracker,
+         dependencies: GeohashSubscriptionDependencies = GeohashSubscriptionDependencies()) {
         self.context = context
         self.inbound = inbound
         self.presence = presence
+        self.dependencies = dependencies
     }
 
     @MainActor
     func resubscribeCurrentGeohash() {
+        guard !retiredForPanic else { return }
         guard let context else { return }
-        guard case .location(let channel) = context.activeChannel else { return }
-        guard let subID = context.geoSubscriptionID else {
-            switchLocationChannel(to: context.activeChannel)
-            return
+        if let subID = context.geoSubscriptionID {
+            dependencies.unsubscribe(subID)
+            context.setGeoChatSubscriptionID(nil)
         }
-
-        context.startGeoParticipantRefreshTimer()
-        NostrRelayManager.shared.unsubscribe(id: subID)
-        let filter = NostrFilter.geohashEphemeral(
-            channel.geohash,
-            since: Date().addingTimeInterval(-TransportConfig.nostrGeohashInitialLookbackSeconds),
-            limit: TransportConfig.nostrGeohashInitialLimit
-        )
-        let subRelays = GeoRelayDirectory.shared.closestRelays(
-            toGeohash: channel.geohash,
-            count: TransportConfig.nostrGeoRelayCount
-        )
-        NostrRelayManager.shared.subscribe(filter: filter, id: subID, relayUrls: subRelays) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.inbound.subscribeNostrEvent(event)
-            }
-        }
-
-        if let dmSub = context.geoDmSubscriptionID {
-            NostrRelayManager.shared.unsubscribe(id: dmSub)
-            context.setGeoDmSubscriptionID(nil)
-        }
-
-        if let identity = try? context.deriveNostrIdentity(forGeohash: channel.geohash) {
-            let dmSub = "geo-dm-\(channel.geohash)"
-            context.setGeoDmSubscriptionID(dmSub)
-            let dmFilter = NostrFilter.giftWrapsFor(
-                pubkey: identity.publicKeyHex,
-                since: Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds)
-            )
-            NostrRelayManager.shared.subscribe(filter: dmFilter, id: dmSub) { [weak self] giftWrap in
-                Task { @MainActor [weak self] in
-                    self?.inbound.subscribeGiftWrap(giftWrap, id: identity)
-                }
-            }
-        }
+        context.stopGeoParticipantRefreshTimer()
+        // Private derived-identity mailboxes remain a separate retirement
+        // boundary; this method can no longer create a public subscription.
+        if case .location(let channel) = context.activeChannel { subscribeToGeoChat(channel) }
     }
 
     @MainActor
     func switchLocationChannel(to channel: ChannelID) {
+        guard !retiredForPanic else { return }
         guard let context else { return }
         context.flushPublicMessagePipeline()
         context.activeChannel = channel
@@ -194,11 +175,11 @@ final class GeohashSubscriptionManager {
         }
 
         if let sub = context.geoSubscriptionID {
-            NostrRelayManager.shared.unsubscribe(id: sub)
+            dependencies.unsubscribe(sub)
             context.setGeoChatSubscriptionID(nil)
         }
         if let dmSub = context.geoDmSubscriptionID {
-            NostrRelayManager.shared.unsubscribe(id: dmSub)
+            dependencies.unsubscribe(dmSub)
             context.setGeoDmSubscriptionID(nil)
         }
         context.currentGeohash = nil
@@ -223,125 +204,66 @@ final class GeohashSubscriptionManager {
             }
         }
 
-        let subID = "geo-\(channel.geohash)"
-        context.setGeoChatSubscriptionID(subID)
-        context.startGeoParticipantRefreshTimer()
-        let ts = Date().addingTimeInterval(-TransportConfig.nostrGeohashInitialLookbackSeconds)
-        let filter = NostrFilter.geohashEphemeral(channel.geohash, since: ts, limit: TransportConfig.nostrGeohashInitialLimit)
-        let subRelays = GeoRelayDirectory.shared.closestRelays(toGeohash: channel.geohash, count: 5)
-        NostrRelayManager.shared.subscribe(filter: filter, id: subID, relayUrls: subRelays) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.inbound.handleNostrEvent(event)
-            }
-        }
-
         subscribeToGeoChat(channel)
     }
 
     @MainActor
     func subscribeToGeoChat(_ channel: GeohashChannel) {
+        guard !retiredForPanic else { return }
         guard let context else { return }
         guard let identity = try? context.deriveNostrIdentity(forGeohash: channel.geohash) else { return }
 
         let dmSub = "geo-dm-\(channel.geohash)"
         context.setGeoDmSubscriptionID(dmSub)
-        if TorManager.shared.isReady {
+        if dependencies.torIsReady() {
             SecureLogger.debug("GeoDM: subscribing DMs pub=\(identity.publicKeyHex.prefix(8))… sub=\(dmSub)", category: .session)
         }
         let dmFilter = NostrFilter.giftWrapsFor(
             pubkey: identity.publicKeyHex,
             since: Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds)
         )
-        NostrRelayManager.shared.subscribe(filter: dmFilter, id: dmSub) { [weak self] giftWrap in
+        dependencies.subscribe(dmFilter, dmSub) { [weak self] giftWrap in
             Task { @MainActor [weak self] in
-                self?.inbound.handleGiftWrap(giftWrap, id: identity)
+                guard let self, !self.retiredForPanic else { return }
+                self.inbound.handleGiftWrap(giftWrap, id: identity)
             }
         }
+    }
+
+    @MainActor
+    func retireForPanic() {
+        retiredForPanic = true
+        guard let context else { return }
+        if let sub = context.geoSubscriptionID { dependencies.unsubscribe(sub) }
+        if let sub = context.geoDmSubscriptionID { dependencies.unsubscribe(sub) }
+        context.setGeoChatSubscriptionID(nil)
+        context.setGeoDmSubscriptionID(nil)
+        context.stopGeoParticipantRefreshTimer()
+        endGeohashSampling()
+        // The separately owned account mailbox keeps its subscription and callbacks.
     }
 
     @MainActor
     func sendGeohash(context geoContext: ChatViewModel.GeoOutgoingContext) {
-        guard let context else { return }
-        let channel = geoContext.channel
-        let event = geoContext.event
-        let identity = geoContext.identity
-
-        let targetRelays = GeoRelayDirectory.shared.closestRelays(
-            toGeohash: channel.geohash,
-            count: TransportConfig.nostrGeoRelayCount
-        )
-
-        if targetRelays.isEmpty {
-            SecureLogger.warning("Geo: no geohash relays available for \(channel.geohash); not sending", category: .session)
-        } else {
-            NostrRelayManager.shared.sendEvent(event, to: targetRelays)
-        }
-
-        context.recordGeoParticipant(pubkeyHex: identity.publicKeyHex)
-        context.registerNostrKeyMapping(identity.publicKeyHex, for: PeerID(nostr: identity.publicKeyHex))
-        SecureLogger.debug(
-            "GeoTeleport: sent geo message pub=\(identity.publicKeyHex.prefix(8))… teleported=\(geoContext.teleported)",
-            category: .session
-        )
-
-        if geoContext.teleported && context.isGeohashOutsideRegionalChannels(channel.geohash) {
-            let key = identity.publicKeyHex.lowercased()
-            context.markGeoTeleported(key)
-            SecureLogger.info(
-                "GeoTeleport: mark self teleported key=\(key.prefix(8))… total=\(context.teleportedGeoCount)",
-                category: .session
-            )
-        }
-
-        context.recordProcessedNostrEvent(event.id)
+        // Public geographic sends are retired, including delayed sends made
+        // under a previous selection. Never redirect their content to mesh.
     }
 
     @MainActor
     func beginGeohashSampling(for geohashes: [String]) {
-        guard let context else { return }
-        if !TorManager.shared.isForeground() {
-            endGeohashSampling()
-            return
-        }
-
-        let desired = Set(geohashes)
-        let current = Set(context.geoSamplingSubs.values)
-        let toAdd = desired.subtracting(current)
-        let toRemove = current.subtracting(desired)
-
-        for (subID, gh) in context.geoSamplingSubs where toRemove.contains(gh) {
-            NostrRelayManager.shared.unsubscribe(id: subID)
-            context.removeGeoSamplingSub(subID)
-        }
-
-        for gh in toAdd {
-            subscribe(gh)
-        }
+        endGeohashSampling()
     }
 
     @MainActor
     func subscribe(_ gh: String) {
-        guard let context else { return }
-        let subID = "geo-sample-\(gh)"
-        context.addGeoSamplingSub(subID, forGeohash: gh)
-        let filter = NostrFilter.geohashEphemeral(
-            gh,
-            since: Date().addingTimeInterval(-TransportConfig.nostrGeohashSampleLookbackSeconds),
-            limit: TransportConfig.nostrGeohashSampleLimit
-        )
-        let subRelays = GeoRelayDirectory.shared.closestRelays(toGeohash: gh, count: 5)
-        NostrRelayManager.shared.subscribe(filter: filter, id: subID, relayUrls: subRelays) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.presence.subscribeNostrEvent(event, gh: gh)
-            }
-        }
+        // Geographic public sampling no longer opens relay subscriptions.
     }
 
     @MainActor
     func endGeohashSampling() {
         guard let context else { return }
         for subID in context.clearGeoSamplingSubs() {
-            NostrRelayManager.shared.unsubscribe(id: subID)
+            dependencies.unsubscribe(subID)
         }
         presence.clearGeoSamplingEventDedup()
     }

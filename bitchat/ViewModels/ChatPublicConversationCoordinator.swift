@@ -319,28 +319,8 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func sendPublicRaw(_ content: String) {
-        if case .location(let channel) = context.activeChannel {
-            Task { @MainActor [weak context] in
-                guard let context else { return }
-                do {
-                    let identity = try context.deriveNostrIdentity(forGeohash: channel.geohash)
-                    let event = try await NostrProtocol.createMinedEphemeralGeohashEvent(
-                        content: content,
-                        geohash: channel.geohash,
-                        senderIdentity: identity,
-                        nickname: context.nickname,
-                        teleported: context.isTeleported
-                    )
-                    let targetRelays = GeoRelayDirectory.shared.closestRelays(toGeohash: channel.geohash, count: 5)
-                    if targetRelays.isEmpty {
-                        NostrRelayManager.shared.sendEvent(event)
-                    } else {
-                        NostrRelayManager.shared.sendEvent(event, to: targetRelays)
-                    }
-                } catch {
-                    SecureLogger.error("❌ Failed to send geohash raw message: \(error)", category: .session)
-                }
-            }
+        if case .location = context.activeChannel {
+            // Retired public channels must not publish or fall back to mesh.
             return
         }
 

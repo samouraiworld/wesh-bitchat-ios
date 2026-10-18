@@ -194,7 +194,19 @@ final class GeoRelayDirectory {
         case network(String)
     }
 
-    static let shared = GeoRelayDirectory()
+    private static var existingShared: GeoRelayDirectory?
+    private static var sharedRetiredForPanic = false
+    static var shared: GeoRelayDirectory {
+        if let existingShared { return existingShared }
+        let directory = GeoRelayDirectory()
+        existingShared = directory
+        return directory
+    }
+
+    static func retireExistingForPanic() {
+        sharedRetiredForPanic = true
+        existingShared?.retireForPanic()
+    }
 
     private(set) var entries: [Entry] = []
     private let lastFetchKey = "georelay.lastFetchAt"
@@ -203,10 +215,19 @@ final class GeoRelayDirectory {
 
     private var retryAttempt: Int = 0
     private var isFetching: Bool = false
+    private var fetchTask: Task<Void, Never>?
+    private var retiredForPanic = false
+    private var fetchGeneration: UInt64 = 0
 
     private init() {
         self.dependencies = .live()
         self.cleanupState = CleanupState(notificationCenter: dependencies.notificationCenter)
+        // A first access after panic cannot create a new active owner or
+        // load/cache historical state. The registry latch never reopens.
+        guard !Self.sharedRetiredForPanic else {
+            retiredForPanic = true
+            return
+        }
         entries = loadLocalEntries()
         if dependencies.autoStart {
             registerObservers()
@@ -236,7 +257,7 @@ final class GeoRelayDirectory {
     /// Ties break by host so every device with the same directory picks the
     /// same relay set — publishers and subscribers must agree on relays.
     func closestRelays(toLat lat: Double, lon: Double, count: Int = 5) -> [String] {
-        guard !entries.isEmpty, count > 0 else { return [] }
+        guard !retiredForPanic, !entries.isEmpty, count > 0 else { return [] }
 
         return entries
             .map { (entry: $0, distance: haversineKm(lat, lon, $0.lat, $0.lon)) }
@@ -247,7 +268,7 @@ final class GeoRelayDirectory {
 
     // MARK: - Remote Fetch
     func prefetchIfNeeded(force: Bool = false) {
-        guard dependencies.remoteFetchAllowed() else { return }
+        guard !retiredForPanic, dependencies.remoteFetchAllowed() else { return }
         guard !isFetching else { return }
 
         let now = dependencies.now()
@@ -266,7 +287,7 @@ final class GeoRelayDirectory {
     }
 
     private func fetchRemote() {
-        guard dependencies.remoteFetchAllowed(), !isFetching else { return }
+        guard !retiredForPanic, dependencies.remoteFetchAllowed(), !isFetching else { return }
         isFetching = true
 
         let request = URLRequest(
@@ -278,8 +299,9 @@ final class GeoRelayDirectory {
         let fetchData = dependencies.makeFetchData()
         let validationPolicy = dependencies.validationPolicy
         let baselineEntries = Set(entries)
+        let generation = fetchGeneration
 
-        Task { [weak self] in
+        fetchTask = Task { [weak self] in
             guard let self else { return }
 
             let outcome = await Self.fetchRemoteOutcome(
@@ -290,6 +312,7 @@ final class GeoRelayDirectory {
                 baselineEntries: baselineEntries
             )
 
+            guard !self.retiredForPanic, self.fetchGeneration == generation, !Task.isCancelled else { return }
             switch outcome {
             case .success(let parsed, let csv):
                 self.handleFetchSuccess(entries: parsed, csv: csv)
@@ -301,6 +324,23 @@ final class GeoRelayDirectory {
                 self.handleFetchFailure(.network(description))
             }
         }
+    }
+
+    /// Permanently stop this owner and return the actual in-flight fetch so
+    /// callers can await its completion even if an injected transport ignores cancellation.
+    @discardableResult
+    func retireForPanic() -> Task<Void, Never>? {
+        retiredForPanic = true
+        fetchGeneration &+= 1
+        cleanupState.observers.forEach { dependencies.notificationCenter.removeObserver($0) }
+        cleanupState.observers.removeAll()
+        cleanupState.refreshTimer?.invalidate()
+        cleanupState.refreshTimer = nil
+        cancelRetry()
+        fetchTask?.cancel()
+        entries.removeAll()
+        isFetching = false
+        return fetchTask
     }
 
     nonisolated private static func fetchRemoteOutcome(
@@ -617,6 +657,7 @@ final class GeoRelayDirectory {
         RunLoop.main.add(timer, forMode: .common)
     }
 
+    var debugFetchTask: Task<Void, Never>? { fetchTask }
     var debugRetryAttempt: Int { retryAttempt }
     var debugHasRetryTask: Bool { cleanupState.retryTask != nil }
     var debugObserverCount: Int { cleanupState.observers.count }

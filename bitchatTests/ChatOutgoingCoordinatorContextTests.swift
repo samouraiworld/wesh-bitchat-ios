@@ -91,6 +91,7 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
     // Geohash identity
     struct IdentityUnavailable: Error {}
     var deriveNostrIdentityError: Error?
+    var syntheticGeographicIdentity: NostrIdentity?
     static let dummyIdentity = NostrIdentity(
         privateKey: Data(repeating: 0x11, count: 32),
         publicKey: Data(repeating: 0x22, count: 32),
@@ -100,7 +101,38 @@ private final class MockChatOutgoingContext: ChatOutgoingContext {
 
     func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
         if let deriveNostrIdentityError { throw deriveNostrIdentityError }
-        return Self.dummyIdentity
+        return syntheticGeographicIdentity ?? Self.dummyIdentity
+    }
+}
+
+@MainActor
+struct GeographicOutgoingRetirementTests {
+    @Test
+    func aRetiredGeographicSelectionCannotPublishOrFallBackToPublicMesh() async throws {
+        let context = MockChatOutgoingContext()
+        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
+        context.syntheticGeographicIdentity = try NostrIdentity.generate()
+        let coordinator = ChatOutgoingCoordinator(context: context)
+
+        coordinator.sendMessage("Synthetic retired geographic send")
+        await coordinator.geohashMiningTask?.value
+
+        #expect(context.sentGeohashContexts.isEmpty)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(context.appendedPublicMessages.isEmpty)
+        #expect(context.recordedActivityKeys.isEmpty)
+    }
+
+    @Test
+    func localPublicMeshStillPublishesAndKeepsItsLocalEcho() {
+        let context = MockChatOutgoingContext()
+        let coordinator = ChatOutgoingCoordinator(context: context)
+
+        coordinator.sendMessage("Synthetic ordinary mesh control")
+
+        #expect(context.sentMeshMessages.count == 1)
+        #expect(context.appendedPublicMessages.map(\.conversationID) == [.mesh])
+        #expect(context.sentGeohashContexts.isEmpty)
     }
 }
 
@@ -197,69 +229,34 @@ struct ChatOutgoingCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func sendMessage_onLocationChannel_sendsGeohashEventOrFailsWithSystemMessage() async {
+    func sendMessage_onRetiredLocationChannel_neverEchoesOrSendsEvenWhenIdentityFails() async {
         let context = MockChatOutgoingContext()
         let coordinator = ChatOutgoingCoordinator(context: context)
-        let channel = GeohashChannel(level: .city, geohash: "u4pruydq")
-        context.activeChannel = .location(channel)
+        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
         context.isTeleported = true
-
-        coordinator.sendMessage("hello geo")
-        // Geohash sends mine a NIP-13 nonce tag off-main before echoing and
-        // sending; await the send task, then drain the main queue.
+        coordinator.sendMessage("Synthetic retired geographic send")
         await coordinator.geohashMiningTask?.value
-        await drainMainActorTasks()
-
-        // Local echo carries the geohash sender suffix (#last-4-of-pubkey) and
-        // the signed event's ID; the send context targets the same channel.
-        #expect(context.appendedPublicMessages.count == 1)
-        let echo = context.appendedPublicMessages[0].message
-        #expect(context.appendedPublicMessages[0].conversationID == .geohash("u4pruydq"))
-        #expect(echo.sender == "me#2222")
-        #expect(context.recordedActivityKeys == ["geo:u4pruydq"])
-        #expect(context.sentGeohashContexts.count == 1)
-        let geoContext = context.sentGeohashContexts[0]
-        #expect(geoContext.channel == channel)
-        #expect(geoContext.teleported)
-        #expect(geoContext.event.id == echo.id)
-
-        // Identity derivation failure: system message, no echo, no send.
         context.deriveNostrIdentityError = MockChatOutgoingContext.IdentityUnavailable()
-        coordinator.sendMessage("doomed")
+        coordinator.sendMessage("Synthetic identity failure control")
         await drainMainActorTasks()
-        #expect(context.systemMessages.count == 1)
-        #expect(context.appendedPublicMessages.count == 1)
-        #expect(context.sentGeohashContexts.count == 1)
+        #expect(context.systemMessages.isEmpty)
+        #expect(context.appendedPublicMessages.isEmpty)
+        #expect(context.sentGeohashContexts.isEmpty)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(context.recordedActivityKeys.isEmpty)
     }
 
     @Test @MainActor
-    func sendMessage_onLocationChannel_serializesRapidSendsInSendOrder() async {
+    func sendMessage_onRetiredLocationChannel_refusesRapidSendsWithoutMining() async {
         let context = MockChatOutgoingContext()
         let coordinator = ChatOutgoingCoordinator(context: context)
-        let channel = GeohashChannel(level: .city, geohash: "u4pruydq")
-        context.activeChannel = .location(channel)
-
-        // Two back-to-back sends. The first carries much larger content, so
-        // its NIP-13 mining hashes a bigger event per attempt and runs longer
-        // than the second's. Without serialization the second (faster) task
-        // could finish first and reorder both the local timeline and the
-        // relayed events. The coordinator chains the mining tasks — each send
-        // awaits the previous send's task before it echoes and relays — so the
-        // visible order must always match the send order.
-        let first = "first " + String(repeating: "x", count: 4000)
-        let second = "second"
-        coordinator.sendMessage(first)
-        coordinator.sendMessage(second)
-
-        // The stored task is the second send, which awaits the first.
+        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
+        coordinator.sendMessage("first " + String(repeating: "x", count: 4000))
+        coordinator.sendMessage("second")
         await coordinator.geohashMiningTask?.value
-        await drainMainActorTasks()
-
-        // Local echoes land in send order…
-        #expect(context.appendedPublicMessages.map(\.message.content) == [first, second])
-        // …and so do the relayed events (IDs match the echoes 1:1, in order).
-        #expect(context.sentGeohashContexts.count == 2)
-        #expect(context.sentGeohashContexts.map(\.event.id)
-                == context.appendedPublicMessages.map(\.message.id))
+        #expect(context.appendedPublicMessages.isEmpty)
+        #expect(context.sentGeohashContexts.isEmpty)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(coordinator.geohashMiningTask == nil)
     }
 }

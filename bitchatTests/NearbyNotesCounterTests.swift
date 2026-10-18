@@ -3,81 +3,36 @@ import CoreLocation
 import XCTest
 @testable import bitchat
 
-/// Tap-to-reveal privacy contract: the nearby-notes counter must not open a
-/// building-precision relay REQ until one explicit act calls `reveal()`, and
-/// the pooled subscription must come up exactly once and go down exactly once.
+/// The retained counter and pool cannot revive the retired notes transport.
+/// Authorized-channel fixture cases remain disposable-CI-only: their legacy
+/// delegate setup constructs a platform CLLocationManager argument.
 @MainActor
 final class NearbyNotesCounterTests: XCTestCase {
-    func test_counterOnlySubscribesAfterReveal_countsUnexpiredNotes_andUnsubscribesOnDeactivate() async throws {
+    func test_revealCannotOpenRetiredNotesSubscriptionOrProvideAnInboundHandler() async throws {
         let relays = SubscriptionRecorder()
         let settings = LocationNotesSettingsStub()
         let locationManager = try await makeAuthorizedLocationManager()
-        let buildingGeohash = try XCTUnwrap(
-            locationManager.availableChannels.first(where: { $0.level == .building })?.geohash
-        )
-
         let counter = NearbyNotesCounter(
             locationManager: locationManager,
             managerFactory: { LocationNotesManager(geohash: $0, dependencies: relays.dependencies) },
-            releaseManager: { $0?.cancel() },
-            locationNotesEnabled: { settings.enabled },
-            locationNotesSettings: settings.changes
-        )
-
+            releaseManager: { $0?.cancel() }, locationNotesEnabled: { settings.enabled },
+            locationNotesSettings: settings.changes)
         counter.activate()
-        // Let the availableChannels replay and any queued retargets land:
-        // being active is not consent, so still no REQ.
-        try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertEqual(relays.subscribeCount, 0)
+        await mainQueueFence()
         XCTAssertFalse(counter.revealed)
-
+        XCTAssertEqual(relays.subscribeCount, 0)
         counter.reveal()
-
+        await mainQueueFence()
         XCTAssertTrue(counter.revealed)
-        XCTAssertEqual(relays.subscribeCount, 1)
-        let gTags = try XCTUnwrap(geohashTagFilter(of: XCTUnwrap(relays.lastFilter)))
-        XCTAssertEqual(gTags.count, 9)
-        XCTAssertEqual(
-            Set(gTags),
-            Set([buildingGeohash] + Geohash.neighbors(of: buildingGeohash)),
-            "REQ must cover the building geohash plus its 8 neighbors"
-        )
-
-        // An expired NIP-40 note must never count.
-        let identity = try NostrIdentity.generate()
-        let now = Date()
-        let expired = NostrEvent(
-            pubkey: identity.publicKeyHex,
-            createdAt: now.addingTimeInterval(-3600),
-            kind: .textNote,
-            tags: [["g", buildingGeohash], ["expiration", String(Int(now.timeIntervalSince1970) - 60)]],
-            content: "gone"
-        )
-        relays.lastHandler?(try expired.sign(with: identity.schnorrSigningKey()))
-        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(relays.subscribeCount, 0)
+        XCTAssertNil(relays.lastFilter)
+        XCTAssertNil(relays.lastHandler)
         XCTAssertEqual(counter.noteCount, 0)
-
-        // A live matching kind-1 note drives the count to 1.
-        let live = NostrEvent(
-            pubkey: identity.publicKeyHex,
-            createdAt: now,
-            kind: .textNote,
-            tags: [["g", buildingGeohash]],
-            content: "still here"
-        )
-        relays.lastHandler?(try live.sign(with: identity.schnorrSigningKey()))
-        let counted = await waitUntil { counter.noteCount == 1 }
-        XCTAssertTrue(counted)
-        // Still exactly one REQ after all the async retarget re-entries.
-        XCTAssertEqual(relays.subscribeCount, 1)
-
         counter.deactivate()
-
-        XCTAssertEqual(relays.unsubscribeCount, 1)
-        XCTAssertEqual(counter.noteCount, 0)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
     }
 
-    func test_permissionRevocation_releasesBuildingSubscriptionDespiteCachedChannels() async throws {
+    func test_permissionRevocationCannotReviveRetiredNotesDespiteCachedChannels() async throws {
         let relays = SubscriptionRecorder()
         let settings = LocationNotesSettingsStub()
         let locationManager = try await makeAuthorizedLocationManager()
@@ -91,14 +46,14 @@ final class NearbyNotesCounterTests: XCTestCase {
 
         counter.activate()
         counter.reveal()
-        XCTAssertEqual(relays.subscribeCount, 1)
+        XCTAssertEqual(relays.subscribeCount, 0)
 
         locationManager.locationManager(CLLocationManager(), didChangeAuthorization: .denied)
 
         let denied = await waitUntil { locationManager.permissionState == .denied }
         XCTAssertTrue(denied)
-        let released = await waitUntil { relays.unsubscribeCount == 1 }
-        XCTAssertTrue(released)
+        await mainQueueFence()
+        XCTAssertEqual(relays.unsubscribeCount, 0)
         XCTAssertTrue(
             locationManager.availableChannels.contains { $0.level == .building },
             "the privacy boundary must not depend on cached channels being cleared"
@@ -106,10 +61,10 @@ final class NearbyNotesCounterTests: XCTestCase {
         XCTAssertEqual(counter.noteCount, 0)
 
         counter.deactivate()
-        XCTAssertEqual(relays.unsubscribeCount, 1, "revocation already released the manager")
+        XCTAssertEqual(relays.unsubscribeCount, 0)
     }
 
-    func test_locationNotesKillSwitch_releasesAndCanReacquireBuildingSubscription() async throws {
+    func test_locationNotesKillSwitchCannotReviveRetiredNotes() async throws {
         let relays = SubscriptionRecorder()
         let settings = LocationNotesSettingsStub()
         let locationManager = try await makeAuthorizedLocationManager()
@@ -123,20 +78,20 @@ final class NearbyNotesCounterTests: XCTestCase {
 
         counter.activate()
         counter.reveal()
-        XCTAssertEqual(relays.subscribeCount, 1)
+        XCTAssertEqual(relays.subscribeCount, 0)
 
         settings.setEnabled(false)
 
-        let released = await waitUntil { relays.unsubscribeCount == 1 }
-        XCTAssertTrue(released)
+        await mainQueueFence()
+        XCTAssertEqual(relays.unsubscribeCount, 0)
         XCTAssertEqual(counter.noteCount, 0)
 
         settings.setEnabled(true)
 
-        let reacquired = await waitUntil { relays.subscribeCount == 2 }
-        XCTAssertTrue(reacquired)
+        await mainQueueFence()
+        XCTAssertEqual(relays.subscribeCount, 0)
         counter.deactivate()
-        XCTAssertEqual(relays.unsubscribeCount, 2)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
     }
 
     func test_checkNotesHint_requiresAuthorizedLocationPermission() {
@@ -179,49 +134,46 @@ final class NearbyNotesCounterTests: XCTestCase {
         let second = pool.acquire("U4PRUYDQ")
 
         XCTAssertTrue(first === second, "same geohash (case-insensitive) must share one manager")
-        XCTAssertEqual(relays.subscribeCount, 1)
+        XCTAssertEqual(relays.subscribeCount, 0)
 
         pool.release(first)
 
-        XCTAssertEqual(relays.unsubscribeCount, 0, "first release keeps the shared REQ live")
-        XCTAssertNotEqual(first.state, .idle)
+        XCTAssertEqual(relays.unsubscribeCount, 0, "retired managers never open a REQ")
+        XCTAssertEqual(first.state, .idle)
 
         pool.release(second)
 
-        XCTAssertEqual(relays.unsubscribeCount, 1)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
         XCTAssertEqual(first.state, .idle)
 
         // An instance the pool never owned (test-injected) degrades to cancel.
         let stray = LocationNotesManager(geohash: "u4pruydp", dependencies: relays.dependencies)
         pool.release(stray)
-        XCTAssertEqual(relays.unsubscribeCount, 2)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
         XCTAssertEqual(stray.state, .idle)
     }
 
-    func test_pool_reacquireAfterFullRelease_bringsSubscriptionBackUp() {
+    func test_pool_reacquireAfterFullRelease_keepsRetiredManagerIdle() {
         let relays = SubscriptionRecorder()
         let pool = LocationNotesPool(
             makeManager: { LocationNotesManager(geohash: $0, dependencies: relays.dependencies) }
         )
 
-        // The notices sheet's geo → mesh → geo cycle: switching to mesh
-        // releases (REQ goes down), switching back re-acquires (fresh REQ),
-        // with exactly one live REQ at any point.
+        // Releasing and reacquiring a retained UI model cannot reopen transport.
         let first = pool.acquire("u4pruydq")
-        XCTAssertEqual(relays.subscribeCount, 1)
+        XCTAssertEqual(relays.subscribeCount, 0)
 
         pool.release(first)
-        XCTAssertEqual(relays.unsubscribeCount, 1)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
         XCTAssertEqual(first.state, .idle)
 
         let second = pool.acquire("u4pruydq")
-        XCTAssertEqual(relays.subscribeCount, 2)
-        XCTAssertNotEqual(second.state, .idle)
+        XCTAssertEqual(relays.subscribeCount, 0)
+        XCTAssertEqual(second.state, .idle)
 
-        // Dismissal after the round trip releases once more — no double
-        // unsubscribe from the earlier tab-switch release.
+        // Dismissal also leaves the network boundary untouched.
         pool.release(second)
-        XCTAssertEqual(relays.unsubscribeCount, 2)
+        XCTAssertEqual(relays.unsubscribeCount, 0)
     }
 
     // MARK: - Helpers
@@ -273,12 +225,10 @@ final class NearbyNotesCounterTests: XCTestCase {
         return manager
     }
 
-    /// The filter's `g` tag values, read through its NIP-01 wire encoding
-    /// (the stored tag filters aren't visible outside the Nostr layer).
-    private func geohashTagFilter(of filter: NostrFilter) throws -> [String]? {
-        let data = try JSONEncoder().encode(filter)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        return json["#g"] as? [String]
+    private func mainQueueFence() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 
     private func waitUntil(
