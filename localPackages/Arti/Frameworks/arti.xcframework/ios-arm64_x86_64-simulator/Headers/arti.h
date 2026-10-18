@@ -4,6 +4,24 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define SOCKS5_REP_SUCCESS 0
+
+#define SOCKS5_REP_FAILURE 1
+
+#define SOCKS5_REP_CONN_REFUSED 5
+
+/**
+ * Concurrent connections past their handshake. More are refused, so no local app can
+ * exhaust our file descriptors.
+ */
+#define MAX_CONNECTIONS 64
+
+/**
+ * Concurrent connections still in their handshake. Kept apart and small, so sockets that
+ * never send a request cannot take the places of working ones.
+ */
+#define MAX_HANDSHAKES 16
+
 /**
  * Start Arti with a SOCKS5 proxy.
  *
