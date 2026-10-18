@@ -232,7 +232,6 @@ private final class DiagnosticsMockContext: CommandContextProvider {
     var activeChannel: ChannelID = .mesh
     var selectedPrivateChatPeer: PeerID?
     var blockedUsers: Set<String> = []
-    let idBridge = NostrIdentityBridge(keychain: MockKeychain())
 
     var nicknameToPeerID: [String: PeerID] = [:]
     private(set) var commandOutputs: [String] = []
@@ -242,7 +241,6 @@ private final class DiagnosticsMockContext: CommandContextProvider {
         nicknameToPeerID[nickname]
     }
 
-    func nostrPubkeyForDisplayName(_ displayName: String) -> String? { nil }
     func startPrivateChat(with peerID: PeerID) {}
     func sendPrivateMessage(_ content: String, to peerID: PeerID) {}
     func clearCurrentPublicTimeline() {}

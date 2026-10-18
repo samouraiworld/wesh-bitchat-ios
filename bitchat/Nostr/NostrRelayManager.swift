@@ -1418,13 +1418,6 @@ final class NostrRelayManager: ObservableObject {
         }
     }
 
-    /// Whether any of `relayUrls` currently holds a live connection. Lets
-    /// subscribers distinguish "loaded, empty" from "never reached a relay"
-    /// when an EOSE fallback fires.
-    func isAnyRelayConnected(among relayUrls: [String]) -> Bool {
-        let targets = Set(relayUrls)
-        return relays.contains { targets.contains($0.url) && $0.isConnected }
-    }
 
     /// Marks the REQ as delivered to `relayUrl`: EOSE completion now waits on
     /// this relay instead of the never-connected remainder.
@@ -1851,15 +1844,6 @@ struct NostrFilter: Encodable {
         return filter
     }
 
-    // For location channels: geohash-scoped ephemeral events (kind 20000) and presence (kind 20001)
-    static func geohashEphemeral(_ geohash: String, since: Date? = nil, limit: Int = 1000) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [20000, 20001]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["g": [geohash]]
-        filter.limit = limit
-        return filter
-    }
 
 }
 

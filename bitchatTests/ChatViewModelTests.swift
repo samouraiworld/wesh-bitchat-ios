@@ -829,7 +829,7 @@ struct ChatViewModelPublicConversationTests {
         let (viewModel, _) = makeTestableViewModel()
 
         viewModel.addPublicSystemMessage("system refresh test")
-        viewModel.refreshVisibleMessages(from: .mesh)
+        viewModel.refreshVisibleMessages()
 
         // The system message lives in the mesh conversation itself, so the
         // derived `messages` view still surfaces it after a refresh.
@@ -845,7 +845,7 @@ struct ChatViewModelPublicConversationTests {
         #expect(!viewModel.messages.isEmpty)
 
         viewModel.clearCurrentPublicTimeline()
-        viewModel.refreshVisibleMessages(from: .mesh)
+        viewModel.refreshVisibleMessages()
 
         #expect(viewModel.messages.isEmpty)
         #expect(viewModel.publicMessages(for: .mesh).isEmpty)

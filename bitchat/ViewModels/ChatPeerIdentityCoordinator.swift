@@ -90,9 +90,7 @@ protocol ChatPeerIdentityContext: AnyObject {
     /// Removes a favorite from the favorites store.
     func removeFavorite(noiseKey: Data)
 
-    // MARK: Geohash & Nostr
-    /// Records the Nostr pubkey behind a (possibly virtual) peer ID.
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID)
+    // MARK: Account Nostr identity
     func bridgedNostrPublicKey(for noiseKey: Data) -> String?
     func sendFavoriteNotificationViaNostr(noisePublicKey: Data, isFavorite: Bool)
 }
@@ -100,10 +98,9 @@ protocol ChatPeerIdentityContext: AnyObject {
 extension ChatViewModel: ChatPeerIdentityContext {
     // `privateChats`, `unreadPrivateMessages`, `selectedPrivateChatPeer`,
     // `selectedPrivateChatFingerprint`, `myPeerID`,
-    // `activeChannel`, `connectedPeers`, `geoNicknames`, `notifyUIChanged()`,
+    // `connectedPeers`, `notifyUIChanged()`,
     // `addSystemMessage(_:)`, `peerNickname(for:)`, `meshPeerNicknames()`,
     // `ephemeralPeerID(forNoiseKey:)`, `unifiedPeer(for:)`,
-    // `registerNostrKeyMapping(_:for:)`, `visibleGeohashPeople()`,
     // `markPrivateMessagesAsRead(from:)`, `sendFavoriteNotificationViaNostr`,
     // and the conversation-store sync methods are shared requirements with
     // the other contexts or satisfied by existing `ChatViewModel` members.

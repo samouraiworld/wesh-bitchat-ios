@@ -25,7 +25,6 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     var unreadPrivateMessages: Set<PeerID> = []
     var selectedPrivateChatPeer: PeerID?
     var nickname = "me"
-    var activeChannel: ChannelID = .mesh
     var nostrKeyMapping: [PeerID: String] = [:]
     private(set) var notifyUIChangedCount = 0
 
@@ -271,7 +270,6 @@ struct GeographicPrivateTransportRetirementTests {
         let coordinator = ChatPrivateConversationCoordinator(context: context)
         let recipientHex = String(repeating: "ab", count: 32)
         let legacyPeer = PeerID(nostr_: recipientHex)
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "00000"))
         context.nostrKeyMapping[legacyPeer] = recipientHex
 
         coordinator.sendPrivateMessage("Synthetic retired geographic private message", to: legacyPeer)

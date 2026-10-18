@@ -1507,10 +1507,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Invalidates the derived `messages` cache and notifies observers.
     /// (Formerly pulled the channel's timeline into a stored `messages`
     /// array; `messages` is now derived from the `ConversationStore`, so
-    /// only the invalidation remains. The `channel` parameter is kept for
-    /// call-site compatibility — every caller passes the active channel.)
+    /// only the invalidation remains.)
     @MainActor
-    func refreshVisibleMessages(from channel: ChannelID? = nil) {
+    func refreshVisibleMessages() {
         visibleMessagesCache = nil
         objectWillChange.send()
     }

@@ -66,46 +66,8 @@ private final class MockChatPublicConversationContext: ChatPublicConversationCon
         archivePurgeCount += 1
     }
 
-    // Private chats
-    var privateChats: [PeerID: [BitchatMessage]] = [:]
-    var unreadPrivateMessages: Set<PeerID> = []
-    private(set) var removedPrivateChats: [PeerID] = []
-
-    func removePrivateChat(_ peerID: PeerID) {
-        removedPrivateChats.append(peerID)
-        privateChats.removeValue(forKey: peerID)
-        unreadPrivateMessages.remove(peerID)
-    }
-
-    // Geohash participants & presence
+    // Sender key mappings
     var nostrKeyMapping: [PeerID: String] = [:]
-    var geoParticipantCounts: [String: Int] = [:]
-    private(set) var removedGeoParticipants: [String] = []
-
-    func removeNostrKeyMappings(matchingPubkeyHexLowercased hex: String) {
-        for (key, value) in nostrKeyMapping where value.lowercased() == hex {
-            nostrKeyMapping.removeValue(forKey: key)
-        }
-    }
-
-    // Nostr identity & blocking
-    var blockedNostrPubkeys: Set<String> = []
-
-    private enum GeographicFixtureError: Error {
-        case forbiddenDerivation
-    }
-
-    func isNostrBlocked(pubkeyHexLowercased: String) -> Bool {
-        blockedNostrPubkeys.contains(pubkeyHexLowercased)
-    }
-
-    func setNostrBlocked(_ pubkeyHexLowercased: String, isBlocked: Bool) {
-        if isBlocked {
-            blockedNostrPubkeys.insert(pubkeyHexLowercased)
-        } else {
-            blockedNostrPubkeys.remove(pubkeyHexLowercased)
-        }
-    }
 
     // Mesh transport
     var meshNicknames: [PeerID: String] = [:]

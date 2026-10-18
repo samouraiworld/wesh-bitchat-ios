@@ -6,7 +6,6 @@ import Foundation
 @MainActor
 protocol ChatNostrContext: NostrInboundPipelineContext, AccountNostrMailboxContext {
     var selectedPrivateChatPeer: PeerID? { get }
-    var nostrKeyMapping: [PeerID: String] { get }
 
     // MARK: Routing & acknowledgements (shared with `ChatPrivateConversationContext`)
     func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool)
@@ -80,11 +79,4 @@ final class ChatNostrCoordinator {
         let peerID = PeerID(hexData: noisePublicKey)
         context.routeFavoriteNotification(to: peerID, isFavorite: isFavorite)
     }
-
-    @MainActor
-    func fullNostrHex(forSenderPeerID senderID: PeerID) -> String? {
-        guard let context else { return nil }
-        return context.nostrKeyMapping[senderID]
-    }
-
 }

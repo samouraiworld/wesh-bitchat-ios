@@ -509,10 +509,8 @@ private final class MockCommandContextProvider: CommandContextProvider {
     var selectedPrivateChatPeer: PeerID?
     var blockedUsers: Set<String> = []
     var privateChats: [PeerID: [BitchatMessage]] = [:]
-    let idBridge: NostrIdentityBridge
 
     var nicknameToPeerID: [String: PeerID] = [:]
-    var displayNameToNostrPubkey: [String: String] = [:]
 
     private(set) var startedPrivateChats: [PeerID] = []
     private(set) var sentPrivateMessages: [(content: String, peerID: PeerID)] = []
@@ -525,17 +523,12 @@ private final class MockCommandContextProvider: CommandContextProvider {
     private(set) var toggledFavorites: [PeerID] = []
     private(set) var favoriteNotifications: [(peerID: PeerID, isFavorite: Bool)] = []
 
-    init(nickname: String = "tester", idBridge: NostrIdentityBridge = NostrIdentityBridge(keychain: MockKeychain())) {
+    init(nickname: String = "tester") {
         self.nickname = nickname
-        self.idBridge = idBridge
     }
 
     func getPeerIDForNickname(_ nickname: String) -> PeerID? {
         nicknameToPeerID[nickname]
-    }
-
-    func nostrPubkeyForDisplayName(_ displayName: String) -> String? {
-        displayNameToNostrPubkey[displayName]
     }
 
     func startPrivateChat(with peerID: PeerID) {

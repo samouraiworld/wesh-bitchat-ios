@@ -435,9 +435,6 @@ private final class TestIdentityManager: SecureIdentityStateManagerProtocol {
         }
     }
 
-    func getBlockedNostrPubkeys() -> Set<String> {
-        blockedNostr
-    }
 
     func registerEphemeralSession(peerID: PeerID, handshakeState: HandshakeState) {}
 

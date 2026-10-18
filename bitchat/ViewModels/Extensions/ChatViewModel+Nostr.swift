@@ -25,9 +25,5 @@ extension ChatViewModel {
         nostrCoordinator.sendFavoriteNotificationViaNostr(noisePublicKey: noisePublicKey, isFavorite: isFavorite)
     }
 
-    @MainActor
-    func fullNostrHex(forSenderPeerID senderID: PeerID) -> String? {
-        nostrCoordinator.fullNostrHex(forSenderPeerID: senderID)
-    }
 
 }
