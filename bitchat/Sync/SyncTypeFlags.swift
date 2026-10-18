@@ -36,7 +36,7 @@ struct SyncTypeFlags: OptionSet {
         case .fragment: return 5
         case .requestSync: return 6
         case .fileTransfer: return 7
-        case .boardPost: return 8
+        case .boardPost: return nil // Bit 8 remains reserved after retirement.
         // Extended bits are compat-safe by construction: `toData()` encodes
         // the bitfield little-endian with trailing zero bytes trimmed (bit 10
         // widens the wire form from 1 to 2 bytes inside the length-prefixed
@@ -62,7 +62,7 @@ struct SyncTypeFlags: OptionSet {
         // never in radio range collect tag blocks, turning a local presence
         // beacon into a network-wide one.
         case .announceV2: return nil
-        // Prekey bundles gossip like board posts. The bitfield is a
+        // Prekey bundles have their own sync round. The bitfield is a
         // wire-tolerant little-endian UInt64 (1-8 bytes, unknown high bits
         // ignored by `type(forBit:)`), so bits 8+ need no format change: old
         // clients decode the wider flags and simply never match the new bits.
@@ -80,10 +80,6 @@ struct SyncTypeFlags: OptionSet {
         case 5: return .fragment
         case 6: return .requestSync
         case 7: return .fileTransfer
-        // Bit 8 spills the encoded bitfield into a second byte. Decoders since
-        // type-aware sync (#853) accept 1-8 bytes and map unknown bits to no
-        // known type, so old clients ignore board rounds instead of choking.
-        case 8: return .boardPost
         case 9: return .prekeyBundle
         case 10: return .groupMessage
         default:
@@ -95,7 +91,6 @@ struct SyncTypeFlags: OptionSet {
     static let message = SyncTypeFlags(messageTypes: [.message])
     static let fragment = SyncTypeFlags(messageTypes: [.fragment])
     static let fileTransfer = SyncTypeFlags(messageTypes: [.fileTransfer])
-    static let board = SyncTypeFlags(messageTypes: [.boardPost])
     static let prekeyBundle = SyncTypeFlags(messageTypes: [.prekeyBundle])
     static let groupMessage = SyncTypeFlags(messageTypes: [.groupMessage])
 

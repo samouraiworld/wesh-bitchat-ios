@@ -1477,8 +1477,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // metadata too). Our own prekey privates are keychain-backed and go
         // with deleteAllKeychainData above plus the identity reset below.
         let prekeysWipeCompleted = panicPersistentStoreWipes.prekeys()
-        // Drop bulletin-board posts and tombstones (memory and disk); board
-        // posts are signed with our identity key and persist for days.
+        // Erase signed posts left on disk by builds that supported Board.
         let boardWipeCompleted = panicPersistentStoreWipes.board()
 
         // Drop any share-extension handoff staged in the app group. The normal
@@ -2058,18 +2057,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         publicConversationCoordinator.addGeohashOnlySystemMessage(content)
     }
 
-    /// Add a local system message to one specific geohash timeline, active or
-    /// not. Used by the board's new-pin alerts to scope-match the pin's channel.
-    @MainActor
-    func addGeohashSystemMessage(_ content: String, geohash: String) {
-        let systemMessage = BitchatMessage(
-            sender: "system",
-            content: content,
-            timestamp: Date(),
-            isRelay: false
-        )
-        appendGeohashMessageIfAbsent(systemMessage, toGeohash: geohash)
-    }
     // Send a public message without adding a local user echo.
     // Used for emotes where we want a local system-style confirmation instead.
     @MainActor

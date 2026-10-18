@@ -31,7 +31,7 @@ struct PanicPersistentStoreWipes {
     var bridge: @MainActor () -> Bool = { BridgeCourierService.shared.wipe() }
     var publicArchive: @MainActor () -> Bool = { GossipMessageArchive.wipeDefault() }
     var prekeys: @MainActor () -> Bool = { PrekeyBundleStore.shared.wipe() }
-    var board: @MainActor () -> Bool = { BoardStore.shared.wipe() }
+    var board: @MainActor () -> Bool = { RetiredBoardStore.shared.wipe() }
     /// Group rosters stored by builds that still accepted BitChat groups.
     var legacyGroups: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }

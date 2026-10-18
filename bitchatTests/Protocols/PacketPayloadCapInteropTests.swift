@@ -86,7 +86,8 @@ struct PacketPayloadCapInteropTests {
     @Test func largestControlAndEnvelopePayloadsStillDecode() throws {
         let cases: [(type: MessageType, payload: Data, compresses: Bool)] = [
             (.announce, try maxAnnounce(), true),
-            (.boardPost, maxBoardPost(), true),
+            // Frozen maximum legacy TLV size; the app no longer owns its codec.
+            (.boardPost, Data(repeating: 0x41, count: 848), true),
             (.nostrCarrier, try maxNostrCarrier(), true),
             (.requestSync, maxRequestSync(), false),
             (.courierEnvelope, try maxCourierEnvelope(), false),
@@ -135,20 +136,6 @@ struct PacketPayloadCapInteropTests {
         ).encode())
     }
 
-    private func maxBoardPost() -> Data {
-        BoardWire.post(BoardPostPacket(
-            postID: Data(repeating: 0x31, count: BoardWireConstants.postIDLength),
-            geohash: "9q8yyk8yuv12",
-            content: String(repeating: "x", count: BoardWireConstants.contentMaxBytes),
-            authorSigningKey: Data(repeating: 0x32, count: BoardWireConstants.signingKeyLength),
-            authorNickname: String(repeating: "n", count: BoardWireConstants.nicknameMaxBytes),
-            createdAt: 1_740_000_000_000,
-            expiresAt: 1_740_000_000_000 + BoardWireConstants.maxLifetimeMs,
-            flags: BoardPostPacket.urgentFlag,
-            signature: signature
-        )).encode()
-    }
-
     private func maxNostrCarrier() throws -> Data {
         let prefix = Data(#"{"content":""#.utf8)
         let suffix = Data(#""}"#.utf8)
@@ -167,7 +154,7 @@ struct PacketPayloadCapInteropTests {
             p: 7,
             m: 1 << 20,
             data: Data((0..<1_024).map { UInt8(truncatingIfNeeded: $0 &* 37) }),
-            types: [.publicMessages, .fragment, .fileTransfer, .groupMessage, .prekeyBundle, .board],
+            types: [.publicMessages, .fragment, .fileTransfer, .groupMessage, .prekeyBundle],
             sinceTimestamp: 1_740_000_000_000,
             fragmentIdFilter: RequestSyncPacket.encodeFragmentIdFilter(fragmentIDs)
         ).encode()

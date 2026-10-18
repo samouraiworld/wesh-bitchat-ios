@@ -78,13 +78,8 @@ final class LocationNotesManager: ObservableObject {
         let content: String
         let createdAt: Date
         let nickname: String?
-        /// The matched `g` tag: the cell the note was posted to, which can be
-        /// a neighbor of the subscribed geohash.
-        let geohash: String
         /// NIP-40 expiration, when the note carries one (dead drops do).
         let expiresAt: Date?
-        /// Carries a `["t","urgent"]` tag (parity with urgent board posts).
-        let isUrgent: Bool
 
         init(
             id: String,
@@ -92,18 +87,14 @@ final class LocationNotesManager: ObservableObject {
             content: String,
             createdAt: Date,
             nickname: String?,
-            geohash: String,
-            expiresAt: Date? = nil,
-            isUrgent: Bool = false
+            expiresAt: Date? = nil
         ) {
             self.id = id
             self.pubkey = pubkey
             self.content = content
             self.createdAt = createdAt
             self.nickname = nickname
-            self.geohash = geohash
             self.expiresAt = expiresAt
-            self.isUrgent = isUrgent
         }
 
         var displayName: String {
@@ -254,9 +245,9 @@ final class LocationNotesManager: ObservableObject {
             guard let self = self else { return }
             guard event.kind == NostrProtocol.EventKind.textNote.rawValue else { return }
             // Ensure matching tag - accept any of our 9 geohashes
-            guard let matchedGeohash = event.tags.first(where: { tag in
+            guard event.tags.contains(where: { tag in
                 tag.count >= 2 && tag[0].lowercased() == "g" && validGeohashes.contains(tag[1].lowercased())
-            })?[1].lowercased() else { return }
+            }) else { return }
             guard !self.noteIDs.contains(event.id) else { return }
             // NIP-40: relays are not required to enforce expiration — drop
             // expired notes client-side so 24h dead drops actually vanish.
@@ -264,16 +255,10 @@ final class LocationNotesManager: ObservableObject {
             if let expiresAt, expiresAt <= self.dependencies.now() { return }
             self.noteIDs.insert(event.id)
             let nick = event.tags.first(where: { $0.first?.lowercased() == "n" && $0.count >= 2 })?.dropFirst().first
-            // created_at is author-chosen; clamp so a future-dated note can't
-            // hold the top of the newest-first list past the memory cap. The
-            // bound is the board's clock-skew allowance: a bridged copy of an
-            // accepted board post must keep its timestamp, or
-            // UnifiedNotices.merge no longer recognizes it as the same notice.
-            let latestAccepted = self.dependencies.now()
-                .addingTimeInterval(TimeInterval(BoardStore.Limits.clockSkewMs) / 1000)
+            // Keep the existing one-hour future-date clamp.
+            let latestAccepted = self.dependencies.now().addingTimeInterval(3_600)
             let ts = min(Date(timeIntervalSince1970: TimeInterval(event.created_at)), latestAccepted)
-            let urgent = event.tags.contains { $0.count >= 2 && $0[0].lowercased() == "t" && $0[1].lowercased() == "urgent" }
-            let note = Note(id: event.id, pubkey: event.pubkey, content: event.content, createdAt: ts, nickname: nick, geohash: matchedGeohash, expiresAt: expiresAt, isUrgent: urgent)
+            let note = Note(id: event.id, pubkey: event.pubkey, content: event.content, createdAt: ts, nickname: nick, expiresAt: expiresAt)
             self.notes.append(note)
             self.notes.sort { $0.createdAt > $1.createdAt }
             self.enforceMemoryCap()
@@ -352,9 +337,7 @@ final class LocationNotesManager: ObservableObject {
                 content: trimmed,
                 createdAt: Date(timeIntervalSince1970: TimeInterval(event.created_at)),
                 nickname: nickname,
-                geohash: geohash,
-                expiresAt: expiresAt,
-                isUrgent: urgent
+                expiresAt: expiresAt
             )
             self.noteIDs.insert(event.id)
             self.notes.insert(echo, at: 0)

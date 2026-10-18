@@ -13,24 +13,13 @@ struct SyncTypeFlagsTests {
     }
 
     @Test func decodeDropsPhantomBits() {
-        // Bits 11+ map to no message type (bit 8 = boardPost, bit 9 =
+        // Bits 11+ map to no message type (bit 8 is retired, bit 9 =
         // prekeyBundle, bit 10 = groupMessage). They must not survive decode
         // as phantom membership.
         let phantom = Data([0x00, 0xF8]) // bits 11..15 set, no known type
         let decoded = SyncTypeFlags.decode(phantom)
         #expect(decoded?.rawValue == 0)
         #expect(decoded?.toMessageTypes().isEmpty == true)
-    }
-
-    @Test func boardBitSurvivesDecode() {
-        // Bit 8 maps to boardPost and spills the field into a second byte;
-        // it must survive decode while the phantom high bits (11+) are
-        // stripped. Bits 9 (prekeyBundle) and 10 (groupMessage) are cleared
-        // to isolate the board bit.
-        let mixed = Data([0x00, 0xF9]) // bit 8 (board) known, bits 11..15 phantom
-        let decoded = SyncTypeFlags.decode(mixed)
-        #expect(decoded?.contains(.board) == true)
-        #expect(decoded?.rawValue == 0b1_0000_0000)
     }
 
     @Test func phantomBitsAreStrippedButKnownBitsSurvive() {
@@ -45,11 +34,13 @@ struct SyncTypeFlagsTests {
 
     @Test func rawValueInitNormalizesPhantomBits() {
         let flags = SyncTypeFlags(rawValue: 0xFFFF_FFFF_FFFF_FFFF)
-        // Every known type bit is set; nothing above them survives. boardPost
-        // occupies bit 8, so the known set spills into a second byte.
+        // The retired bit is stripped; prekeys and groups retain bits 9/10.
         #expect(flags.contains(.announce))
         #expect(flags.contains(.fileTransfer))
-        #expect(flags.contains(.board))
+        #expect(!flags.contains(.boardPost))
+        #expect(flags.contains(.prekeyBundle))
+        #expect(flags.contains(.groupMessage))
+        #expect(flags.rawValue & (1 << 8) == 0)
         let data = flags.toData()
         #expect(data?.count == 2)
     }
