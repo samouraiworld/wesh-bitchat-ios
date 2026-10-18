@@ -133,15 +133,6 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertTrue(deliverer.requests.isEmpty)
     }
 
-    func test_onlyAllowlistedInAppDeepLinksAreHandled() throws {
-        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "wesh://share"))))
-        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "WESH://share"))))
-        for rejected in ["wesh://geohash/87yv", "bitchat://share", "https://share", "https://example.org",
-                         "wesh://user@share", "wesh://share:443", "tel:123", "wesh:share"] {
-            XCTAssertFalse(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: rejected))), rejected)
-        }
-    }
-
     func test_weshSchemeIsRegisteredWithTheSystem() throws {
         // Read the app's Info.plist from source: under SwiftPM, Bundle.main is the test runner.
         let plistURL = URL(fileURLWithPath: #filePath)

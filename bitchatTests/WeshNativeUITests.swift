@@ -80,7 +80,7 @@ struct WeshNativeUITests {
         #expect(feedback.consume(fourth) == nil)
     }
 
-    @Test func disappearedConversationCannotFocusItsOldResultOrImportedDraft() throws {
+    @Test func disappearedConversationCannotFocusItsOldResult() throws {
         var feedback = WeshComposerFeedbackState()
         feedback.appear()
         feedback.showAction("Synthetic result")
@@ -92,21 +92,11 @@ struct WeshNativeUITests {
         #expect(feedback.consume(oldResult) == nil)
         feedback.appear()
         #expect(feedback.readyFocus == nil)
-        feedback.showImportedDraft("Synthetic imported draft", focusComposer: true)
-        let oldImport = try #require(feedback.readyFocus)
-        feedback.disappear()
-        feedback.appear()
-        feedback.showImportedDraft("Synthetic imported draft", focusComposer: true)
-        let currentImport = try #require(feedback.readyFocus)
-        #expect(feedback.consume(oldImport) == nil)
-        #expect(feedback.consume(currentImport) == .composer)
-        #expect(feedback.consume(currentImport) == nil)
-        feedback.showImportedDraft("Synthetic import before editing", focusComposer: true)
-        let editedImport = try #require(feedback.readyFocus)
-        feedback.edited(rejection: nil)
-        #expect(feedback.consume(editedImport) == nil)
-        feedback.showImportedDraft("Synthetic dismissed review", focusComposer: false)
-        #expect(feedback.readyFocus == nil)
+        feedback.showAction("Synthetic result after reopening")
+        let current = try #require(feedback.readyFocus)
+        #expect(feedback.consume(oldResult) == nil)
+        #expect(feedback.consume(current) == .feedback)
+        #expect(feedback.consume(current) == nil)
     }
 
     @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "outbox"]) @MainActor
@@ -707,7 +697,7 @@ struct WeshNativeUITests {
         }
     }
 
-    @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
+    @Test @MainActor func unavailableIdentityCacheRefusesPrivateSendingAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)
         let peer = PeerID(hexData: key)
@@ -726,12 +716,10 @@ struct WeshNativeUITests {
         let vm = ChatViewModel(keychain: MockKeychain(),
             idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: identity, transport: MockTransport(), weshPrivatePolicyEnabled: true)
-        #expect(!vm.canImportWeshSharedContent(to: peer))
         #expect(!vm.canSendWeshPrivate(to: peer))
         storage.simulatedReadError = nil
         vm.handleDidBecomeActive()
         #expect(identity.isPersistenceAvailable)
-        #expect(vm.canImportWeshSharedContent(to: peer))
     }
 
     @Test func timelineUsesCalendarDaysAcrossMidnightAndDaylightSaving() throws {
@@ -805,21 +793,6 @@ struct WeshNativeUITests {
         vm.bluetoothState = .poweredOn
         vm.sendMeshWave()
         #expect(transport.sentMessages.count == 1)
-    }
-
-    @Test @MainActor func sharedDraftRequiresExactCurrentUnblockedEnrollment() {
-        let key = Data(repeating: 41, count: 32)
-        let otherKey = Data(repeating: 42, count: 32)
-        let peer = PeerID(hexData: key)
-        let other = PeerID(hexData: otherKey)
-        let contacts = [WeshQRTrust.Contact(noiseKeyHex: key.hexEncodedString(), nickname: "Contact test")]
-        let enrolled: Set<String> = [key.sha256Fingerprint(), otherKey.sha256Fingerprint()]
-        #expect(WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer.toShort(), contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: other, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: [], qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: [], blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: [key.sha256Fingerprint()]))
     }
 
     private var vector: VerificationService.VerificationQR {

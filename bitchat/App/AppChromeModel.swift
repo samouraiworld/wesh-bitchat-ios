@@ -32,16 +32,13 @@ final class AppChromeModel: ObservableObject {
     @Published private(set) var panicWipeBlocked = false
 
     private let chatViewModel: ChatViewModel
-    private let onPanicWipe: () -> Void
     private var cancellables = Set<AnyCancellable>()
 
     init(
         chatViewModel: ChatViewModel,
-        privateInboxModel: PrivateInboxModel,
-        onPanicWipe: @escaping () -> Void = {}
+        privateInboxModel: PrivateInboxModel
     ) {
         self.chatViewModel = chatViewModel
-        self.onPanicWipe = onPanicWipe
         self.nickname = chatViewModel.nickname
         self.noiseIdentityAvailability = chatViewModel.noiseIdentityAvailability
 
@@ -111,7 +108,6 @@ final class AppChromeModel: ObservableObject {
         isNoticesSheetPresented = false
         showingFingerprintFor = nil
 
-        onPanicWipe()
         // Wesh: Bluetooth stays off until the welcome and its terms are accepted again, so the new
         // identity announces nothing before (`AppRuntime.welcomeFinished`).
         return chatViewModel.panicClearAllData(restartMesh: !WeshMode.isActive)

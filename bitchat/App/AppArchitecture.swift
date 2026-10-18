@@ -22,9 +22,7 @@ enum AppEvent: Sendable, Equatable {
     case startupCompleted
     case scenePhaseChanged(RuntimeScenePhase)
     case openedURL(String)
-    case sharedContentReadyForReview(SharedContentKind)
     case notificationOpened(peerID: PeerID?)
-    case deepLinkOpened(String)
     case torLifecycleChanged(TorLifecycleEvent)
     case nostrRelayConnectionChanged(Bool)
     case terminationRequested
