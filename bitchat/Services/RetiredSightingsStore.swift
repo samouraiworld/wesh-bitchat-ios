@@ -39,14 +39,21 @@ struct PanicStartupDecision {
         checkPending: () throws -> Bool,
         wipeSightings: @MainActor () -> Bool,
         wipeGeography: @MainActor () -> Bool,
-        wipeSharedContent _: @MainActor () -> Bool,
-        wipeBoard _: @MainActor () -> Bool,
-        wipeBridge _: @MainActor () -> Bool
+        wipeSharedContent: @MainActor () -> Bool,
+        wipeBoard: @MainActor () -> Bool,
+        wipeBridge: @MainActor () -> Bool
     ) -> Self {
         let pending = (try? checkPending()) ?? true
         let sightingsConfirmed = wipeSightings()
         let geographyConfirmed = wipeGeography()
-        return Self(recoveryPending: pending, legacySightingsConfirmed: sightingsConfirmed && geographyConfirmed)
+        let sharedContentConfirmed = wipeSharedContent()
+        let boardConfirmed = wipeBoard()
+        let bridgeConfirmed = wipeBridge()
+        return Self(
+            recoveryPending: pending,
+            legacySightingsConfirmed: sightingsConfirmed && geographyConfirmed
+                && sharedContentConfirmed && boardConfirmed && bridgeConfirmed
+        )
     }
 
     @MainActor
