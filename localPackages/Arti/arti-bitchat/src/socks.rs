@@ -312,4 +312,56 @@ mod tests {
         let result = timed_handshake(&mut server, Duration::from_millis(50)).await;
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
     }
+
+    async fn greeted_timed_handshake() -> (
+        DuplexStream,
+        tokio::task::JoinHandle<io::Result<(String, u16)>>,
+    ) {
+        let (mut client, mut server) = duplex(1024);
+        let task = tokio::spawn(async move {
+            timed_handshake(&mut server, HANDSHAKE_TIMEOUT).await
+        });
+        client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+        let mut method = [0u8; 2];
+        client.read_exact(&mut method).await.unwrap();
+        assert_eq!(method, [0x05, 0x00]);
+        (client, task)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_client_that_stalls_after_greeting_times_out() {
+        let (_client, task) = greeted_timed_handshake().await;
+
+        tokio::time::advance(HANDSHAKE_TIMEOUT - Duration::from_millis(1)).await;
+        assert!(!task.is_finished());
+        tokio::time::advance(Duration::from_millis(1)).await;
+
+        assert_eq!(task.await.unwrap().unwrap_err().kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_partial_connect_request_keeps_the_original_handshake_deadline() {
+        let started = tokio::time::Instant::now();
+        let (mut client, task) = greeted_timed_handshake().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+
+        // A valid header and domain prefix arrive late; the remaining name and port never do.
+        client.write_all(&[0x05, 0x01, 0x00, 0x03, 17]).await.unwrap();
+        client.write_all(b"relay.").await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        assert_eq!(task.await.unwrap().unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert_eq!(started.elapsed(), HANDSHAKE_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_complete_connect_request_before_the_deadline_is_accepted() {
+        let (mut client, task) = greeted_timed_handshake().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        client.write_all(&connect(0x03, &domain(b"relay.example.org"), 443)).await.unwrap();
+
+        assert_eq!(task.await.unwrap().unwrap(), ("relay.example.org".to_owned(), 443));
+    }
 }

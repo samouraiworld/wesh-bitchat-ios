@@ -17,6 +17,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.96.0}"
 RUSTC_VERSION="${RUSTC_VERSION:-1.96.0}"
 CBINDGEN_VERSION="${CBINDGEN_VERSION:-0.29.4}"
+KEEP_BUILD_CACHE="${KEEP_BUILD_CACHE:-1}"
+if [[ "$KEEP_BUILD_CACHE" != 0 && "$KEEP_BUILD_CACHE" != 1 ]]; then
+    echo "KEEP_BUILD_CACHE must be 0 or 1" >&2
+    exit 1
+fi
 export RUSTC="$(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,6 +95,11 @@ check_prerequisites() {
         exit 1
     fi
 
+    if ! command -v python3 &> /dev/null; then
+        log_error "Python 3 is required for deterministic archive padding"
+        exit 1
+    fi
+
     log_info "Prerequisites OK"
 }
 
@@ -160,6 +170,20 @@ build_target() {
         log_error "Build failed: $lib_path not found"
         exit 1
     fi
+
+    # Keep the shared host macro cache: Cargo 1.96 clean --target selects
+    # that host cache here instead of the completed cross-target artifacts.
+    if [[ "$KEEP_BUILD_CACHE" == 0 ]]; then
+        local release_dir="$SCRIPT_DIR/target/$target/release"
+        if [[ -L "$SCRIPT_DIR/target" || -L "$SCRIPT_DIR/target/$target" || -L "$release_dir" ]]; then
+            log_error "Refusing cache cleanup through a symbolic link"
+            exit 1
+        fi
+        local cache
+        for cache in deps build .fingerprint incremental examples; do
+            rm -rf -- "$release_dir/$cache"
+        done
+    fi
 }
 
 # Create xcframework from built libraries
@@ -167,6 +191,13 @@ create_xcframework() {
     log_info "Creating xcframework..."
 
     local xcframework_path="$OUTPUT_DIR/$FRAMEWORK_NAME.xcframework"
+    local stage_dir="$SCRIPT_DIR/target/xcframework-stage"
+    if [[ -L "$SCRIPT_DIR/target" || -L "$stage_dir" ]]; then
+        log_error "Refusing packaging through a symbolic link"
+        exit 1
+    fi
+    rm -rf -- "$stage_dir"
+    mkdir -p "$stage_dir"
 
     # Remove existing xcframework
     rm -rf "$xcframework_path"
@@ -174,29 +205,34 @@ create_xcframework() {
 
     # Normalize each architecture before combining the universal slices.
     for target in "${TARGETS[@]}"; do
-        local lib_path="$SCRIPT_DIR/target/$target/release/$LIB_NAME"
-        if [[ -f "$lib_path" ]]; then
-            # Strip the library for additional size reduction
-            log_info "Stripping $target library..."
-            strip -x "$lib_path" 2>/dev/null || true
+        local raw_path="$SCRIPT_DIR/target/$target/release/$LIB_NAME"
+        local lib_path="$stage_dir/$target/$LIB_NAME"
+        if [[ -f "$raw_path" ]]; then
+            # strip rewrites local symbol/relocation tables. Always start from
+            # an immutable Cargo output so repeated packaging never strips twice.
+            mkdir -p "$stage_dir/$target"
+            cp "$raw_path" "$lib_path"
+            log_info "Stripping $target staging library..."
+            strip -x "$lib_path"
 
-            # Normalize archive metadata so repeated rebuilds are byte-stable.
+            # Normalize archive metadata on the staging copy.
             local normalized_path="$lib_path.normalized"
             xcrun libtool -static -D -no_warning_for_no_symbols "$lib_path" -o "$normalized_path"
             mv "$normalized_path" "$lib_path"
+            python3 "$SCRIPT_DIR/normalize-archive.py" "$lib_path"
 
         else
-            log_error "Missing required library: $lib_path"
+            log_error "Missing required library: $raw_path"
             exit 1
         fi
     done
 
-    local simulator_dir="$SCRIPT_DIR/target/ios-universal-simulator/release"
+    local simulator_dir="$stage_dir/ios-universal-simulator"
     local simulator_lib="$simulator_dir/$LIB_NAME"
     mkdir -p "$simulator_dir"
     xcrun lipo -create \
-        "$SCRIPT_DIR/target/aarch64-apple-ios-sim/release/$LIB_NAME" \
-        "$SCRIPT_DIR/target/x86_64-apple-ios/release/$LIB_NAME" \
+        "$stage_dir/aarch64-apple-ios-sim/$LIB_NAME" \
+        "$stage_dir/x86_64-apple-ios/$LIB_NAME" \
         -output "$simulator_lib"
 
     # Normalize the universal archive after lipo so repeated rebuilds remain
@@ -204,23 +240,25 @@ create_xcframework() {
     local normalized_simulator="$simulator_lib.normalized"
     xcrun libtool -static -D -no_warning_for_no_symbols "$simulator_lib" -o "$normalized_simulator"
     mv "$normalized_simulator" "$simulator_lib"
+    python3 "$SCRIPT_DIR/normalize-archive.py" "$simulator_lib"
 
-    local macos_dir="$SCRIPT_DIR/target/macos-universal/release"
+    local macos_dir="$stage_dir/macos-universal"
     local macos_lib="$macos_dir/$LIB_NAME"
     mkdir -p "$macos_dir"
     xcrun lipo -create \
-        "$SCRIPT_DIR/target/aarch64-apple-darwin/release/$LIB_NAME" \
-        "$SCRIPT_DIR/target/x86_64-apple-darwin/release/$LIB_NAME" \
+        "$stage_dir/aarch64-apple-darwin/$LIB_NAME" \
+        "$stage_dir/x86_64-apple-darwin/$LIB_NAME" \
         -output "$macos_lib"
 
     local normalized_macos="$macos_lib.normalized"
     xcrun libtool -static -D -no_warning_for_no_symbols "$macos_lib" -o "$normalized_macos"
     mv "$normalized_macos" "$macos_lib"
+    python3 "$SCRIPT_DIR/normalize-archive.py" "$macos_lib"
 
     local header_dir="$OUTPUT_DIR/include"
     local cmd=(
         xcodebuild -create-xcframework
-        -library "$SCRIPT_DIR/target/aarch64-apple-ios/release/$LIB_NAME" -headers "$header_dir"
+        -library "$stage_dir/aarch64-apple-ios/$LIB_NAME" -headers "$header_dir"
         -library "$simulator_lib" -headers "$header_dir"
         -library "$macos_lib" -headers "$header_dir"
         -output "$xcframework_path"

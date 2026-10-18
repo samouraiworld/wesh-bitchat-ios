@@ -3,7 +3,8 @@ name: Arti Binary Provenance
 # The Arti xcframework is a vendored binary; these checks turn the policy in
 # docs/ARTI-BINARY-PROVENANCE.md into an enforced gate:
 #  1. The checked-in binary must match the hash manifest in the provenance doc.
-#  2. A PR that changes the binary must also change at least one provenance
+#  2. Reviewed source and build inputs must match their audited hashes.
+#  3. A PR that changes the binary must also change at least one provenance
 #     input (Rust source, lockfile, build script, or the doc itself).
 
 on:
@@ -13,10 +14,17 @@ on:
     paths:
       - "localPackages/Arti/**"
       - "docs/ARTI-BINARY-PROVENANCE.md"
+      - ".github/workflows/arti-provenance.yml"
+      - "scripts/tests/test_arti_archive_normalization.py"
   pull_request:
     paths:
       - "localPackages/Arti/**"
       - "docs/ARTI-BINARY-PROVENANCE.md"
+      - ".github/workflows/arti-provenance.yml"
+      - "scripts/tests/test_arti_archive_normalization.py"
+
+permissions:
+  contents: read
 
 jobs:
   verify-hashes:
@@ -51,6 +59,32 @@ jobs:
           fi
           echo "All $(wc -l < actual.txt) artifact hashes match the provenance manifest."
 
+  verify-source-inputs:
+    name: Verify native source and recipe hashes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Compare reviewed source inputs with manifest
+        run: |
+          set -euo pipefail
+          doc="docs/ARTI-BINARY-PROVENANCE.md"
+          grep -E '^[0-9a-f]{64}  localPackages/Arti/(Cargo\.(toml|lock)|build-ios\.sh|normalize-archive\.py|arti-bitchat/)' "$doc" \
+            | sort -k2 > expected-inputs.txt
+          test -s expected-inputs.txt
+          git ls-files -z -- localPackages/Arti/Cargo.toml localPackages/Arti/Cargo.lock \
+            localPackages/Arti/build-ios.sh localPackages/Arti/normalize-archive.py localPackages/Arti/arti-bitchat \
+            | sort -z | xargs -0 sha256sum | sort -k2 > actual-inputs.txt
+          if ! diff -u expected-inputs.txt actual-inputs.txt; then
+            echo "::error::Arti source or recipe changed without an updated audited build record. Rebuild and review the source/artifact pair, or document and review why the change cannot affect the shipped library."
+            exit 1
+          fi
+
+      - name: Check archive padding contracts
+        run: python3 -m unittest discover -s scripts/tests -p test_arti_archive_normalization.py
+
   require-provenance-evidence:
     name: Binary changes must ship with provenance inputs
     runs-on: ubuntu-latest
@@ -76,7 +110,7 @@ jobs:
             exit 0
           fi
 
-          if echo "$changed" | grep -Eq '^(localPackages/Arti/(Cargo\.(toml|lock)|build-ios\.sh|arti-bitchat/)|docs/ARTI-BINARY-PROVENANCE\.md)'; then
+          if echo "$changed" | grep -Eq '^(localPackages/Arti/(Cargo\.(toml|lock)|build-ios\.sh|normalize-archive\.py|arti-bitchat/)|docs/ARTI-BINARY-PROVENANCE\.md)'; then
             echo "Binary change is accompanied by provenance inputs."
             exit 0
           fi
