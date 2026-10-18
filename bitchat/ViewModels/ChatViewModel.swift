@@ -451,9 +451,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
     }
 
-    // Track which GeoDM messages we've already sent a delivery ACK for (by messageID)
-    // Single-writer: mutate only via `markGeoDeliveryAckSent(_:)` below.
-    private(set) var sentGeoDeliveryAcks: Set<String> = []
+    // Track which Nostr DMs we've already sent a delivery ACK for (by messageID)
+    // Single-writer: mutate only via `markNostrDeliveryAckSent(_:)` below.
+    private(set) var sentNostrDeliveryAcks: Set<String> = []
 
     // Track app startup phase to prevent marking old messages as unread
     var isStartupPhase = true
@@ -497,12 +497,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         sentReadReceipts.insert(messageID).inserted
     }
 
-    /// Records that a GeoDM delivery ACK is being sent for `messageID`.
+    /// Records that a Nostr DM delivery ACK is being sent for `messageID`.
     /// Returns `false` when one was already recorded — the caller must skip sending.
     @MainActor
     @discardableResult
-    func markGeoDeliveryAckSent(_ messageID: String) -> Bool {
-        sentGeoDeliveryAcks.insert(messageID).inserted
+    func markNostrDeliveryAckSent(_ messageID: String) -> Bool {
+        sentNostrDeliveryAcks.insert(messageID).inserted
     }
 
     /// Forgets that read receipts were sent for `ids` so READ acks can be

@@ -201,19 +201,19 @@ private final class MockChatNostrContext: ChatNostrContext {
 
     // Routing & acknowledgements
     private(set) var routedFavoriteNotifications: [(peerID: PeerID, isFavorite: Bool)] = []
-    private(set) var geoDeliveryAcks: [(messageID: String, recipientHex: String)] = []
-    private(set) var geoReadReceipts: [(messageID: String, recipientHex: String)] = []
+    private(set) var nostrDeliveryAcks: [(messageID: String, recipientHex: String)] = []
+    private(set) var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
 
     func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
         routedFavoriteNotifications.append((peerID, isFavorite))
     }
 
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoDeliveryAcks.append((messageID, recipientHex))
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrDeliveryAcks.append((messageID, recipientHex))
     }
 
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoReadReceipts.append((messageID, recipientHex))
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrReadReceipts.append((messageID, recipientHex))
     }
 
     // Favorites & notifications
@@ -565,20 +565,20 @@ struct ChatNostrCoordinatorContextTests {
 
         // Not viewing the chat: delivery ack only.
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: false, senderPubkey: senderPubkey, key: nil)
-        #expect(context.geoDeliveryAcks.map(\.messageID) == ["mid-1"])
-        #expect(context.geoDeliveryAcks.first?.recipientHex == senderPubkey)
-        #expect(context.geoReadReceipts.isEmpty)
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["mid-1"])
+        #expect(context.nostrDeliveryAcks.first?.recipientHex == senderPubkey)
+        #expect(context.nostrReadReceipts.isEmpty)
 
         // Viewing the chat: delivery ack plus read receipt.
         context.selectedPrivateChatPeer = convKey
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: false, senderPubkey: senderPubkey, key: Data([0x01]))
-        #expect(context.geoDeliveryAcks.count == 2)
-        #expect(context.geoReadReceipts.map(\.messageID) == ["mid-1"])
+        #expect(context.nostrDeliveryAcks.count == 2)
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["mid-1"])
 
         // Already read: no further read receipt.
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: true, senderPubkey: senderPubkey, key: nil)
-        #expect(context.geoDeliveryAcks.count == 3)
-        #expect(context.geoReadReceipts.count == 1)
+        #expect(context.nostrDeliveryAcks.count == 3)
+        #expect(context.nostrReadReceipts.count == 1)
     }
 
     @Test @MainActor

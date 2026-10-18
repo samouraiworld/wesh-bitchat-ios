@@ -94,7 +94,7 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
     // Routing & receipts
     private(set) var routedPrivateMessages: [(content: String, peerID: PeerID, recipientNickname: String)] = []
     private(set) var routedReadReceipts: [(messageID: String, peerID: PeerID)] = []
-    private(set) var geoReadReceipts: [(messageID: String, recipientHex: String)] = []
+    private(set) var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
 
     func routePrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
         routedPrivateMessages.append((content, peerID, recipientNickname))
@@ -106,8 +106,8 @@ private final class MockChatLifecycleContext: ChatLifecycleContext {
         return routeReadReceiptResult
     }
 
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoReadReceipts.append((messageID, recipientHex))
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrReadReceipts.append((messageID, recipientHex))
     }
 
     // Nostr & geohash
@@ -240,13 +240,13 @@ struct ChatLifecycleCoordinatorContextTests {
 
         #expect(context.managerReadMarks == [convKey])
         // Only the peer's own un-acked, non-relay message gets a READ.
-        #expect(context.geoReadReceipts.map(\.messageID) == ["m1"])
-        #expect(context.geoReadReceipts.first?.recipientHex == recipientHex)
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["m1"])
+        #expect(context.nostrReadReceipts.first?.recipientHex == recipientHex)
         #expect(context.sentReadReceipts.contains("m1"))
 
         // Second pass: nothing new to send.
         coordinator.markPrivateMessagesAsRead(from: convKey)
-        #expect(context.geoReadReceipts.count == 1)
+        #expect(context.nostrReadReceipts.count == 1)
     }
 
     @Test @MainActor

@@ -54,7 +54,7 @@ protocol ChatLifecycleContext: AnyObject {
     func routePrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String)
     @discardableResult
     func routeReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) -> Bool
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
 
     // MARK: Nostr & geohash
     func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
@@ -188,7 +188,7 @@ final class ChatLifecycleCoordinator {
                     "GeoDM: sending READ for mid=\(message.id.prefix(8))… to=\(recipientHex.prefix(8))…",
                     category: .session
                 )
-                context.sendGeohashReadReceipt(
+                context.sendNostrIdentityReadReceipt(
                     message.id,
                     toRecipientHex: recipientHex,
                     from: identity

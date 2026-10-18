@@ -51,10 +51,10 @@ protocol ChatPrivateConversationContext: AnyObject {
     /// Returns `false` when one was already recorded — the caller must skip sending.
     @discardableResult
     func markReadReceiptSent(_ messageID: String) -> Bool
-    /// Records that a GeoDM delivery ACK is being sent for `messageID`.
+    /// Records that a Nostr DM delivery ACK is being sent for `messageID`.
     /// Returns `false` when one was already recorded — the caller must skip sending.
     @discardableResult
-    func markGeoDeliveryAckSent(_ messageID: String) -> Bool
+    func markNostrDeliveryAckSent(_ messageID: String) -> Bool
     /// Moves the open private chat to `newPeerID` when the current selection is
     /// one of the peer IDs being migrated away.
     func handOffSelectedPrivateChat(from oldPeerIDs: [PeerID], to newPeerID: PeerID)
@@ -91,9 +91,9 @@ protocol ChatPrivateConversationContext: AnyObject {
     @discardableResult
     func markMessageDelivered(_ messageID: String, for peerIDs: [PeerID]) -> Bool
     func sendMeshReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID)
-    func sendGeohashPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String)
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
+    func sendNostrIdentityPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String)
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
 
     // MARK: System messages
     func addMeshOnlySystemMessage(_ content: String)
@@ -138,7 +138,7 @@ extension ChatPrivateConversationContext {
 extension ChatViewModel: ChatPrivateConversationContext {
     // `privateChats` and `notifyUIChanged()` are shared requirements with
     // `ChatDeliveryContext`; the single-writer intent ops (`markReadReceiptSent`,
-    // `markGeoDeliveryAckSent`, `handOffSelectedPrivateChat`) live next to their
+    // `markNostrDeliveryAckSent`, `handOffSelectedPrivateChat`) live next to their
     // backing state in `ChatViewModel`. The remaining state members are
     // satisfied by existing `ChatViewModel` properties and methods.
 
@@ -208,8 +208,8 @@ extension ChatViewModel: ChatPrivateConversationContext {
         meshService.sendReadReceipt(receipt, to: peerID)
     }
 
-    func sendGeohashPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        makeGeohashNostrTransport().sendPrivateMessageGeohash(
+    func sendNostrIdentityPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
+        makePrivateNostrTransport().sendPrivateMessageForNostrIdentity(
             content: content,
             toRecipientHex: recipientHex,
             from: identity,
@@ -217,12 +217,12 @@ extension ChatViewModel: ChatPrivateConversationContext {
         )
     }
 
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        makeGeohashNostrTransport().sendDeliveryAckGeohash(for: messageID, toRecipientHex: recipientHex, from: identity)
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        makePrivateNostrTransport().sendDeliveryAckForNostrIdentity(for: messageID, toRecipientHex: recipientHex, from: identity)
     }
 
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        makeGeohashNostrTransport().sendReadReceiptGeohash(messageID, toRecipientHex: recipientHex, from: identity)
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        makePrivateNostrTransport().sendReadReceiptForNostrIdentity(messageID, toRecipientHex: recipientHex, from: identity)
     }
 
     func addSystemMessage(_ content: String) {
@@ -255,10 +255,10 @@ extension ChatViewModel: ChatPrivateConversationContext {
         NotificationService.shared.sendPrivateMessageNotification(from: senderName, message: message, peerID: pinnedPeerID)
     }
 
-    /// Deliberately no `senderPeerID`: geohash envelopes (and the acks for
-    /// inbound account DMs sent through here) must never carry the mesh
-    /// peer ID. The recipient-less encoders fill that field with random bytes.
-    private func makeGeohashNostrTransport() -> NostrTransport {
+    /// Deliberately no `senderPeerID`: private messages and ACKs using an explicit
+    /// Nostr identity, including inbound account DM replies, must never carry the
+    /// mesh peer ID. The recipient-less encoders fill that field with random bytes.
+    private func makePrivateNostrTransport() -> NostrTransport {
         NostrTransport(keychain: keychain, idBridge: idBridge)
     }
 }
@@ -268,24 +268,24 @@ final class ChatPrivateConversationCoordinator {
     private unowned let context: any ChatPrivateConversationContext
 
     // Outbox retries re-wrap the same message in fresh gift-wrap events, so
-    // relay-level event-ID dedup can't catch them; track inbound GeoDM
+    // relay-level event-ID dedup can't catch them; track inbound Nostr DM
     // message IDs so each copy past the first costs one (already-deduped)
     // ack check and nothing else.
-    private var seenInboundGeoDMIDs: Set<String> = []
-    private var seenInboundGeoDMOrder: [String] = []
-    private static let seenInboundGeoDMCap = 512
+    private var seenInboundNostrDMIDs: Set<String> = []
+    private var seenInboundNostrDMOrder: [String] = []
+    private static let seenInboundNostrDMCap = 512
 
     init(context: any ChatPrivateConversationContext) {
         self.context = context
     }
 
-    /// Returns `false` if this GeoDM message ID was already handled.
-    private func markInboundGeoDMSeen(_ messageId: String) -> Bool {
-        guard !seenInboundGeoDMIDs.contains(messageId) else { return false }
-        seenInboundGeoDMIDs.insert(messageId)
-        seenInboundGeoDMOrder.append(messageId)
-        if seenInboundGeoDMOrder.count > Self.seenInboundGeoDMCap {
-            seenInboundGeoDMIDs.remove(seenInboundGeoDMOrder.removeFirst())
+    /// Returns `false` if this Nostr DM message ID was already handled.
+    private func markInboundNostrDMSeen(_ messageId: String) -> Bool {
+        guard !seenInboundNostrDMIDs.contains(messageId) else { return false }
+        seenInboundNostrDMIDs.insert(messageId)
+        seenInboundNostrDMOrder.append(messageId)
+        if seenInboundNostrDMOrder.count > Self.seenInboundNostrDMCap {
+            seenInboundNostrDMIDs.remove(seenInboundNostrDMOrder.removeFirst())
         }
         return true
     }
@@ -493,7 +493,7 @@ final class ChatPrivateConversationCoordinator {
                 "GeoDM: local send mid=\(messageID.prefix(8))… to=\(recipientHex.prefix(8))… conv=\(peerID)",
                 category: .session
             )
-            context.sendGeohashPrivateMessage(
+            context.sendNostrIdentityPrivateMessage(
                 content,
                 toRecipientHex: recipientHex,
                 from: identity,
@@ -530,13 +530,13 @@ final class ChatPrivateConversationCoordinator {
         // Wesh: only an npub bound to a QR-verified contact gets an ack or a store.
         guard context.admitsPrivateSender(convKey) else { return }
 
-        guard markInboundGeoDMSeen(messageId) else { return }
+        guard markInboundNostrDMSeen(messageId) else { return }
 
         SecureLogger.info("GeoDM: recv PM <- sender=\(senderPubkey.prefix(8))… mid=\(messageId.prefix(8))…", category: .session)
 
         // Ack only once the block and dedup checks pass. Outbox retries of a
         // message we've already acked are dropped by the dedup guard, and
-        // markGeoDeliveryAckSent dedups the actual sends by message ID.
+        // markNostrDeliveryAckSent dedups the actual sends by message ID.
         sendDeliveryAckIfNeeded(to: messageId, senderPubKey: senderPubkey, from: id)
 
         // Prefer the favorite's stored nickname when the sender resolved to a
@@ -674,13 +674,13 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func sendDeliveryAckIfNeeded(to messageId: String, senderPubKey: String, from id: NostrIdentity) {
-        guard context.markGeoDeliveryAckSent(messageId) else { return }
-        context.sendGeohashDeliveryAck(for: messageId, toRecipientHex: senderPubKey, from: id)
+        guard context.markNostrDeliveryAckSent(messageId) else { return }
+        context.sendNostrIdentityDeliveryAck(for: messageId, toRecipientHex: senderPubKey, from: id)
     }
 
     func sendReadReceiptIfNeeded(to messageId: String, senderPubKey: String, from id: NostrIdentity) {
         guard context.markReadReceiptSent(messageId) else { return }
-        context.sendGeohashReadReceipt(messageId, toRecipientHex: senderPubKey, from: id)
+        context.sendNostrIdentityReadReceipt(messageId, toRecipientHex: senderPubKey, from: id)
     }
 
     func handlePrivateMessage(_ message: BitchatMessage) {
@@ -790,7 +790,7 @@ final class ChatPrivateConversationCoordinator {
             context.routeReadReceipt(receipt, to: PeerID(hexData: key))
             context.markReadReceiptSent(message.id)
         } else if let identity = context.currentNostrIdentity() {
-            context.sendGeohashReadReceipt(message.id, toRecipientHex: senderPubkey, from: identity)
+            context.sendNostrIdentityReadReceipt(message.id, toRecipientHex: senderPubkey, from: identity)
             context.markReadReceiptSent(message.id)
             SecureLogger.debug(
                 "Viewing chat; sent READ ack directly to Nostr pub=\(senderPubkey.prefix(8))… for mid=\(message.id.prefix(8))…",

@@ -99,23 +99,23 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 
     // BLE short peer ID embedded in favorites (recipient-addressed) envelopes.
-    // Geohash envelopes never carry it (see NostrEmbeddedBitChat).
+    // Explicit-identity envelopes never carry it (see NostrEmbeddedBitChat).
     var senderPeerID = PeerID(str: "")
 
     // Throttle outbound acks — READ receipts and DELIVERED acks, direct and
-    // geohash — to avoid relay rate limits. Reconnect redelivery produces a
+    // explicit-identity — to avoid relay rate limits. Reconnect redelivery produces a
     // burst of acks at once: 8 DELIVERED in under a second tripped damus's
     // "noting too much" during July 2026 device testing.
     private enum QueuedAck {
         case readDirect(ReadReceipt, PeerID)
         case deliveredDirect(messageID: String, peerID: PeerID)
-        case deliveredGeohash(messageID: String, recipientHex: String, identity: NostrIdentity)
-        case readGeohash(messageID: String, recipientHex: String, identity: NostrIdentity)
+        case deliveredNostrIdentity(messageID: String, recipientHex: String, identity: NostrIdentity)
+        case readNostrIdentity(messageID: String, recipientHex: String, identity: NostrIdentity)
     }
 
-    /// Ack pacing shared across transport instances. Geohash acks are sent
+    /// Ack pacing shared across transport instances. Explicit-identity acks are sent
     /// through short-lived transports created per ack
-    /// (`makeGeohashNostrTransport()`), so a per-instance queue would only
+    /// (`makePrivateNostrTransport()`), so a per-instance queue would only
     /// ever hold one item and never pace a burst (flagged in upstream review on
     /// #1398). Production wires `sharedAckPacer` via `Dependencies.live`;
     /// tests get an isolated instance per `Dependencies` by default.
@@ -332,7 +332,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 
     /// Enqueue an ack for paced sending. Captures self strongly on purpose:
-    /// geohash acks ride throwaway transport instances that must stay alive
+    /// Explicit-identity acks ride throwaway transport instances that must stay alive
     /// until their ack leaves the queue.
     private func enqueueAck(_ ack: QueuedAck) {
         dependencies.ackPacer.enqueue { self.sendAckItem(ack) }
@@ -361,21 +361,21 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 }
 
-// MARK: - Geohash Helpers
+// MARK: - Explicit Nostr Identity Helpers
 
 extension NostrTransport {
 
-    // MARK: Geohash ACK helpers
-    func sendDeliveryAckGeohash(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        enqueueAck(.deliveredGeohash(messageID: messageID, recipientHex: recipientHex, identity: identity))
+    // MARK: Explicit-identity ACK helpers
+    func sendDeliveryAckForNostrIdentity(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        enqueueAck(.deliveredNostrIdentity(messageID: messageID, recipientHex: recipientHex, identity: identity))
     }
 
-    func sendReadReceiptGeohash(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        enqueueAck(.readGeohash(messageID: messageID, recipientHex: recipientHex, identity: identity))
+    func sendReadReceiptForNostrIdentity(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        enqueueAck(.readNostrIdentity(messageID: messageID, recipientHex: recipientHex, identity: identity))
     }
 
-    // MARK: Geohash DMs (per-geohash identity)
-    func sendPrivateMessageGeohash(content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
+    // MARK: Private messages using the supplied Nostr identity
+    func sendPrivateMessageForNostrIdentity(content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
         Task { @MainActor in
             guard !recipientHex.isEmpty else { return }
             SecureLogger.debug("GeoDM: send PM mid=\(messageID.prefix(8))…", category: .session)
@@ -444,12 +444,12 @@ extension NostrTransport {
                 }
                 sendWrappedMessage(content: ack, recipientHex: recipientHex, senderIdentity: senderIdentity)
 
-            case .deliveredGeohash(let messageID, let recipientHex, let identity):
+            case .deliveredNostrIdentity(let messageID, let recipientHex, let identity):
                 SecureLogger.debug("GeoDM: send DELIVERED mid=\(messageID.prefix(8))…", category: .session)
                 guard let embedded = NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .delivered, messageID: messageID) else { return }
                 sendWrappedMessage(content: embedded, recipientHex: recipientHex, senderIdentity: identity, registerPending: true)
 
-            case .readGeohash(let messageID, let recipientHex, let identity):
+            case .readNostrIdentity(let messageID, let recipientHex, let identity):
                 SecureLogger.debug("GeoDM: send READ mid=\(messageID.prefix(8))…", category: .session)
                 guard let embedded = NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .readReceipt, messageID: messageID) else { return }
                 sendWrappedMessage(content: embedded, recipientHex: recipientHex, senderIdentity: identity, registerPending: true)

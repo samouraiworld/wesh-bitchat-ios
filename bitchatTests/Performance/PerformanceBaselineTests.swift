@@ -726,8 +726,8 @@ private final class PerfNostrContext: ChatNostrContext {
     func isGeohashOutsideRegionalChannels(_ geohash: String) -> Bool { false }
 
     func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {}
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {}
 
     func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? { nil }
     func allFavoriteRelationships() -> [FavoritesPersistenceService.FavoriteRelationship] { [] }

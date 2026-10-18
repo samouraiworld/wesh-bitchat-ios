@@ -532,7 +532,7 @@ struct ChatViewModelNostrExtensionTests {
         )
         #expect(didStore)
         #expect(viewModel.nostrKeyMapping[convKey] == sender.publicKeyHex)
-        #expect(viewModel.sentGeoDeliveryAcks.contains(messageID))
+        #expect(viewModel.sentNostrDeliveryAcks.contains(messageID))
     }
 
     @Test @MainActor
@@ -567,7 +567,7 @@ struct ChatViewModelNostrExtensionTests {
         #expect(didProcess)
         #expect(viewModel.privateChats[convKey] == nil)
         // A blocked sender gets nothing back, not even a DELIVERED ack.
-        #expect(!viewModel.sentGeoDeliveryAcks.contains(messageID))
+        #expect(!viewModel.sentNostrDeliveryAcks.contains(messageID))
     }
 
     @Test @MainActor
@@ -737,7 +737,7 @@ struct ChatViewModelGeoDMTests {
         viewModel.handlePrivateMessage(payload, senderPubkey: senderPubkey, convKey: convKey, id: identity, messageTimestamp: Date())
 
         #expect(viewModel.privateChats[convKey]?.count == 1)
-        #expect(viewModel.sentGeoDeliveryAcks.contains(messageID))
+        #expect(viewModel.sentNostrDeliveryAcks.contains(messageID))
     }
 
     @Test @MainActor
@@ -813,7 +813,7 @@ struct ChatViewModelGeoDMTests {
             messageTimestamp: Date()
         )
 
-        #expect(viewModel.sentGeoDeliveryAcks.contains(messageID))
+        #expect(viewModel.sentNostrDeliveryAcks.contains(messageID))
         #expect(viewModel.sentReadReceipts.contains(messageID))
         #expect(!viewModel.unreadPrivateMessages.contains(convKey))
     }
@@ -823,18 +823,18 @@ struct ChatViewModelGeoDMTests {
 
 /// Contracts for the owner-side intent ops that are the sole mutation paths
 /// for `ChatViewModel`'s shared coordinator state (`nostrKeyMapping`,
-/// `sentReadReceipts`, `sentGeoDeliveryAcks`, `isBatchingPublic`, the geo
+/// `sentReadReceipts`, `sentNostrDeliveryAcks`, `isBatchingPublic`, the geo
 /// subscription IDs, and the selected private chat hand-off).
 struct ChatViewModelIntentOperationTests {
 
     @Test @MainActor
-    func markGeoDeliveryAckSent_returnsFalseOnSecondCall() async {
+    func markNostrDeliveryAckSent_returnsFalseOnSecondCall() async {
         let (viewModel, _) = makeTestableViewModel()
 
-        #expect(viewModel.markGeoDeliveryAckSent("geo-ack-1"))
-        #expect(!viewModel.markGeoDeliveryAckSent("geo-ack-1"))
-        #expect(viewModel.markGeoDeliveryAckSent("geo-ack-2"))
-        #expect(viewModel.sentGeoDeliveryAcks == ["geo-ack-1", "geo-ack-2"])
+        #expect(viewModel.markNostrDeliveryAckSent("geo-ack-1"))
+        #expect(!viewModel.markNostrDeliveryAckSent("geo-ack-1"))
+        #expect(viewModel.markNostrDeliveryAckSent("geo-ack-2"))
+        #expect(viewModel.sentNostrDeliveryAcks == ["geo-ack-1", "geo-ack-2"])
     }
 
     @Test @MainActor
