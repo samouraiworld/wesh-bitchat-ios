@@ -312,8 +312,10 @@ struct PaveExchangeScreen: View {
         while !Task.isCancelled {
             now = Date()
             if payload.isEmpty || clock.isExpired(at: now) {
-                payload = makePayload()
-                clock = PaveQRRefreshClock(issuedAt: now)
+                let refreshed = PaveQRRefreshClock.refresh(makePayload: makePayload, currentDate: Date.init)
+                payload = refreshed.payload
+                now = refreshed.sampledAt
+                clock = refreshed.clock ?? PaveQRRefreshClock(issuedAt: .distantPast)
             }
             try? await Task.sleep(nanoseconds: 15_000_000_000)
         }
