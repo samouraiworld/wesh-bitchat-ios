@@ -24,7 +24,7 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 
 ## 4. Backups
 - **Android:** Wesh excludes all of its data from Google backups and from transfers to a new phone.
-- **iPhone:** Wesh configures its sensitive files and keys to be excluded from iCloud and computer backups. App settings may be backed up (appearance, notices accepted<!-- INTERNET:START -->, whether Internet mode is on<!-- INTERNET:END -->).
+- **iPhone:** Wesh configures its sensitive files to be excluded from iCloud and computer backups. Keys tied to the device do not migrate to another device. Restoring on the original device may retain keys and still requires qualification. App settings may be backed up (appearance, notices accepted<!-- INTERNET:START -->, whether Internet mode is on<!-- INTERNET:END -->).
 - This version no longer counts encountered phones and no longer receives text through the retired share extension. A backup made by an older version may still contain that count, its secret value, encounter times, old geographic-room preferences or unused shared text. A peer ID recorded elsewhere may allow a phone to be recognized in the old count.
 - Updating and emergency erase do not modify backups already made. Candidate V1 migration and restoration still require device qualification before publication; a general guarantee that an old backup contains no data has not been established.
 
