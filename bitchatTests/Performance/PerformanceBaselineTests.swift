@@ -345,18 +345,20 @@ final class PerformanceBaselineTests: XCTestCase {
 
     // MARK: - 6b. End-to-end public ingest pipeline (current architecture)
 
-    /// Baseline for the full public-message ingest cycle through a real
+    /// Sustained batched throughput for the full public ingest cycle through a real
     /// `ChatViewModel`: `didReceivePublicMessage` (transport delegate entry,
     /// main-actor Task hop per message) → `handlePublicMessage` (rate limit,
     /// pipeline enqueue) → `PublicMessagePipeline` timer-batched flush into
     /// the `ConversationStore` (derived `ChatViewModel.messages` view;
     /// `PublicChatModel` observes the active `Conversation` directly).
-    /// Measures until `messages` and the feature model reflect every message,
-    /// so the pipeline's flush latency is part of the cycle. Senders are
-    /// spread 4-per-peer to stay under the 5-token sender rate bucket.
+    /// Measures until `messages` and the feature model reflect every message.
+    /// The 1,000-message workload amortizes the unchanged default batching delay;
+    /// this is not a latency measurement equivalent to the old 200-message burst.
+    /// It stays below the 1,337-row timeline cap, with four messages per sender
+    /// to stay under the five-token sender rate bucket.
     func testPipelinePublicIngest() {
-        let messageCount = 200
-        let senderCount = 50
+        let messageCount = 1000
+        let senderCount = 250
         let base = Date(timeIntervalSince1970: 1_700_000_000)
         struct InboundPublic {
             let peerID: PeerID
@@ -392,21 +394,57 @@ final class PerformanceBaselineTests: XCTestCase {
                     messageID: item.messageID
                 )
             }
-            // Drain the per-message main-actor hops and whichever surfacing
-            // path wins (the pipeline's batched timer flush or the startup
-            // channel apply's `refreshVisibleMessages`); `PublicChatModel`
-            // reads the same conversation synchronously.
+            // Drain the per-message main-actor hops and the actual default
+            // pipeline timer. Both views must reflect the whole synthetic corpus.
             let consistent = spinMainRunLoop(timeout: 10) {
-                fixture.viewModel.messages.count >= messageCount
-                    && fixture.publicChat.messages.count >= messageCount
+                fixture.viewModel.messages.filter { expectedIDs.contains($0.id) }.count == messageCount
+                    && fixture.publicChat.messages.filter { expectedIDs.contains($0.id) }.count == messageCount
             }
             samples.append(Date().timeIntervalSince(start))
             XCTAssertTrue(consistent, "messages/PublicChatModel never converged")
             let ingested = fixture.viewModel.messages.filter { expectedIDs.contains($0.id) }
             XCTAssertEqual(ingested.count, messageCount)
+            XCTAssertEqual(Set(ingested.map(\.id)), expectedIDs)
+            let publicIngested = fixture.publicChat.messages.filter { expectedIDs.contains($0.id) }
+            XCTAssertEqual(publicIngested.count, messageCount)
+            XCTAssertEqual(Set(publicIngested.map(\.id)), expectedIDs)
         }
 
         reportThroughput("pipeline.publicIngest", samples: samples, operations: messageCount, unit: "messages")
+    }
+
+    /// Preserve the original 200-message default-timer scenario independently
+    /// from the sustained-throughput floor. The actual VM fixture runs only in CI.
+    func testDefaultPublicIngest200AutomaticallyConverges() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != "true",
+                      "The actual public-ingest VM convergence fixture runs only in CI")
+        let messageCount = 200
+        let senderCount = 50
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let fixture = PerfPipelineFixture()
+        let expectedIDs = Set((0..<messageCount).map { "perf-default-pub-\($0)" })
+
+        for i in 0..<messageCount {
+            let sender = i % senderCount
+            fixture.viewModel.didReceivePublicMessage(
+                from: PeerID(str: String(format: "%016x", 0xC0DE_0000 + sender)),
+                nickname: "perfpeer\(sender)",
+                content: "public pipeline message \(i) from sender \(sender)",
+                timestamp: base.addingTimeInterval(Double(i)),
+                messageID: "perf-default-pub-\(i)"
+            )
+        }
+        let consistent = spinMainRunLoop(timeout: 10) {
+            fixture.viewModel.messages.filter { expectedIDs.contains($0.id) }.count == messageCount
+                && fixture.publicChat.messages.filter { expectedIDs.contains($0.id) }.count == messageCount
+        }
+        XCTAssertTrue(consistent, "default-timer messages/PublicChatModel never converged")
+        let ingested = fixture.viewModel.messages.filter { expectedIDs.contains($0.id) }
+        XCTAssertEqual(ingested.count, messageCount)
+        XCTAssertEqual(Set(ingested.map(\.id)), expectedIDs)
+        let publicIngested = fixture.publicChat.messages.filter { expectedIDs.contains($0.id) }
+        XCTAssertEqual(publicIngested.count, messageCount)
+        XCTAssertEqual(Set(publicIngested.map(\.id)), expectedIDs)
     }
 
     // MARK: - 7. ConversationStore append (to-be architecture)
