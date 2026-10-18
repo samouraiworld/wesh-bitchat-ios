@@ -11,17 +11,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "localPackages/Arti/**"
-      - "docs/ARTI-BINARY-PROVENANCE.md"
-      - ".github/workflows/arti-provenance.yml"
-      - "scripts/tests/test_arti_archive_normalization.py"
   pull_request:
-    paths:
-      - "localPackages/Arti/**"
-      - "docs/ARTI-BINARY-PROVENANCE.md"
-      - ".github/workflows/arti-provenance.yml"
-      - "scripts/tests/test_arti_archive_normalization.py"
 
 permissions:
   contents: read

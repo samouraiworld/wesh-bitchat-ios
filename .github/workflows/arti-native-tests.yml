@@ -2,18 +2,8 @@ name: Arti Native Contracts
 
 on:
   pull_request:
-    paths:
-      - "localPackages/Arti/Cargo.toml"
-      - "localPackages/Arti/Cargo.lock"
-      - "localPackages/Arti/arti-bitchat/**"
-      - ".github/workflows/arti-native-tests.yml"
   push:
     branches: [main]
-    paths:
-      - "localPackages/Arti/Cargo.toml"
-      - "localPackages/Arti/Cargo.lock"
-      - "localPackages/Arti/arti-bitchat/**"
-      - ".github/workflows/arti-native-tests.yml"
 
 permissions:
   contents: read
