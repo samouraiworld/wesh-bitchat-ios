@@ -414,10 +414,9 @@ final class PerformanceBaselineTests: XCTestCase {
     }
 
     /// Preserve the original 200-message default-timer scenario independently
-    /// from the sustained-throughput floor. The actual VM fixture runs only in CI.
-    func testDefaultPublicIngest200AutomaticallyConverges() throws {
-        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != "true",
-                      "The actual public-ingest VM convergence fixture runs only in CI")
+    /// from the sustained-throughput floor. Run this actual VM fixture only in
+    /// disposable CI; local validation selects the injected pipeline controls.
+    func testDefaultPublicIngest200AutomaticallyConverges() {
         let messageCount = 200
         let senderCount = 50
         let base = Date(timeIntervalSince1970: 1_700_000_000)
