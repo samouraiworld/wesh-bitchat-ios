@@ -46,7 +46,6 @@ struct PanicStartupDecision {
         wipeMedia: @MainActor () -> Bool,
         wipeLegacyGroupKeys: @MainActor () -> Bool
     ) -> Self {
-        _ = wipeLegacyGroupKeys
         let pending = (try? checkPending()) ?? true
         let sightingsConfirmed = wipeSightings()
         let geographyConfirmed = wipeGeography()
@@ -55,10 +54,12 @@ struct PanicStartupDecision {
         let bridgeConfirmed = wipeBridge()
         let groupsConfirmed = wipeGroups()
         let mediaConfirmed = wipeMedia()
+        let groupKeysConfirmed = wipeLegacyGroupKeys()
         return Self(
             recoveryPending: pending,
             legacySightingsConfirmed: sightingsConfirmed && geographyConfirmed
                 && sharedContentConfirmed && boardConfirmed && bridgeConfirmed && groupsConfirmed && mediaConfirmed
+                && groupKeysConfirmed
         )
     }
 
