@@ -164,24 +164,21 @@ final class AppRuntime: ObservableObject {
             // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
             if WeshWelcome.isDone() { startWeshInternet() } else { WeshInternetMode.shared.clearArtiWhileOff() }
         }
-        performMediaMaintenance()
+        performBackupMaintenance()
 
         record(.launched)
         record(.startupCompleted)
     }
 
-    /// Wesh has no media: deletes the media an older build may have stored,
-    /// after excluding from backups the files older builds left there.
-    /// Detached because `AppRuntime` is main-actor; best-effort, nothing at
-    /// launch depends on the result. Skipped under tests, whose process
-    /// shares the developer's real Application Support tree.
-    private func performMediaMaintenance() {
+    /// Preserves backup exclusion for existing files. Checked legacy-media deletion
+    /// runs in the preflight before transport admission, independently of this sweep.
+    /// This best-effort task is skipped under tests, which share the host's file tree.
+    private func performBackupMaintenance() {
         guard !TestEnvironment.isRunningTests else { return }
         Task.detached(priority: .utility) {
             #if os(iOS)
             LocalFileProtection.excludeApplicationSupportFromBackup()
             #endif
-            try? PanicRecoveryFileStore().removeLegacyMedia()
         }
     }
 

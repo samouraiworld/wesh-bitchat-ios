@@ -271,7 +271,7 @@ struct PanicRecoveryFileStore {
 
     /// Deletes the legacy media tree. Throws unless it is confirmed gone.
     func removeLegacyMedia() throws {
-        let directory = try rootDirectory()
+        let directory = try removalRootDirectory()
             .appendingPathComponent(Self.legacyMediaDirectoryName, isDirectory: true)
         guard PanicFileRemoval.remove(directory, required: true, fileManager: fileManager) else {
             throw PanicRecoveryError.legacyMediaNotRemoved
@@ -302,6 +302,15 @@ struct PanicRecoveryFileStore {
         where fileManager.fileExists(atPath: markerURL.path) {
             try fileManager.removeItem(at: markerURL)
         }
+    }
+
+    /// Resolves the configured removal path without creating the root or a panic marker.
+    private func removalRootDirectory() throws -> URL {
+        if let baseDirectory { return baseDirectory }
+        guard let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw PanicRecoveryError.legacyMediaNotRemoved
+        }
+        return directory
     }
 
     private func rootDirectory() throws -> URL {
