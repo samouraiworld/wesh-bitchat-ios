@@ -40,13 +40,13 @@ struct SightingsStartupPreflightTests {
             cleanupCalls += 1
             return cleanupSucceeds
         }
-        let failed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup)
+        let failed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true })
         #expect(failed.blockOrdinaryAdmission)
         #expect(failed.suspendTransport)
         #expect(!failed.replayPanic)
         cleanupSucceeds = true
 
-        let confirmed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup)
+        let confirmed = PanicStartupDecision.retry(checkPending: { false }, wipeSightings: cleanup, wipeGeography: { true })
 
         #expect(!confirmed.blockOrdinaryAdmission)
         #expect(!confirmed.suspendTransport)
@@ -56,14 +56,14 @@ struct SightingsStartupPreflightTests {
 
     @Test @MainActor
     func newlyPendingMarkerCannotBeClearedByOrdinaryCleanupRetry() {
-        let decision = PanicStartupDecision.retry(checkPending: { true }, wipeSightings: { true })
+        let decision = PanicStartupDecision.retry(checkPending: { true }, wipeSightings: { true }, wipeGeography: { true })
         #expect(decision.replayPanic)
         #expect(decision.suspendTransport)
     }
 
     @Test @MainActor
     func unreadablePendingMarkerNeverReopensOrdinaryAdmission() {
-        let decision = PanicStartupDecision.retry(checkPending: { throw MarkerFailure.unavailable }, wipeSightings: { true })
+        let decision = PanicStartupDecision.retry(checkPending: { throw MarkerFailure.unavailable }, wipeSightings: { true }, wipeGeography: { true })
         #expect(decision.replayPanic)
         #expect(decision.suspendTransport)
     }
