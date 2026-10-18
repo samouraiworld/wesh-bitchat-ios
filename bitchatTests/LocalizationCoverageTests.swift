@@ -54,22 +54,6 @@ struct LocalizationCoverageTests {
         }
     }
 
-    @Test func shareExtensionCatalogCoversAllLocalesForEveryKey() throws {
-        let catalog = try Self.loadCatalog("bitchatShareExtension/Localization/Localizable.xcstrings")
-        let expected = catalog.allLocales
-        for (key, locales) in catalog.coverage.sorted(by: { $0.key < $1.key }) {
-            let missing = expected.subtracting(locales).sorted()
-            #expect(missing.isEmpty, "\(key) is missing locales: \(missing.joined(separator: ", "))")
-        }
-    }
-
-    @Test func shareExtensionSupportsSameLocalesAsMainApp() throws {
-        let main = try Self.loadCatalog("bitchat/Localizable.xcstrings")
-        let shareExt = try Self.loadCatalog("bitchatShareExtension/Localization/Localizable.xcstrings")
-        let missing = main.allLocales.subtracting(shareExt.allLocales).sorted()
-        #expect(missing.isEmpty, "share extension is missing locales: \(missing.joined(separator: ", "))")
-    }
-
     /// The catalog tests above validate the CATALOG; this one validates the
     /// CODE. A `String(localized:)` whose key is absent from the catalog its
     /// target actually ships compiles and runs fine — it just silently ships
@@ -79,93 +63,30 @@ struct LocalizationCoverageTests {
     /// coverage tests stayed green. Interpolated keys can't be checked
     /// statically and are skipped; every literal key must resolve.
     ///
-    /// The catalogs are checked per target, not as a union: the share
-    /// extension bundles only its own catalog, so a key it references that
-    /// lives solely in the app catalog is just as untranslated there as one
-    /// that exists nowhere.
+    /// Both app targets bundle the main catalog. Every literal key in app
+    /// sources must resolve there; removed targets must not contribute keys
+    /// that could hide a missing main-app translation.
     @Test func everyCodeReferencedKeyExistsInItsOwnCatalog() throws {
         let main = try Self.loadCatalog(Self.mainCatalogPath)
-        let shareExt = try Self.loadCatalog(Self.shareExtensionCatalogPath)
         let mainKeys = Set(main.coverage.keys)
-        let shareKeys = Set(shareExt.coverage.keys)
+        let references = try Self.localizedKeyReferences(in: "bitchat")
+        #expect(!references.isEmpty, "app source scan should find localized keys")
 
-        // Files under `bitchat/` that the share extension also compiles have to
-        // resolve in both catalogs, since each target bundles only its own.
-        let sharedSources = try Self.shareExtensionMembershipExceptions()
+        let missing = references
+            .filter { !mainKeys.contains($0.key) }
+            .map { "\($0.location) \($0.key)" }
 
-        for (sourceRoot, ownKeys, otherKeys, ownCatalog, otherCatalog) in [
-            ("bitchat", mainKeys, shareKeys, Self.mainCatalogPath, Self.shareExtensionCatalogPath),
-            ("bitchatShareExtension", shareKeys, mainKeys,
-             Self.shareExtensionCatalogPath, Self.mainCatalogPath)
-        ] {
-            let references = try Self.localizedKeyReferences(in: sourceRoot)
-
-            let missing = references
-                .filter { !ownKeys.contains($0.key) }
-                .map { reference -> String in
-                    let note = otherKeys.contains(reference.key)
-                        ? " (present in \(otherCatalog), which this target does not bundle)"
-                        : " (present in no catalog)"
-                    return "\(reference.location) \(reference.key)\(note)"
-                }
-
-            #expect(
-                missing.isEmpty,
-                """
-                keys referenced under \(sourceRoot)/ but absent from \(ownCatalog) — \
-                these ship English to all non-source locales:
-                \(missing.sorted().joined(separator: "\n"))
-                """
-            )
-
-            guard sourceRoot == "bitchat" else { continue }
-            let missingInBoth = references
-                .filter { sharedSources.contains($0.location.prefix(while: { $0 != ":" }).description) }
-                .filter { !shareKeys.contains($0.key) }
-                .map { "\($0.location) \($0.key)" }
-
-            #expect(
-                missingInBoth.isEmpty,
-                """
-                keys referenced from files the share extension also compiles, but absent \
-                from \(Self.shareExtensionCatalogPath) — these ship English inside the \
-                extension:
-                \(missingInBoth.sorted().joined(separator: "\n"))
-                """
-            )
-        }
-    }
-
-    /// The files under `bitchat/` that the share-extension target compiles, read
-    /// from the project's membership exceptions so this cannot drift when the
-    /// set changes.
-    private static func shareExtensionMembershipExceptions() throws -> Set<String> {
-        let project = try String(
-            contentsOf: repoRoot.appendingPathComponent("bitchat.xcodeproj/project.pbxproj"),
-            encoding: .utf8
-        )
-        let marker = #"Exceptions for "bitchat" folder in "bitchatShareExtension" target"#
-        guard let markerRange = project.range(of: marker),
-              let listStart = project.range(
-                of: "membershipExceptions = (", range: markerRange.upperBound..<project.endIndex
-              ),
-              let listEnd = project.range(
-                of: ");", range: listStart.upperBound..<project.endIndex
-              )
-        else { return [] }
-
-        return Set(
-            project[listStart.upperBound..<listEnd.lowerBound]
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { $0.hasSuffix(".swift") }
-                .map { "bitchat/\($0)" }
+        #expect(
+            missing.isEmpty,
+            """
+            keys referenced under bitchat/ but absent from \(Self.mainCatalogPath) — \
+            these ship English to all non-source locales:
+            \(missing.sorted().joined(separator: "\n"))
+            """
         )
     }
 
     private static let mainCatalogPath = "bitchat/Localizable.xcstrings"
-    private static let shareExtensionCatalogPath =
-        "bitchatShareExtension/Localization/Localizable.xcstrings"
 
     /// A literal `String(localized:)` key, with where it was written.
     private struct KeyReference {
