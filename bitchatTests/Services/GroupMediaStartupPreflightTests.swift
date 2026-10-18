@@ -241,11 +241,11 @@ private final class GroupMediaFixture {
         if retry {
             return PanicStartupDecision.retry(checkPending: checkPending,
                 wipeSightings: sightings, wipeGeography: geography, wipeSharedContent: sharedContent,
-                wipeBoard: board, wipeBridge: bridge, wipeGroups: groups, wipeMedia: media)
+                wipeBoard: board, wipeBridge: bridge, wipeGroups: groups, wipeMedia: media, wipeLegacyGroupKeys: { true })
         }
         return PanicStartupDecision.preflight(checkPending: checkPending,
             wipeSightings: sightings, wipeGeography: geography, wipeSharedContent: sharedContent,
-            wipeBoard: board, wipeBridge: bridge, wipeGroups: groups, wipeMedia: media)
+            wipeBoard: board, wipeBridge: bridge, wipeGroups: groups, wipeMedia: media, wipeLegacyGroupKeys: { true })
     }
 
     func expectErased() {

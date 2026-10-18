@@ -65,6 +65,11 @@ struct PanicPersistentStoreWipes {
         if TestEnvironment.isRunningTests { return true }
         return PanicFileRemoval.removeLegacyMedia(fileStore: PanicRecoveryFileStore())
     }
+    /// Secrets left by builds that still accepted BitChat groups.
+    var legacyGroupKeys: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return KeychainManager.retireLegacyGroupKeysFromCurrentService()
+    }
     /// Handoffs left by earlier share extensions; never parsed or imported.
     var sharedContent: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }
