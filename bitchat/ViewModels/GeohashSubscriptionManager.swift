@@ -23,7 +23,6 @@ protocol GeohashSubscriptionContext: AnyObject {
     /// Clears all sampling subscriptions and returns the removed subscription IDs
     /// so the caller can unsubscribe them from the relay manager.
     func clearGeoSamplingSubs() -> [String]
-    var nostrRelayManager: NostrRelayManager? { get }
 
     // MARK: Public timeline & pipeline
     var messages: [BitchatMessage] { get }
@@ -36,7 +35,6 @@ protocol GeohashSubscriptionContext: AnyObject {
 
     // MARK: Nostr identity & dedup
     func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
-    func currentNostrIdentity() -> NostrIdentity?
     func recordProcessedNostrEvent(_ eventID: String)
     func clearProcessedNostrEvents()
     /// Records the Nostr pubkey behind a (possibly virtual) peer ID.
@@ -108,8 +106,7 @@ extension ChatViewModel: GeohashSubscriptionContext {
 }
 
 /// Owns subscription IDs and relay lifecycle for geohash channels, geohash
-/// DMs, the account gift-wrap mailbox, and background geohash sampling. The
-/// only component that talks to `NostrRelayManager`; inbound events are
+/// DMs and background geohash sampling. Geographic inbound events are
 /// forwarded to `NostrInboundPipeline` / `GeoPresenceTracker`.
 final class GeohashSubscriptionManager {
     private weak var context: (any GeohashSubscriptionContext)?
@@ -375,28 +372,4 @@ final class GeohashSubscriptionManager {
         presence.clearGeoSamplingEventDedup()
     }
 
-    @MainActor
-    func setupNostrMessageHandling() {
-        guard let context else { return }
-        guard let currentIdentity = context.currentNostrIdentity() else {
-            SecureLogger.warning("⚠️ No Nostr identity available for message handling", category: .session)
-            return
-        }
-
-        SecureLogger.debug(
-            "🔑 Setting up Nostr subscription for pubkey: \(currentIdentity.publicKeyHex.prefix(16))...",
-            category: .session
-        )
-
-        let filter = NostrFilter.giftWrapsFor(
-            pubkey: currentIdentity.publicKeyHex,
-            since: Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds)
-        )
-
-        context.nostrRelayManager?.subscribe(filter: filter, id: "chat-messages") { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.inbound.handleNostrMessage(event)
-            }
-        }
-    }
 }

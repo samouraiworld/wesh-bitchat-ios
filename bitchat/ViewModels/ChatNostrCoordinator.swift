@@ -10,7 +10,7 @@ import Foundation
 /// Nostr stack. The members declared here are only the residual
 /// favorites/ack glue the slimmed coordinator still owns.
 @MainActor
-protocol ChatNostrContext: GeohashSubscriptionContext, NostrInboundPipelineContext, GeoPresenceContext {
+protocol ChatNostrContext: GeohashSubscriptionContext, NostrInboundPipelineContext, GeoPresenceContext, AccountNostrMailboxContext {
     var selectedPrivateChatPeer: PeerID? { get }
     var nostrKeyMapping: [PeerID: String] { get }
     func startPrivateChat(with peerID: PeerID)
@@ -35,11 +35,12 @@ extension ChatViewModel: ChatNostrContext {
     // `ChatVerificationCoordinator.swift` — already exist on `ChatViewModel`.
 }
 
-/// Thin facade over the Nostr stack: owns and wires the three components and
+/// Thin facade over the Nostr stack: owns and wires the components and
 /// keeps the residual favorites/ack glue that fits none of them.
 ///
 /// - `subscriptions`: relay lifecycle and subscription IDs
 ///   (`GeohashSubscriptionManager`)
+/// - `accountMailbox`: account gift-wrap subscription, independent of geographic channels
 /// - `inbound`: the hot event -> message/payload pipeline
 ///   (`NostrInboundPipeline`)
 /// - `presence`: teleport marking, sampling dedup, notification cooldown
@@ -49,6 +50,7 @@ final class ChatNostrCoordinator {
     let presence: GeoPresenceTracker
     let inbound: NostrInboundPipeline
     let subscriptions: GeohashSubscriptionManager
+    let accountMailbox: AccountNostrMailbox
 
     init(context: any ChatNostrContext) {
         self.context = context
@@ -57,6 +59,7 @@ final class ChatNostrCoordinator {
         self.presence = presence
         self.inbound = inbound
         self.subscriptions = GeohashSubscriptionManager(context: context, inbound: inbound, presence: presence)
+        self.accountMailbox = AccountNostrMailbox(context: context, inbound: inbound)
     }
 
     @MainActor

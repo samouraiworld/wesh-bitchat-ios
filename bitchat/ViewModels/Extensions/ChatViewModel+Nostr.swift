@@ -62,7 +62,7 @@ extension ChatViewModel {
 
     @MainActor
     func setupNostrMessageHandling() {
-        nostrCoordinator.subscriptions.setupNostrMessageHandling()
+        nostrCoordinator.accountMailbox.setupNostrMessageHandling()
     }
 
     @MainActor

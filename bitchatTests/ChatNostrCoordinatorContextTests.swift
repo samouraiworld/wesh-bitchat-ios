@@ -28,7 +28,13 @@ private final class MockChatNostrContext: ChatNostrContext {
     var geoDmSubscriptionID: String?
     var geoSamplingSubs: [String: String] = [:]
     var lastGeoNotificationAt: [String: Date] = [:]
-    var nostrRelayManager: NostrRelayManager? { nil }
+    private(set) var accountSubscriptions: [(filter: NostrFilter, id: String)] = []
+    private(set) var accountHandlers: [(NostrEvent) -> Void] = []
+
+    func subscribeAccountMailbox(filter: NostrFilter, id: String, handler: @escaping (NostrEvent) -> Void) {
+        accountSubscriptions.append((filter, id))
+        accountHandlers.append(handler)
+    }
 
     func setGeoChatSubscriptionID(_ id: String?) { geoSubscriptionID = id }
     func setGeoDmSubscriptionID(_ id: String?) { geoDmSubscriptionID = id }
@@ -255,6 +261,85 @@ private func drainMainQueue() async {
 /// (`NostrRelayManager.shared` subscriptions, `TorManager`) remain covered by
 /// the full view-model tests.
 struct ChatNostrCoordinatorContextTests {
+
+    @Test @MainActor
+    func accountMailboxRequiresIdentityAndKeepsTheGiftWrapFilter() throws {
+        let context = MockChatNostrContext()
+        let coordinator = ChatNostrCoordinator(context: context)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        #expect(context.accountSubscriptions.isEmpty)
+
+        let identity = try NostrIdentity.generate()
+        context.nostrIdentity = identity
+        let earliest = Int(Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds).timeIntervalSince1970)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        let latest = Int(Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds).timeIntervalSince1970)
+        #expect(context.accountSubscriptions.count == 1)
+        let subscription = try #require(context.accountSubscriptions.first)
+        #expect(subscription.id == "chat-messages")
+        #expect(subscription.filter.kinds == [1059])
+        let since = try #require(subscription.filter.since)
+        #expect((earliest...latest).contains(since))
+        let encoded = try JSONEncoder().encode(subscription.filter)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["#p"] as? [String] == [identity.publicKeyHex])
+    }
+
+    @Test @MainActor
+    func accountMailboxCallbackPreservesPrivateMessagesAndBothAcknowledgements() async throws {
+        let context = MockChatNostrContext()
+        context.nostrIdentity = try NostrIdentity.generate()
+        let recipient = try #require(context.nostrIdentity)
+        let sender = try NostrIdentity.generate()
+        let coordinator = ChatNostrCoordinator(context: context)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        let handler = try #require(context.accountHandlers.first)
+        let contents = [
+            try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: "Synthetic inbox message", messageID: "mailbox-pm")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .delivered, messageID: "mailbox-delivered")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .readReceipt, messageID: "mailbox-read"))
+        ]
+        for content in contents {
+            handler(try NostrProtocol.createPrivateMessage(
+                content: content, recipientPubkey: recipient.publicKeyHex, senderIdentity: sender
+            ))
+        }
+        let routed = await TestHelpers.waitUntil({
+            context.handledPrivateMessages.count == 1 && context.handledDelivered.count == 1 &&
+                context.handledReadReceipts.count == 1
+        }, timeout: TestConstants.settleTimeout)
+        #expect(routed)
+        #expect(context.activeChannel == .mesh)
+        #expect(context.handledPrivateMessages.first?.senderPubkey == sender.publicKeyHex)
+        #expect(context.handledDelivered.first?.senderPubkey == sender.publicKeyHex)
+        #expect(context.handledReadReceipts.first?.senderPubkey == sender.publicKeyHex)
+        let payload = try #require(context.handledPrivateMessages.first?.payload)
+        let message = try #require(PrivateMessagePacket.decode(from: payload.data))
+        #expect(message.messageID == "mailbox-pm")
+        #expect(message.content == "Synthetic inbox message")
+    }
+
+    @Test @MainActor
+    func accountMailboxDoesNotRetainItsContext() throws {
+        var context: MockChatNostrContext? = MockChatNostrContext()
+        weak var weakContext = context
+        let coordinator = ChatNostrCoordinator(context: try #require(context))
+        context = nil
+        #expect(weakContext == nil)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+    }
+
+    @Test @MainActor
+    func aRetainedRelayHandlerDoesNotKeepTheAccountMailboxAlive() throws {
+        let context = MockChatNostrContext()
+        context.nostrIdentity = try NostrIdentity.generate()
+        var coordinator: ChatNostrCoordinator? = ChatNostrCoordinator(context: context)
+        weak var mailbox = coordinator?.accountMailbox
+        coordinator?.accountMailbox.setupNostrMessageHandling()
+        #expect(context.accountHandlers.count == 1)
+        coordinator = nil
+        #expect(mailbox == nil)
+    }
 
     @Test @MainActor
     func handleNostrEvent_ingestsPublicMessageOnceAndDeduplicates() async throws {

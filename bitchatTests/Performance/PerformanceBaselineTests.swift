@@ -654,7 +654,7 @@ private final class PerfNostrContext: ChatNostrContext {
     var geoDmSubscriptionID: String?
     var geoSamplingSubs: [String: String] = [:]
     var lastGeoNotificationAt: [String: Date] = [:]
-    var nostrRelayManager: NostrRelayManager? { nil }
+    func subscribeAccountMailbox(filter: NostrFilter, id: String, handler: @escaping (NostrEvent) -> Void) {}
 
     func setGeoChatSubscriptionID(_ id: String?) { geoSubscriptionID = id }
     func setGeoDmSubscriptionID(_ id: String?) { geoDmSubscriptionID = id }
