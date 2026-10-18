@@ -177,7 +177,7 @@ struct SharedContentRetirementTests {
         let viewModel = ChatViewModel(
             keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: MockIdentityManager(keychain), transport: transport,
-            locationManager: LocationChannelManager(storage: defaults), readReceiptsDefaults: defaults,
+            readReceiptsDefaults: defaults,
             panicRecoveryOperations: operations, panicNetworkLifecycle: .noop,
             weshPrivatePolicyEnabled: true, weshMeetingNote: WeshMeetingNoteStore(),
             panicPersistentStoreWipes: wipes
