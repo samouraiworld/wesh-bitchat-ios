@@ -314,6 +314,7 @@ final class NoiseEncryptionService {
         keychain: KeychainManagerProtocol,
         ordinaryHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryHandshakeTimeout,
+        initiatorDeadlineScheduler: NoiseInitiatorDeadlineScheduler = .liveDispatch,
         ordinaryResponderHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
         recentInitiatorCompletionGracePeriod: TimeInterval =
@@ -330,6 +331,7 @@ final class NoiseEncryptionService {
                 localStaticKey: staticKey,
                 keychain: keychain,
                 ordinaryHandshakeTimeout: ordinaryHandshakeTimeout,
+                initiatorDeadlineScheduler: initiatorDeadlineScheduler,
                 ordinaryResponderHandshakeTimeout: ordinaryResponderHandshakeTimeout,
                 recentInitiatorCompletionGracePeriod: recentInitiatorCompletionGracePeriod,
                 ordinaryReconnectRollbackCooldown: ordinaryReconnectRollbackCooldown

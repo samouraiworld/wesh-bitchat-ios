@@ -604,13 +604,18 @@ struct NoiseEncryptionServiceTests {
 
     @Test("Ordinary timeout produces exactly one bounded retry")
     func ordinaryInitiationTimeoutIsBounded() async throws {
+        let deadlines = ManualNoiseInitiatorDeadlines()
         let service = NoiseEncryptionService(
             keychain: MockKeychain(),
-            ordinaryHandshakeTimeout: 0.03
+            ordinaryHandshakeTimeout: 0.03,
+            initiatorDeadlineScheduler: deadlines.scheduler
         )
         let peerID = PeerID(str: "1021324354657687")
         let recorder = HandshakeStartRecorder()
+        let callbacks = NoiseDeadlineCallbackOwner()
         service.onHandshakeRecoveryRequired = { [weak service] request in
+            guard callbacks.begin() else { return }
+            defer { callbacks.finish() }
             guard let service else { return }
             do {
                 let payload = try claimPreparedRecoveryPayload(
@@ -624,27 +629,125 @@ struct NoiseEncryptionServiceTests {
             }
         }
 
-        let first = try #require(
-            try service.initiateHandshakeIfNeeded(
-                with: peerID,
-                retryOnTimeout: true
+        try await withNoiseDeadlineCleanup(
+            service: service, peerID: peerID, deadlines: deadlines, callbacks: callbacks
+        ) {
+            let first = try #require(
+                try service.initiateHandshakeIfNeeded(
+                    with: peerID,
+                    retryOnTimeout: true
+                )
             )
+            #expect(
+                service.claimHandshakeInitiation(first, for: peerID) != nil
+            )
+            try #require(await deadlines.advance(by: 0.03))
+            let retried = await TestHelpers.waitUntil(
+                { recorder.messages.count == 1 },
+                timeout: TestConstants.longTimeout
+            )
+            #expect(retried)
+            let handlerFinished = await TestHelpers.waitUntil(
+                { callbacks.completedCount == 1 && callbacks.isIdle },
+                timeout: TestConstants.longTimeout
+            )
+            try #require(handlerFinished)
+            try #require(await deadlines.advance(by: 0.03))
+            let retryExpired = await TestHelpers.waitUntil(
+                { !service.hasSession(with: peerID) },
+                timeout: TestConstants.longTimeout
+            )
+            #expect(retryExpired)
+            #expect(recorder.timeoutCount == 1)
+            #expect(recorder.errorCount == 0)
+        }
+    }
+
+    @Test("Manual initiator deadlines preserve claim identity and rearming")
+    func manualInitiatorDeadlineClaimRearmsAndCancelsPreparation() async throws {
+        let deadlines = ManualNoiseInitiatorDeadlines()
+        let service = NoiseEncryptionService(
+            keychain: MockKeychain(),
+            ordinaryHandshakeTimeout: 0.03,
+            initiatorDeadlineScheduler: deadlines.scheduler
         )
-        #expect(
-            service.claimHandshakeInitiation(first, for: peerID) != nil
+        let peerID = PeerID(str: "1021324354657687")
+        let callbacks = NoiseDeadlineCallbackOwner()
+        let recorder = HandshakeStartRecorder()
+        service.onHandshakeRecoveryRequired = { [weak service] request in
+            guard callbacks.begin() else { return }
+            defer { callbacks.finish() }
+            service?.cancelHandshakeRecovery(request)
+            recorder.recordTimeout()
+        }
+
+        try await withNoiseDeadlineCleanup(
+            service: service, peerID: peerID, deadlines: deadlines, callbacks: callbacks
+        ) {
+            let attempt = try #require(
+                try service.initiateHandshakeIfNeeded(with: peerID, retryOnTimeout: true)
+            )
+            let preparationDeadline = try #require(deadlines.pendingWorkItems.first)
+            try #require(await deadlines.advance(by: 0.02))
+            #expect(service.claimHandshakeInitiation(attempt, for: peerID) == attempt.payload)
+            #expect(service.claimHandshakeInitiation(attempt, for: peerID) == nil)
+            #expect(preparationDeadline.isCancelled)
+            #expect(deadlines.scheduledDelays == [0.03, 0.03])
+
+            // Release the original cancelled preparation item on its real queue.
+            try #require(await deadlines.advance(by: 0.01))
+            #expect(service.hasSession(with: peerID))
+            #expect(recorder.timeoutCount == 0)
+
+            try #require(await deadlines.advance(by: 0.02))
+            let handlerFinished = await TestHelpers.waitUntil(
+                { callbacks.completedCount == 1 && callbacks.isIdle },
+                timeout: TestConstants.longTimeout
+            )
+            try #require(handlerFinished)
+            #expect(!service.hasSession(with: peerID))
+            #expect(recorder.timeoutCount == 1)
+            #expect(service.claimHandshakeInitiation(attempt, for: peerID) == nil)
+        }
+    }
+
+    @Test("Cleared initiators reject old claims and cancel their queued deadlines")
+    func manualInitiatorDeadlinesStayCancelledAfterClear() async throws {
+        let deadlines = ManualNoiseInitiatorDeadlines()
+        let service = NoiseEncryptionService(
+            keychain: MockKeychain(),
+            ordinaryHandshakeTimeout: 0.03,
+            initiatorDeadlineScheduler: deadlines.scheduler
         )
-        let retried = await TestHelpers.waitUntil(
-            { recorder.messages.count == 1 },
-            timeout: TestConstants.longTimeout
-        )
-        #expect(retried)
-        let retryExpired = await TestHelpers.waitUntil(
-            { !service.hasSession(with: peerID) },
-            timeout: TestConstants.longTimeout
-        )
-        #expect(retryExpired)
-        #expect(recorder.timeoutCount == 1)
-        #expect(recorder.errorCount == 0)
+        let peerID = PeerID(str: "1021324354657687")
+        let callbacks = NoiseDeadlineCallbackOwner()
+        let recorder = HandshakeStartRecorder()
+        service.onHandshakeRecoveryRequired = { request in
+            guard callbacks.begin() else { return }
+            defer { callbacks.finish() }
+            recorder.record(request: request)
+        }
+
+        try await withNoiseDeadlineCleanup(
+            service: service, peerID: peerID, deadlines: deadlines, callbacks: callbacks
+        ) {
+            let attempt = try #require(
+                try service.initiateHandshakeIfNeeded(with: peerID, retryOnTimeout: true)
+            )
+            #expect(service.claimHandshakeInitiation(attempt, for: peerID) == attempt.payload)
+            let pending = deadlines.pendingWorkItems
+            try #require(pending.count == 2)
+            service.clearSession(for: peerID)
+            #expect(pending.allSatisfy(\.isCancelled))
+            #expect(service.claimHandshakeInitiation(attempt, for: peerID) == nil)
+
+            // These exact items were cancelled before queue submission, so
+            // their completed queue barrier proves no recovery was scheduled.
+            try #require(await deadlines.advance(by: 0.03))
+            #expect(!service.hasSession(with: peerID))
+            #expect(recorder.requests.isEmpty)
+            #expect(callbacks.completedCount == 0)
+        }
     }
 
     @Test("Claim gives an attempt a full on-wire timeout window")
@@ -1673,4 +1776,139 @@ private final class HandshakeStartRecorder: @unchecked Sendable {
         storedTimeoutUptimes.append(uptimeNanoseconds)
         lock.unlock()
     }
+}
+
+/// Keeps callback work owned through teardown even if the manager has already
+/// captured a callback for a later global-queue hop.
+private final class NoiseDeadlineCallbackOwner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var accepting = true
+    private var active = 0
+    private var completed = 0
+
+    func begin() -> Bool {
+        lock.withLock {
+            guard accepting else { return false }
+            active += 1
+            return true
+        }
+    }
+
+    func finish() {
+        lock.withLock {
+            active -= 1
+            completed += 1
+        }
+    }
+
+    func close() { lock.withLock { accepting = false } }
+    var isIdle: Bool { lock.withLock { active == 0 } }
+    var completedCount: Int { lock.withLock { completed } }
+}
+
+/// Advances only ordinary initiator deadlines. The manager still owns the
+/// actual work items, cancellation, queue and timeout/recovery state machine.
+private final class ManualNoiseInitiatorDeadlines: @unchecked Sendable {
+    private struct Entry {
+        let deadline: TimeInterval
+        let queue: DispatchQueue
+        let work: DispatchWorkItem
+    }
+
+    private final class QueueCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var remaining: Int
+        init(count: Int) { remaining = count }
+        func finish() { lock.withLock { remaining -= 1 } }
+        var isFinished: Bool { lock.withLock { remaining == 0 } }
+    }
+
+    private let lock = NSLock()
+    private var now: TimeInterval = 0
+    private var pending: [Entry] = []
+    private var queues: [ObjectIdentifier: DispatchQueue] = [:]
+    private var delays: [TimeInterval] = []
+
+    var scheduler: NoiseInitiatorDeadlineScheduler {
+        NoiseInitiatorDeadlineScheduler { [self] delay, queue, work in
+            lock.withLock {
+                pending.append(Entry(deadline: now + delay, queue: queue, work: work))
+                queues[ObjectIdentifier(queue)] = queue
+                delays.append(delay)
+            }
+        }
+    }
+
+    var pendingWorkItems: [DispatchWorkItem] { lock.withLock { pending.map(\.work) } }
+    var scheduledDelays: [TimeInterval] { lock.withLock { delays } }
+
+    func advance(by interval: TimeInterval) async -> Bool {
+        let due: [Entry] = lock.withLock {
+            now += interval
+            let released = pending.filter { $0.deadline <= now }
+            pending.removeAll { $0.deadline <= now }
+            return released
+        }
+        let targets = Dictionary(due.map { (ObjectIdentifier($0.queue), $0.queue) },
+                                 uniquingKeysWith: { first, _ in first })
+        return await submitAndDrain(due, queues: Array(targets.values))
+    }
+
+    func cancelPendingAndDrain() async -> (cancelled: Bool, drained: Bool) {
+        let (entries, targets): ([Entry], [DispatchQueue]) = lock.withLock {
+            let entries = pending
+            pending.removeAll()
+            return (entries, Array(queues.values))
+        }
+        // The real clearSession must already have cancelled these. Still
+        // cancel any unexpected item for cleanup, while reporting the defect.
+        let cancelled = entries.allSatisfy { $0.work.isCancelled }
+        entries.forEach { $0.work.cancel() }
+        let drained = await submitAndDrain(entries, queues: targets)
+        lock.withLock { queues.removeAll() }
+        return (cancelled, drained)
+    }
+
+    private func submitAndDrain(_ entries: [Entry], queues: [DispatchQueue]) async -> Bool {
+        for entry in entries {
+            entry.queue.async(execute: entry.work)
+        }
+        let completion = QueueCompletion(count: queues.count)
+        for queue in queues {
+            queue.async(flags: .barrier) { completion.finish() }
+        }
+        return await TestHelpers.waitUntil(
+            { completion.isFinished }, timeout: TestConstants.longTimeout
+        )
+    }
+}
+
+private func withNoiseDeadlineCleanup(
+    service: NoiseEncryptionService,
+    peerID: PeerID,
+    deadlines: ManualNoiseInitiatorDeadlines,
+    callbacks: NoiseDeadlineCallbackOwner,
+    operation: () async throws -> Void
+) async throws {
+    var primaryFailure: Error?
+    do {
+        try await operation()
+    } catch {
+        primaryFailure = error
+    }
+
+    // Close callback admission before waiting: a captured-but-not-entered
+    // global callback is then inert, rather than being mistaken for a drain.
+    callbacks.close()
+    let callbacksFinished = await TestHelpers.waitUntil(
+        { callbacks.isIdle }, timeout: TestConstants.longTimeout
+    )
+    #expect(callbacksFinished, "Entered recovery handlers must finish before teardown")
+    service.clearSession(for: peerID)
+    let cleanup = await deadlines.cancelPendingAndDrain()
+    #expect(cleanup.cancelled, "The real session clear must cancel pending deadlines")
+    #expect(cleanup.drained, "Submitted original work and queue barriers must finish")
+    // Keep the closed callback installed: mutating the service callback while
+    // a captured global wrapper could read it would introduce a teardown race.
+    if let primaryFailure { throw primaryFailure }
 }

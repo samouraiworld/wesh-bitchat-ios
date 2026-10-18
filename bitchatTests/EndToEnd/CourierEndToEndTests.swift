@@ -623,6 +623,7 @@ struct CourierEndToEndTests {
     /// mesh-wide handshake flood at an identity that cannot answer.
     @Test func deliveryAckForAbsentPeerQueuesWithoutHandshake() async throws {
         let ble = makeService()
+        defer { ble.stopServices() }
         let outbound = PacketTap()
         ble._test_onOutboundPacket = outbound.record
 
