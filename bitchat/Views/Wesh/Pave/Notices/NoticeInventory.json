@@ -4,7 +4,7 @@
     "bitchat/Views/Wesh/Pave/Notices/secp256k1-NOTICES.txt": "4c26e939a13b4d51f5b5e93c2978c54738b246545ea702b90467d50f8ddf84c4"
   },
   "cargoLockSHA256": "da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5",
-  "cargoManifestSHA256": "b5ecb5b0dabf40c442b553724adcbf8996e280ebd0968d1d33b89c792ed0131d",
+  "cargoManifestSHA256": "77099504353b19d9e20f08685a004fda52a20f69d0c2f7068cc5f709d5fb5793",
   "components": [
     {
       "crateChecksum": "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa",

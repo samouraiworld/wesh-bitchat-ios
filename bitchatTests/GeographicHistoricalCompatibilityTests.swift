@@ -17,13 +17,12 @@ struct GeographicHistoricalCompatibilityTests {
     }
 
     @Test
-    func oldURLPayloadsAndEventNumbersRemainReservedWithoutBecomingDeepLinks() throws {
+    func oldURLPayloadsAndEventNumbersRemainReserved() throws {
         let payload = try #require(URL(string: "bitchat://geohash/00000"))
         #expect(payload.host == "geohash")
         #expect(payload.path == "/00000")
-        #expect(!WeshDeepLinks.isInternal(payload))
-        #expect(!WeshDeepLinks.isInternal(try #require(URL(string: "wesh://geohash/00000"))))
-        #expect(WeshDeepLinks.isInternal(try #require(URL(string: "wesh://share"))))
+        // Runtime URL routing was retired with the share importer. Its removed
+        // entrypoints are checked by the source configuration contracts.
         #expect(NostrProtocol.EventKind.ephemeralEvent.rawValue == 20000)
         #expect(NostrProtocol.EventKind.geohashPresence.rawValue == 20001)
         #expect(NostrProtocol.EventKind.giftWrap.rawValue == 1059)

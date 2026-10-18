@@ -150,6 +150,12 @@ class GeographicRetirementConfigurationTests(unittest.TestCase):
         owners = ['.github/workflows/fetch_georelays.yml', '.github/workflows/validate_georelays.yml']
         self.assertEqual([path for path in owners if (ROOT / path).exists()], [])
 
+    def test_retired_urls_have_no_runtime_routing_entrypoint(self):
+        runtime = (ROOT / 'bitchat/App/AppRuntime.swift').read_text()
+        self.assertNotIn('enum WeshDeepLinks', runtime)
+        self.assertNotIn('switchLocationChannel', runtime)
+        self.assertNotIn('checkForSharedContent', runtime)
+
     def test_wesh_scheme_bluetooth_camera_and_background_ble_are_preserved(self):
         self.assertEqual([scheme for entry in self.info['CFBundleURLTypes']
                           for scheme in entry['CFBundleURLSchemes']], ['wesh'])
