@@ -35,8 +35,23 @@ struct PanicStartupDecision {
     var blockOrdinaryAdmission: Bool { !legacySightingsConfirmed }
 
     @MainActor
-    static func retry(checkPending: () throws -> Bool, wipeSightings: @MainActor () -> Bool) -> Self {
+    static func preflight(
+        checkPending: () throws -> Bool,
+        wipeSightings: @MainActor () -> Bool,
+        wipeGeography: @MainActor () -> Bool
+    ) -> Self {
         let pending = (try? checkPending()) ?? true
-        return Self(recoveryPending: pending, legacySightingsConfirmed: wipeSightings())
+        let sightingsConfirmed = wipeSightings()
+        let geographyConfirmed = wipeGeography()
+        return Self(recoveryPending: pending, legacySightingsConfirmed: sightingsConfirmed && geographyConfirmed)
+    }
+
+    @MainActor
+    static func retry(
+        checkPending: () throws -> Bool,
+        wipeSightings: @MainActor () -> Bool,
+        wipeGeography: @MainActor () -> Bool
+    ) -> Self {
+        preflight(checkPending: checkPending, wipeSightings: wipeSightings, wipeGeography: wipeGeography)
     }
 }

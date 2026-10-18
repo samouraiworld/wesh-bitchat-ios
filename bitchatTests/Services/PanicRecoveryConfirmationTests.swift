@@ -15,7 +15,7 @@ struct PanicRecoveryConfirmationTests {
         let retry = PanicStartupDecision.retry(checkPending: {
             if markerUnreadable { throw MarkerFailure.unavailable }
             return true
-        }, wipeSightings: { true })
+        }, wipeSightings: { true }, wipeGeography: { true })
         #expect(retry.replayPanic)
         #expect(retry.suspendTransport)
 
