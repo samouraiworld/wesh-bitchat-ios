@@ -25,7 +25,6 @@ final class AppRuntime: ObservableObject {
     let conversationUIModel: ConversationUIModel
     let peerListModel: PeerListModel
     let appChromeModel: AppChromeModel
-    let sharedContentImportModel: SharedContentImportModel
     let composerDrafts = ComposerDraftStore.repository
 
     private var cancellables = Set<AnyCancellable>()
@@ -86,12 +85,9 @@ final class AppRuntime: ObservableObject {
             conversations: conversations,
             peerIdentityStore: peerIdentityStore
         )
-        let sharedContentImportModel = SharedContentImportModel(store: resolvedSharedContentStore)
-        self.sharedContentImportModel = sharedContentImportModel
         self.appChromeModel = AppChromeModel(
             chatViewModel: self.chatViewModel,
-            privateInboxModel: self.privateInboxModel,
-            onPanicWipe: { sharedContentImportModel.discardAll() }
+            privateInboxModel: self.privateInboxModel
         )
         configureComposerDrafts()
         bindRuntimeObservers()
@@ -129,10 +125,7 @@ final class AppRuntime: ObservableObject {
 
     func start() {
         guard chatViewModel.networkActivationAllowed else { return }
-        guard !started else {
-            checkForSharedContent()
-            return
-        }
+        guard !started else { return }
 
         started = true
         NotificationDelegate.shared.runtime = self
@@ -154,7 +147,6 @@ final class AppRuntime: ObservableObject {
             // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
             if WeshWelcome.isDone() { startWeshInternet() } else { WeshInternetMode.shared.clearArtiWhileOff() }
         }
-        checkForSharedContent()
         performMediaMaintenance()
 
         record(.launched)
@@ -179,11 +171,8 @@ final class AppRuntime: ObservableObject {
     func handleOpenURL(_ url: URL) {
         record(.openedURL(url.absoluteString))
 
-        // Only the scheme registered with the OS; `bitchat://verify` QR
-        // payloads are parsed in-app and never arrive here.
-        if WeshDeepLinks.isInternal(url), url.host == "share" {
-            checkForSharedContent()
-        }
+        // The retired share route has no import action. Identity QR payloads
+        // are still parsed in-app, independently of OS URL registration.
     }
 
     func handleDidBecomeActiveNotification() {
@@ -191,7 +180,6 @@ final class AppRuntime: ObservableObject {
         chatViewModel.handleDidBecomeActive()
         configureComposerDrafts()
         composerDrafts.retry()
-        checkForSharedContent()
     }
 
     #if os(macOS)
@@ -199,7 +187,6 @@ final class AppRuntime: ObservableObject {
         guard chatViewModel.networkActivationAllowed else { return }
         record(.scenePhaseChanged(.active))
         chatViewModel.handleDidBecomeActive()
-        checkForSharedContent()
     }
     #endif
 
@@ -248,7 +235,6 @@ final class AppRuntime: ObservableObject {
             chatViewModel.handleDidBecomeActive()
             configureComposerDrafts()
             composerDrafts.retry()
-            checkForSharedContent()
 
         case .inactive:
             record(.scenePhaseChanged(.inactive))
@@ -279,14 +265,6 @@ final class AppRuntime: ObservableObject {
         if identifier.hasPrefix("private-"), let peerID = PeerID(str: userInfo["peerID"] as? String) {
             record(.notificationOpened(peerID: peerID))
             chatViewModel.startPrivateChat(with: peerID)
-        }
-
-        // A notification payload never reaches the OS URL router: only an
-        // allowlisted in-app link is handled, here.
-        if let deepLink = userInfo["deeplink"] as? String, let url = URL(string: deepLink),
-           WeshDeepLinks.isInternal(url) {
-            record(.deepLinkOpened(deepLink))
-            handleOpenURL(url)
         }
     }
 
@@ -384,25 +362,6 @@ private extension AppRuntime {
         #endif
     }
 
-    func checkForSharedContent() {
-        let previousID = sharedContentImportModel.offer?.id
-        guard let payload = sharedContentImportModel.refresh(
-            destination: currentSharedContentDestination
-        ) else { return }
-
-        if previousID != payload.id {
-            record(.sharedContentReadyForReview(payload.kind))
-        }
-    }
-
-    var currentSharedContentDestination: SharedContentDestination {
-        SharedContentDestination.resolve(
-            selectedPrivatePeerID: privateConversationModel.selectedPeerID,
-            privateDisplayName: privateConversationModel.selectedHeaderState?.displayName,
-            activeChannel: chatViewModel.activeChannel
-        )
-    }
-
     func handleNostrRelayConnectionChanged(_ isConnected: Bool) {
         record(.nostrRelayConnectionChanged(isConnected))
 
@@ -449,18 +408,5 @@ extension AppRuntime {
 
     nonisolated static func resolveScreenshotResponse(isAppInfoPresented: Bool) -> ScreenshotCaptureResponse {
         isAppInfoPresented ? .ignore : .forwardToChat
-    }
-}
-
-/// Links the app accepts from the OS or from its own notification payloads.
-enum WeshDeepLinks {
-    static let scheme = "wesh"
-    static let hosts: Set<String> = ["share"]
-
-    static func isInternal(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == scheme, let host = url.host?.lowercased(), hosts.contains(host) else {
-            return false
-        }
-        return url.user == nil && url.password == nil && url.port == nil
     }
 }

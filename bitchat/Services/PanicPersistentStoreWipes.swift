@@ -44,6 +44,7 @@ struct PanicPersistentStoreWipes {
         ) else { return false }
         return PanicFileRemoval.remove(base.appendingPathComponent("groups", isDirectory: true), required: true)
     }
+    /// Handoffs left by earlier share extensions; never parsed or imported.
     var sharedContent: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }
         guard let defaults = UserDefaults(suiteName: BitchatApp.groupID) else { return false }
