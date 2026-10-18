@@ -1,0 +1,40 @@
+name: Offline Third-Party Notices
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "localPackages/Arti/Cargo.lock"
+      - "localPackages/Arti/arti-bitchat/Cargo.toml"
+      - "Package.swift"
+      - "bitchat/Views/Wesh/Pave/Notices/**"
+      - "scripts/notices/**"
+      - "scripts/third_party_notices.py"
+      - "scripts/tests/test_third_party_notices.py"
+      - ".github/workflows/third-party-notices.yml"
+  pull_request:
+    paths:
+      - "localPackages/Arti/Cargo.lock"
+      - "localPackages/Arti/arti-bitchat/Cargo.toml"
+      - "Package.swift"
+      - "bitchat/Views/Wesh/Pave/Notices/**"
+      - "scripts/notices/**"
+      - "scripts/third_party_notices.py"
+      - "scripts/tests/test_third_party_notices.py"
+      - ".github/workflows/third-party-notices.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  notices:
+    name: Check offline notice inventory and terms
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python3 scripts/third_party_notices.py check
+      - run: python3 -m unittest discover -s scripts/tests -p test_third_party_notices.py

@@ -24,13 +24,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poster typeface: Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, under the SIL Open Font License 1.1, reproduced below."
+            "value" : "Poster typeface: Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, under the SIL Open Font License 1.1. Full licence in the Archivo notice."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Police d’affiche : Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, sous SIL Open Font License 1.1, reproduite ci-dessous."
+            "value" : "Police d’affiche : Archivo ExtraCondensed Black, © 2020 The Archivo Project Authors, sous SIL Open Font License 1.1. Licence intégrale dans la notice Archivo."
           }
         }
       }
@@ -82,6 +82,125 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Licences"
+          }
+        }
+      }
+    },
+    "pave.about.notices.archivo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archivo · Font licence"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archivo · Licence de la police"
+          }
+        }
+      }
+    },
+    "pave.about.notices.arti" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arti · Native dependency notices"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arti · Notices des dépendances natives"
+          }
+        }
+      }
+    },
+    "pave.about.notices.incomplete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Some dependency notices are still missing from this collection."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certaines notices de dépendances manquent encore à cette collection."
+          }
+        }
+      }
+    },
+    "pave.about.notices.secp256k1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "secp256k1 · MIT notices"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "secp256k1 · Notices MIT"
+          }
+        }
+      }
+    },
+    "pave.about.notices.source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Component source code"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code source du composant"
+          }
+        }
+      }
+    },
+    "pave.about.notices.sourceCore" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "C library source code"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code source de la bibliothèque C"
+          }
+        }
+      }
+    },
+    "pave.about.notices.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This licence could not be loaded."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette licence n’a pas pu être chargée."
           }
         }
       }

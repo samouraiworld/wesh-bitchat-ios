@@ -31,15 +31,96 @@ enum PaveDisplayFont {
     }
 
     /// The SIL Open Font License shipped next to the font, shown in Licences.
-    static var licenseText: String? {
-        let bundle = PaveCopy.bundle
+    static func licenseText(in bundle: Bundle = PaveCopy.bundle) -> String? {
         let url = bundle.url(forResource: "Archivo-OFL", withExtension: "txt", subdirectory: "Fonts")
             ?? bundle.url(forResource: "Archivo-OFL", withExtension: "txt")
         return url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
     }
 }
 
-/// Licences: Wesh, its third-party components and the poster face, with the font's full licence.
+/// Offline notices use the same bundle in the app and SwiftPM resource builds.
+enum PaveLegalNotices {
+    enum Component: String, CaseIterable, Identifiable {
+        case secp256k1, arti, archivo
+
+        var id: String { rawValue }
+
+        var titleKey: String {
+            switch self {
+            case .secp256k1: return "pave.about.notices.secp256k1"
+            case .arti: return "pave.about.notices.arti"
+            case .archivo: return "pave.about.notices.archivo"
+            }
+        }
+
+        var sourceURL: URL {
+            switch self {
+            case .secp256k1:
+                return URL(string: "https://github.com/samouraiworld/swift-secp256k1/tree/0a1a9f9031b6f86f92eb9b66ef8a6882af531e6f")!
+            case .arti:
+                return URL(string: "https://gitlab.torproject.org/tpo/core/arti")!
+            case .archivo:
+                return URL(string: "https://github.com/Omnibus-Type/Archivo")!
+            }
+        }
+
+        func text(in bundle: Bundle = PaveCopy.bundle) throws -> String {
+            let name: String
+            let directory: String
+            switch self {
+            case .secp256k1: name = "secp256k1-NOTICES"; directory = "Notices"
+            case .arti: name = "Arti-NOTICES"; directory = "Notices"
+            case .archivo:
+                guard let text = PaveDisplayFont.licenseText(in: bundle),
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { throw PaveLegalNotices.ResourceError.missingOrEmpty }
+                return text
+            }
+            return try PaveLegalNotices.text(name, fileExtension: "txt", directory: directory, in: bundle)
+        }
+    }
+
+    static let secpCoreSourceURL = URL(string: "https://github.com/bitcoin-core/secp256k1/tree/70f149b9a1bf4ed3266f97774d0ae9577534bf40")!
+
+    enum ResourceError: Error, Equatable { case missingOrEmpty, incompleteInventory }
+
+    private struct Inventory: Decodable {
+        struct Entry: Decodable {
+            struct Notice: Decodable { let sha256: String }
+            let name: String
+            let version: String
+            let notices: [Notice]
+        }
+        let unresolved: [String]
+        let components: [Entry]
+        let targets: [String: [String]]
+    }
+
+    static func requireCompleteInventory(in bundle: Bundle = PaveCopy.bundle) throws {
+        let json = try text("NoticeInventory", fileExtension: "json", directory: "Notices", in: bundle)
+        let inventory = try JSONDecoder().decode(Inventory.self, from: Data(json.utf8))
+        let expected = Set(inventory.targets.values.flatMap { $0 })
+        let actual = Set(inventory.components.map { "\($0.name)@\($0.version)" })
+        let hasTexts = inventory.components.allSatisfy { entry in
+            !entry.notices.isEmpty && entry.notices.allSatisfy { $0.sha256.count == 64 }
+        }
+        guard inventory.unresolved.isEmpty, inventory.targets.count == 5,
+              !expected.isEmpty, actual == expected, actual.count == inventory.components.count, hasTexts
+        else { throw ResourceError.incompleteInventory }
+    }
+
+    private static func text(_ name: String, fileExtension ext: String, directory: String, in bundle: Bundle) throws -> String {
+        let url = bundle.url(forResource: name, withExtension: ext, subdirectory: directory)
+            ?? bundle.url(forResource: name, withExtension: ext)
+        guard let url else { throw ResourceError.missingOrEmpty }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ResourceError.missingOrEmpty
+        }
+        return text
+    }
+}
+
 struct PaveLicensesScreen: View {
     @Environment(\.paveTheme) private var theme
 
@@ -52,19 +133,66 @@ struct PaveLicensesScreen: View {
                 Text(PaveCopy.text("pave.about.licenseWesh")).paveText(.body)
                 Text(PaveCopy.text("pave.about.licenseThirdParty")).paveText(.body)
                 Text(PaveCopy.text("pave.about.licenseFont")).paveText(.body)
-                if let license = PaveDisplayFont.licenseText {
-                    Text(verbatim: license)
-                        .paveText(.caption)
-                        .foregroundStyle(theme[.inkMuted])
-                        .padding(PaveSpace.s3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(theme[.surface], in: RoundedRectangle(cornerRadius: PaveRadius.control))
+                ForEach(PaveLegalNotices.Component.allCases) { component in
+                    NavigationLink {
+                        PaveLicenseDetailScreen(component: component)
+                    } label: {
+                        Label(PaveCopy.text(component.titleKey), systemImage: "doc.text")
+                            .paveText(.headline)
+                    }
                 }
             }
             .foregroundStyle(theme[.ink])
             .padding(PaveSpace.s4)
         }
         .paveScreenBackground()
+    }
+}
+
+private struct PaveLicenseDetailScreen: View {
+    let component: PaveLegalNotices.Component
+    @Environment(\.paveTheme) private var theme
+    @State private var notice: String?
+    @State private var isUnavailable = false
+    @State private var isIncomplete = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: PaveSpace.s4) {
+                Text(PaveCopy.text(component.titleKey)).paveText(.title)
+                    .accessibilityAddTraits(.isHeader)
+                Link(PaveCopy.text("pave.about.notices.source"), destination: component.sourceURL)
+                    .paveText(.body)
+                if component == .secp256k1 {
+                    Link(PaveCopy.text("pave.about.notices.sourceCore"), destination: PaveLegalNotices.secpCoreSourceURL)
+                        .paveText(.body)
+                }
+                if isIncomplete {
+                    Text(PaveCopy.text("pave.about.notices.incomplete")).paveText(.body)
+                        .foregroundStyle(theme[.warning])
+                }
+                if isUnavailable {
+                    Text(PaveCopy.text("pave.about.notices.unavailable")).paveText(.body)
+                        .foregroundStyle(theme[.warning])
+                }
+                if let notice {
+                    Text(verbatim: notice).paveText(.caption)
+                        .foregroundStyle(theme[.inkMuted])
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(PaveSpace.s4)
+        }
+        .paveScreenBackground()
+        .task {
+            do { notice = try component.text() }
+            catch { isUnavailable = true }
+            if component == .arti {
+                do { try PaveLegalNotices.requireCompleteInventory() }
+                catch { isIncomplete = true }
+            }
+        }
     }
 }
 
