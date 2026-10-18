@@ -2,20 +2,8 @@ name: Arti Independent Clean Rebuild
 
 on:
   pull_request:
-    paths:
-      - 'localPackages/Arti/**'
-      - 'docs/ARTI-BINARY-PROVENANCE.md'
-      - '.github/workflows/arti-clean-rebuild.yml'
-      - 'scripts/verify_arti_clean_rebuild.py'
-      - 'scripts/tests/test_arti_clean_rebuild.py'
   push:
     branches: [main]
-    paths:
-      - 'localPackages/Arti/**'
-      - 'docs/ARTI-BINARY-PROVENANCE.md'
-      - '.github/workflows/arti-clean-rebuild.yml'
-      - 'scripts/verify_arti_clean_rebuild.py'
-      - 'scripts/tests/test_arti_clean_rebuild.py'
 
 permissions:
   contents: read
