@@ -112,9 +112,6 @@ final class GeohashSubscriptionManager {
     private weak var context: (any GeohashSubscriptionContext)?
     private let inbound: NostrInboundPipeline
     private let presence: GeoPresenceTracker
-    /// Geohashes already told "sent via mesh gateway" this session, so the
-    /// notice appears once per channel instead of once per message.
-    private var gatewayNoticeGeohashes = Set<String>()
 
     init(context: any GeohashSubscriptionContext, inbound: NostrInboundPipeline, presence: GeoPresenceTracker) {
         self.context = context
@@ -145,9 +142,6 @@ final class GeohashSubscriptionManager {
         NostrRelayManager.shared.subscribe(filter: filter, id: subID, relayUrls: subRelays) { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.inbound.subscribeNostrEvent(event)
-                // Gateway downlink: rebroadcast relay events for the viewed
-                // channel onto the mesh (no-op unless gateway mode is on).
-                GatewayService.shared.rebroadcastRelayEvent(event, geohash: channel.geohash)
             }
         }
 
@@ -238,9 +232,6 @@ final class GeohashSubscriptionManager {
         NostrRelayManager.shared.subscribe(filter: filter, id: subID, relayUrls: subRelays) { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.inbound.handleNostrEvent(event)
-                // Gateway downlink: rebroadcast relay events for the viewed
-                // channel onto the mesh (no-op unless gateway mode is on).
-                GatewayService.shared.rebroadcastRelayEvent(event, geohash: channel.geohash)
             }
         }
 
@@ -284,23 +275,6 @@ final class GeohashSubscriptionManager {
             SecureLogger.warning("Geo: no geohash relays available for \(channel.geohash); not sending", category: .session)
         } else {
             NostrRelayManager.shared.sendEvent(event, to: targetRelays)
-        }
-
-        // Mesh gateway uplink: with no working relay connection, hand the
-        // locally signed event to a mesh peer advertising the gateway
-        // capability (keys never leave this device — only the finished,
-        // signed event travels). Uplink is only ever attempted here, for a
-        // freshly composed event, never for received carrier events (loop
-        // rule 3 in GatewayService).
-        if GatewayService.shared.uplinkViaMesh(event: event, geohash: channel.geohash),
-           gatewayNoticeGeohashes.insert(channel.geohash).inserted {
-            context.addPublicSystemMessage(
-                String(
-                    localized: "system.gateway.sent_via_mesh",
-                    defaultValue: "sent via mesh gateway",
-                    comment: "System message when a geohash message was handed to a mesh internet gateway because no relay is reachable"
-                )
-            )
         }
 
         context.recordGeoParticipant(pubkeyHex: identity.publicKeyHex)

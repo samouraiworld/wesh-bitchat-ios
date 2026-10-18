@@ -28,7 +28,7 @@ enum PanicFileRemoval {
 @MainActor
 struct PanicPersistentStoreWipes {
     var courier: @MainActor () -> Bool = { CourierStore.shared.wipe() }
-    var bridge: @MainActor () -> Bool = { BridgeCourierService.shared.wipe() }
+    var bridge: @MainActor () -> Bool = { RetiredBridgeDropStore.shared.wipe() }
     var publicArchive: @MainActor () -> Bool = { GossipMessageArchive.wipeDefault() }
     var prekeys: @MainActor () -> Bool = { PrekeyBundleStore.shared.wipe() }
     var board: @MainActor () -> Bool = { RetiredBoardStore.shared.wipe() }

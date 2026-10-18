@@ -45,8 +45,6 @@ final class CourierStore {
         var sprayedTo: Set<Data>
         /// Last speculative multi-hop handover toward a relayed announce.
         var lastRemoteHandoverAt: Date?
-        /// Last publish of this envelope as a bridge courier drop on relays.
-        var lastBridgePublishAt: Date?
         /// Prekey-sealed (envelope v2) discriminator; nil for static-sealed v1.
         let prekeyID: UInt32?
 
@@ -64,7 +62,6 @@ final class CourierStore {
             copies: UInt8,
             sprayedTo: Set<Data> = [],
             lastRemoteHandoverAt: Date? = nil,
-            lastBridgePublishAt: Date? = nil,
             prekeyID: UInt32? = nil
         ) {
             self.recipientTag = recipientTag
@@ -76,7 +73,6 @@ final class CourierStore {
             self.copies = copies
             self.sprayedTo = sprayedTo
             self.lastRemoteHandoverAt = lastRemoteHandoverAt
-            self.lastBridgePublishAt = lastBridgePublishAt
             self.prekeyID = prekeyID
         }
 
@@ -93,7 +89,6 @@ final class CourierStore {
             copies = try container.decodeIfPresent(UInt8.self, forKey: .copies) ?? 1
             sprayedTo = try container.decodeIfPresent(Set<Data>.self, forKey: .sprayedTo) ?? []
             lastRemoteHandoverAt = try container.decodeIfPresent(Date.self, forKey: .lastRemoteHandoverAt)
-            lastBridgePublishAt = try container.decodeIfPresent(Date.self, forKey: .lastBridgePublishAt)
             prekeyID = try container.decodeIfPresent(UInt32.self, forKey: .prekeyID)
         }
     }
@@ -326,36 +321,6 @@ final class CourierStore {
         }
     }
 
-    /// Envelopes eligible to park on relays as bridge courier drops. Merely
-    /// offering one does not start its cooldown: the caller commits that only
-    /// after a relay explicitly accepts the event via NIP-01 `OK`.
-    func envelopesForBridgePublish(cooldown: TimeInterval) -> [CourierEnvelope] {
-        let date = now()
-        return queue.sync {
-            pruneExpiredLocked(at: date)
-            return envelopes.compactMap { stored in
-                if let last = stored.lastBridgePublishAt,
-                   date.timeIntervalSince(last) < cooldown {
-                    return nil
-                }
-                // The relay copy carries no spray budget.
-                return stored.envelope.withCopies(1)
-            }
-        }
-    }
-
-    /// Starts the bridge-publish cooldown only for a relay-confirmed copy.
-    func markBridgePublished(_ envelope: CourierEnvelope) {
-        let date = now()
-        queue.sync {
-            guard let index = envelopes.firstIndex(where: { $0.ciphertext == envelope.ciphertext }) else {
-                return
-            }
-            envelopes[index].lastBridgePublishAt = date
-            persistLocked()
-        }
-    }
-
     // MARK: - Spray-and-wait (on encountering another courier)
 
     /// Envelopes to re-deposit with a courier we just encountered, each with
@@ -563,9 +528,6 @@ final class CourierStore {
                 merged[index].sprayedTo = combinedSprayedTo
                 if candidate.tier == .favorite { merged[index].tier = .favorite }
                 merged[index].lastRemoteHandoverAt = [merged[index].lastRemoteHandoverAt, candidate.lastRemoteHandoverAt]
-                    .compactMap { $0 }
-                    .max()
-                merged[index].lastBridgePublishAt = [merged[index].lastBridgePublishAt, candidate.lastBridgePublishAt]
                     .compactMap { $0 }
                     .max()
             } else {
