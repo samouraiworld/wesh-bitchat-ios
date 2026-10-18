@@ -155,6 +155,7 @@ struct RetiredGroupKeyRetirementTests {
         #expect(fixture.retire())
 
         #expect(fixture.items == before)
+        #expect(fixture.items.map(\.opaqueBytes) == before.map(\.opaqueBytes))
         #expect(fixture.deletions.isEmpty)
         #expect(fixture.queryViolations.isEmpty)
     }
@@ -204,6 +205,46 @@ struct RetiredGroupKeyRetirementTests {
         #expect(initial.replayPanic && initial.suspendTransport)
         #expect(retry.replayPanic && retry.suspendTransport)
         #expect(fixture.markerReads == 2)
+    }
+
+    @Test
+    func absentAccessGroupKeepsTheExistingNonsynchronizableServiceNamespace() {
+        let service = "synthetic.wesh.ungrouped"
+        let account = "identity_groupKey-" + String(repeating: "ab", count: 16)
+        var inventories: [[String: Any]] = []
+        var deletions: [[String: Any]] = []
+
+        let completed = KeychainManager.retireLegacyGroupKeys(primaryService: service, copyAttributes: { query in
+            inventories.append(query)
+            if inventories.count == 1 {
+                return (errSecSuccess, [[kSecAttrService as String: service, kSecAttrAccount as String: account]])
+            }
+            return (errSecSuccess, [[String: Any]]())
+        }, deleteItem: { query in
+            deletions.append(query)
+            return errSecSuccess
+        })
+
+        #expect(completed)
+        #expect(inventories.count == 2)
+        #expect(deletions.count == 1)
+        for query in inventories {
+            #expect(Set(query.keys) == Set([kSecClass, kSecAttrService, kSecAttrSynchronizable,
+                                           kSecMatchLimit, kSecReturnAttributes].map { $0 as String }))
+            #expect(query[kSecClass as String] as? String == kSecClassGenericPassword as String)
+            #expect(query[kSecAttrService as String] as? String == service)
+            #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+            #expect(query[kSecMatchLimit as String] as? String == kSecMatchLimitAll as String)
+            #expect(query[kSecReturnAttributes as String] as? Bool == true)
+        }
+        for query in deletions {
+            #expect(Set(query.keys) == Set([kSecClass, kSecAttrService, kSecAttrAccount,
+                                           kSecAttrSynchronizable].map { $0 as String }))
+            #expect(query[kSecClass as String] as? String == kSecClassGenericPassword as String)
+            #expect(query[kSecAttrService as String] as? String == service)
+            #expect(query[kSecAttrAccount as String] as? String == account)
+            #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
+        }
     }
 }
 
