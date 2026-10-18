@@ -670,7 +670,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             wipeGeography: persistentWipes.geography,
             wipeSharedContent: persistentWipes.sharedContent,
             wipeBoard: persistentWipes.board,
-            wipeBridge: persistentWipes.bridge
+            wipeBridge: persistentWipes.bridge,
+            wipeGroups: persistentWipes.legacyGroups,
+            wipeMedia: persistentWipes.legacyMedia
         )
         // Preserve the preflight decision used to defer CoreBluetooth. A
         // transiently successful second read must not skip recovery and leave
@@ -1215,7 +1217,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             wipeGeography: panicPersistentStoreWipes.geography,
             wipeSharedContent: panicPersistentStoreWipes.sharedContent,
             wipeBoard: panicPersistentStoreWipes.board,
-            wipeBridge: panicPersistentStoreWipes.bridge
+            wipeBridge: panicPersistentStoreWipes.bridge,
+            wipeGroups: panicPersistentStoreWipes.legacyGroups,
+            wipeMedia: panicPersistentStoreWipes.legacyMedia
         )
         if decision.replayPanic {
             startupRetirementBlocked = false

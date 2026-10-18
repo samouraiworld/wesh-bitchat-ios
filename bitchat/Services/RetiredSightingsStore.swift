@@ -41,7 +41,9 @@ struct PanicStartupDecision {
         wipeGeography: @MainActor () -> Bool,
         wipeSharedContent: @MainActor () -> Bool,
         wipeBoard: @MainActor () -> Bool,
-        wipeBridge: @MainActor () -> Bool
+        wipeBridge: @MainActor () -> Bool,
+        wipeGroups _: @MainActor () -> Bool,
+        wipeMedia _: @MainActor () -> Bool
     ) -> Self {
         let pending = (try? checkPending()) ?? true
         let sightingsConfirmed = wipeSightings()
@@ -63,9 +65,12 @@ struct PanicStartupDecision {
         wipeGeography: @MainActor () -> Bool,
         wipeSharedContent: @MainActor () -> Bool,
         wipeBoard: @MainActor () -> Bool,
-        wipeBridge: @MainActor () -> Bool
+        wipeBridge: @MainActor () -> Bool,
+        wipeGroups: @MainActor () -> Bool,
+        wipeMedia: @MainActor () -> Bool
     ) -> Self {
         preflight(checkPending: checkPending, wipeSightings: wipeSightings, wipeGeography: wipeGeography,
-                  wipeSharedContent: wipeSharedContent, wipeBoard: wipeBoard, wipeBridge: wipeBridge)
+                  wipeSharedContent: wipeSharedContent, wipeBoard: wipeBoard, wipeBridge: wipeBridge,
+                  wipeGroups: wipeGroups, wipeMedia: wipeMedia)
     }
 }

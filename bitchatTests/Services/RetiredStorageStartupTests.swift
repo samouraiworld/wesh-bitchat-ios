@@ -50,7 +50,7 @@ struct RetiredStorageStartupTests {
         let decision = PanicStartupDecision.preflight(checkPending: { false },
             wipeSightings: { cleanup("sightings") }, wipeGeography: { cleanup("geography") },
             wipeSharedContent: { cleanup("sharedContent") }, wipeBoard: { cleanup("board") },
-            wipeBridge: { cleanup("bridge") })
+            wipeBridge: { cleanup("bridge") }, wipeGroups: { true }, wipeMedia: { true })
 
         #expect(attempts == RetiredStorageFixture.owners)
         #expect(decision.suspendTransport)
@@ -183,11 +183,11 @@ private final class RetiredStorageFixture {
         if retry {
             return PanicStartupDecision.retry(checkPending: checkPending,
                 wipeSightings: sightings, wipeGeography: geography, wipeSharedContent: sharedContent,
-                wipeBoard: board, wipeBridge: bridge)
+                wipeBoard: board, wipeBridge: bridge, wipeGroups: { true }, wipeMedia: { true })
         }
         return PanicStartupDecision.preflight(checkPending: checkPending,
             wipeSightings: sightings, wipeGeography: geography, wipeSharedContent: sharedContent,
-            wipeBoard: board, wipeBridge: bridge)
+            wipeBoard: board, wipeBridge: bridge, wipeGroups: { true }, wipeMedia: { true })
     }
 
     func allowCleanupRetry() throws {
