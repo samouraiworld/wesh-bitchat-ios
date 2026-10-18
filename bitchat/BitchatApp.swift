@@ -14,7 +14,7 @@ struct BitchatApp: App {
     static let bundleID = Bundle.main.bundleIdentifier ?? "chat.bitchat"
     static let groupID = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String ?? "group.\(bundleID)"
 
-    @StateObject private var runtime: AppRuntime
+    @StateObject private var runtimeOwner: AppRuntimeOwner<AppRuntime>
     #if os(iOS)
     @Environment(\.scenePhase) var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -24,50 +24,56 @@ struct BitchatApp: App {
 
     init() {
         WeshMode.isActive = true
+        let isTesting = TestEnvironment.isRunningTests
+        _runtimeOwner = StateObject(wrappedValue: AppRuntimeOwner(isTesting: isTesting) { AppRuntime() })
+        guard !isTesting else { return }
         PaveDisplayName.warmUp()
         // Wesh Internet mode is opt-in (default off); WeshInternetMode forces Tor.
         // Before the welcome's terms are accepted, even an Internet mode left on stays off.
         NetworkActivationService.shared.setUserInternetEnabled(WeshInternetSettings.isEnabled() && WeshWelcome.isDone())
         BridgeService.shared.setEnabled(false)
         GatewayService.shared.setEnabled(false)
-        _runtime = StateObject(wrappedValue: AppRuntime())
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
 
     var body: some Scene {
         WindowGroup {
-            WeshRootView(runtime: runtime)
-                .environment(\.appTheme, .liquidGlass)
-                .environmentObject(runtime.publicChatModel)
-                .environmentObject(runtime.privateInboxModel)
-                .environmentObject(runtime.privateConversationModel)
-                .environmentObject(runtime.verificationModel)
-                .environmentObject(runtime.conversationUIModel)
-                .environmentObject(runtime.locationChannelsModel)
-                .environmentObject(runtime.peerListModel)
-                .environmentObject(runtime.appChromeModel)
-                .environmentObject(runtime.boardAlertsModel)
-                .environmentObject(runtime.sharedContentImportModel)
-                .paveEraseShortcut { runtime.appChromeModel.panicClearAllData() }
-                .onAppear {
-                    appDelegate.runtime = runtime
-                    runtime.start()
-                }
-                .onOpenURL { url in
-                    runtime.handleOpenURL(url)
-                }
-                #if os(iOS)
-                .onChange(of: scenePhase) { newPhase in
-                    runtime.handleScenePhaseChange(newPhase)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                    runtime.handleDidBecomeActiveNotification()
-                }
-                #elseif os(macOS)
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    runtime.handleMacDidBecomeActiveNotification()
-                }
-                #endif
+            if let runtime = runtimeOwner.runtime {
+                WeshRootView(runtime: runtime)
+                    .environment(\.appTheme, .liquidGlass)
+                    .environmentObject(runtime.publicChatModel)
+                    .environmentObject(runtime.privateInboxModel)
+                    .environmentObject(runtime.privateConversationModel)
+                    .environmentObject(runtime.verificationModel)
+                    .environmentObject(runtime.conversationUIModel)
+                    .environmentObject(runtime.locationChannelsModel)
+                    .environmentObject(runtime.peerListModel)
+                    .environmentObject(runtime.appChromeModel)
+                    .environmentObject(runtime.boardAlertsModel)
+                    .environmentObject(runtime.sharedContentImportModel)
+                    .paveEraseShortcut { runtime.appChromeModel.panicClearAllData() }
+                    .onAppear {
+                        appDelegate.runtime = runtime
+                        runtime.start()
+                    }
+                    .onOpenURL { url in
+                        runtime.handleOpenURL(url)
+                    }
+                    #if os(iOS)
+                    .onChange(of: scenePhase) { newPhase in
+                        runtime.handleScenePhaseChange(newPhase)
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                        runtime.handleDidBecomeActiveNotification()
+                    }
+                    #elseif os(macOS)
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                        runtime.handleMacDidBecomeActiveNotification()
+                    }
+                    #endif
+            } else {
+                Color.clear
+            }
         }
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)
@@ -81,6 +87,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     weak var runtime: AppRuntime?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        guard !TestEnvironment.isRunningTests else { return true }
         // Installed before the first resign-active so the app-switcher snapshot
         // never captures an open conversation.
         PrivacyScreen.shared.install()

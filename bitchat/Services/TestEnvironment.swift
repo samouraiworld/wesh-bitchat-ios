@@ -13,13 +13,18 @@ import Foundation
 /// for an in-memory one under test. Mirrors the detection already used by
 /// `NotificationService` and `LocationStateManager`.
 enum TestEnvironment {
-    /// True when running under XCTest / Swift Testing or in CI.
-    static let isRunningTests: Bool = {
-        let env = ProcessInfo.processInfo.environment
-        return NSClassFromString("XCTestCase") != nil ||
-               env["XCTestConfigurationFilePath"] != nil ||
-               env["XCTestBundlePath"] != nil ||
-               env["GITHUB_ACTIONS"] != nil ||
-               env["CI"] != nil
-    }()
+    /// The unit-test schemes set an explicit flag before App.init runs.
+    /// Existing XCTest and CI detection also covers other test entry points.
+    static let isRunningTests = detectsTests(
+        environment: ProcessInfo.processInfo.environment,
+        xctestClassPresent: NSClassFromString("XCTestCase") != nil
+    )
+
+    static func detectsTests(environment: [String: String], xctestClassPresent: Bool) -> Bool {
+        environment["WESH_UNIT_TEST_HOST"] == "1" || xctestClassPresent ||
+            environment["XCTestConfigurationFilePath"] != nil ||
+            environment["XCTestBundlePath"] != nil ||
+            environment["GITHUB_ACTIONS"] != nil ||
+            environment["CI"] != nil
+    }
 }
