@@ -738,7 +738,8 @@ struct NoiseEncryptionServiceTests {
             let pending = deadlines.pendingWorkItems
             try #require(pending.count == 2)
             service.clearSession(for: peerID)
-            #expect(pending.allSatisfy(\.isCancelled))
+            let pendingAreCancelled = pending.allSatisfy(\.isCancelled)
+            #expect(pendingAreCancelled)
             #expect(service.claimHandshakeInitiation(attempt, for: peerID) == nil)
 
             // These exact items were cancelled before queue submission, so
