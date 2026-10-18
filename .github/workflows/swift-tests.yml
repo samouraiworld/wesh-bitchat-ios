@@ -74,6 +74,38 @@ jobs:
         # 15-minute job timeout.
         run: swift build --build-tests --enable-code-coverage --package-path ${{ matrix.path }}
 
+      # SwiftPM copies string catalogs without compiling their localized
+      # tables. Exercise the same real strings/stringsdict resources that
+      # Xcode produces, including French and plural-formatting lookups.
+      - name: Compile app localization resources
+        if: matrix.name == 'app'
+        run: |
+          set -euo pipefail
+          BIN_PATH=$(swift build --show-bin-path --package-path .)
+          CATALOG="bitchat/Views/Wesh/Pave/Pave.xcstrings"
+          test -f "$CATALOG"
+          RESOURCE_DIRECTORY=$(python3 - "$BIN_PATH" "$CATALOG" <<'PY'
+          import pathlib
+          import sys
+
+          bundle = pathlib.Path(sys.argv[1]) / "bitchat_bitchat.bundle"
+          if not bundle.is_dir():
+              raise SystemExit("Built app module resource bundle is missing")
+          catalogs = list(bundle.rglob("Pave.xcstrings"))
+          if len(catalogs) != 1 or catalogs[0].read_bytes() != pathlib.Path(sys.argv[2]).read_bytes():
+              raise SystemExit("Built app resource catalog does not match its source")
+          if catalogs[0].parent not in (bundle, bundle / "Contents" / "Resources"):
+              raise SystemExit("Built app catalog is outside a standard bundle resource directory")
+          print(catalogs[0].parent)
+          PY
+          )
+          xcrun xcstringstool compile "$CATALOG" --output-directory "$RESOURCE_DIRECTORY" \
+            --language en --language fr --format stringsAndStringsdict
+          for language in en fr; do
+            test -s "$RESOURCE_DIRECTORY/$language.lproj/Pave.strings"
+            test -s "$RESOURCE_DIRECTORY/$language.lproj/Pave.stringsdict"
+          done
+
       - name: Run Tests
         # Perf benchmarks are excluded here and run in their own serial step
         # below: measuring while parallel test processes contend for cores
