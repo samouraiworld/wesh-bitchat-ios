@@ -340,43 +340,112 @@ struct BLEServiceCoreTests {
         #expect(messages.first?.content == "Hello")
     }
 
+    @Test(arguments: [MessageType.message, .prekeyBundle])
+    func solicitedFragmentedSyncUsesBoundResponder(type: MessageType) async throws {
+        let manager = RequestSyncManager()
+        let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
+        manager.registerRequest(to: fixture.responder)
+        #expect(manager.isValidResponse(from: fixture.responder, isRSR: true))
+        #expect(!manager.isValidResponse(from: fixture.author, isRSR: true))
+
+        for fragment in fixture.fragments {
+            fixture.ble._test_ingestFrame(fragment, link: fixture.link)
+        }
+        await fixture.ble._test_drainFragmentPipeline()
+
+        #expect(fixture.wasDelivered)
+        #expect(fixture.publicMessages.publicMessagesSnapshot().first?.content == (type == .message ? fixture.content : nil))
+    }
+
+    @Test(arguments: [MessageType.message, .prekeyBundle])
+    func unsolicitedFragmentedSyncCannotBorrowAuthorsRequest(type: MessageType) async throws {
+        let manager = RequestSyncManager()
+        let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
+        // Only the actual bound responder may answer our request. A request
+        // to the author does not authorize a different neighbor to replay it.
+        manager.registerRequest(to: fixture.author)
+        #expect(manager.isValidResponse(from: fixture.author, isRSR: true))
+        for fragment in fixture.fragments {
+            fixture.ble._test_ingestFrame(fragment, link: fixture.link)
+        }
+        await fixture.ble._test_drainFragmentPipeline()
+        #expect(!fixture.wasDelivered)
+    }
+
+    @Test(arguments: [MessageType.message, .prekeyBundle])
+    func fragmentedSyncExpiresBeforeLastFragment(type: MessageType) async throws {
+        let clock = FragmentSyncClock()
+        let manager = RequestSyncManager(responseWindow: 30, now: { clock.now })
+        let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
+        manager.registerRequest(to: fixture.responder)
+        #expect(manager.isValidResponse(from: fixture.responder, isRSR: true))
+        for fragment in fixture.fragments.dropLast() {
+            fixture.ble._test_ingestFrame(fragment, link: fixture.link)
+        }
+        fixture.ble._test_fenceEngine()
+        clock.advance(by: 31)
+        fixture.ble._test_ingestFrame(try #require(fixture.fragments.last), link: fixture.link)
+        await fixture.ble._test_drainFragmentPipeline()
+        #expect(!fixture.wasDelivered)
+    }
+
+    @Test(arguments: [MessageType.message, .prekeyBundle])
+    func innerSyncResponseRequiresRSRFragment(type: MessageType) async throws {
+        let manager = RequestSyncManager()
+        let fixture = try makeFragmentedSyncFixture(type: type, manager: manager)
+        manager.registerRequest(to: fixture.responder)
+        // Ordinary traffic cannot smuggle an RSR inner packet through an
+        // open request window. Both envelopes must carry the response flag.
+        for var fragment in fixture.fragments {
+            fragment.isRSR = false
+            fixture.ble._test_ingestFrame(fragment, link: fixture.link)
+        }
+        await fixture.ble._test_drainFragmentPipeline()
+        #expect(!fixture.wasDelivered)
+    }
+
+    @Test(arguments: [MessageType.message, .prekeyBundle])
+    func solicitedFragmentedSyncStillRequiresAuthorsSignature(type: MessageType) async throws {
+        let manager = RequestSyncManager()
+        let fixture = try makeFragmentedSyncFixture(type: type, manager: manager, corruptSignature: true)
+        manager.registerRequest(to: fixture.responder)
+        for fragment in fixture.fragments {
+            fixture.ble._test_ingestFrame(fragment, link: fixture.link)
+        }
+        await fixture.ble._test_drainFragmentPipeline()
+        #expect(!fixture.wasDelivered)
+    }
+
     @Test
-    func syncResponseFragmentedForUsIsReassembledAndDelivered() async throws {
-        // A REQUEST_SYNC answer from iOS: a long public message, fragmented
-        // with every fragment addressed to the requester (us).
+    func fragmentsFromAnotherAuthorCannotInjectUnsignedSelfMessage() async throws {
         let ble = makeService()
-        let delegate = PublicCaptureDelegate()
-        ble.delegate = delegate
-        let signer = NoiseEncryptionService(keychain: MockKeychain())
-        let sender = PeerID(str: "1122334455667788")
-        // Random letters: a repeated phrase compresses into one fragment.
-        let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789 ")
-        let content = String((0..<1_200).map { _ in alphabet.randomElement()! })
-        let unsigned = makePublicPacket(
-            content: content,
-            sender: sender,
-            timestamp: UInt64(Date().timeIntervalSince1970 * 1000)
-        )
-        let packet = try #require(signer.signPacket(unsigned), "Failed to sign public message")
-        let signingKey = try #require(signer.getSigningPublicKeyData())
+        let capture = PublicCaptureDelegate()
+        ble.delegate = capture
+        let remoteAuthor = PeerID(str: "1122334455667788")
+        let remoteData = try #require(Data(hexString: remoteAuthor.id))
+        let link = BLEIngressLinkID.central("synthetic-forged-self-message")
+        ble._test_bindCentral("synthetic-forged-self-message", to: remoteAuthor)
+        // An attacker wraps an unsigned message claiming our identity in
+        // fragments that identify the attacker. No sync request exists.
+        let content = String(decoding: Array(UInt8(33)...UInt8(96)), as: UTF8.self)
+        let forgedInner = makePublicPacket(content: content, sender: ble.myPeerID,
+                                          timestamp: UInt64(Date().timeIntervalSince1970 * 1_000))
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
-            for: BLEOutboundFragmentTransferRequest(packet: packet, pad: false, maxChunk: 256, directedPeer: ble.myPeerID),
-            defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
-            bleMaxMTU: 512
+            for: BLEOutboundFragmentTransferRequest(packet: forgedInner, pad: false, maxChunk: 64, directedPeer: nil),
+            defaultChunkSize: TransportConfig.bleDefaultFragmentSize, bleMaxMTU: 512,
+            fragmentID: Data([0x13, 0x25, 0x47, 0x69, 0x81, 0x93, 0x04, 0x16])
         ))
         #expect(plan.totalFragments > 1)
-        #expect(plan.fragmentPackets.allSatisfy { $0.recipientID == Data(hexString: ble.myPeerID.id) })
-
         for fragment in plan.fragmentPackets {
-            ble._test_handlePacket(fragment, fromPeerID: sender, signingPublicKey: signingKey)
+            let remoteFragment = BitchatPacket(
+                type: fragment.type, senderID: remoteData, recipientID: fragment.recipientID,
+                timestamp: fragment.timestamp, payload: fragment.payload, signature: nil,
+                ttl: fragment.ttl, version: fragment.version, route: fragment.route, isRSR: false
+            )
+            ble._test_ingestFrame(remoteFragment, link: link)
         }
-
-        let delivered = await TestHelpers.waitUntil(
-            { delegate.publicMessagesSnapshot().count == 1 },
-            timeout: TestConstants.longTimeout
-        )
-        #expect(delivered)
-        #expect(delegate.publicMessagesSnapshot().first?.content == content)
+        await ble._test_drainFragmentPipeline()
+        #expect(capture.publicMessagesSnapshot().isEmpty)
     }
 
     @Test
@@ -2078,7 +2147,8 @@ private func makeService(
     keychain: MockKeychain = MockKeychain(),
     noiseResponderHandshakeTimeout: TimeInterval =
         NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
-    engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler()
+    engineScheduler: BLEEngineScheduling = BLEEngineDispatchScheduler(),
+    requestSyncManager: RequestSyncManager = RequestSyncManager()
 ) -> BLEService {
     let identityManager = MockIdentityManager(keychain)
     let idBridge = NostrIdentityBridge(keychain: MockKeychainHelper())
@@ -2088,8 +2158,91 @@ private func makeService(
         identityManager: identityManager,
         initializeBluetoothManagers: false,
         noiseResponderHandshakeTimeout: noiseResponderHandshakeTimeout,
-        engineScheduler: engineScheduler
+        engineScheduler: engineScheduler,
+        requestSyncManager: requestSyncManager
     )
+}
+
+/// Three identities: a local requester, a bound relay, and the original
+/// author. Frames enter through the same link attribution as CoreBluetooth.
+private struct FragmentedSyncFixture {
+    let ble: BLEService
+    let author: PeerID
+    let responder = PeerID(str: "1122334455667788")
+    let link = BLEIngressLinkID.central("fragment-sync-responder")
+    let publicMessages: PublicCaptureDelegate
+    let fragments: [BitchatPacket]
+    let content: String
+    let type: MessageType
+
+    var wasDelivered: Bool {
+        type == .message
+            ? publicMessages.publicMessagesSnapshot().count == 1
+            : ble._test_hasGossipPrekeyBundle(for: author)
+    }
+}
+
+private func makeFragmentedSyncFixture(
+    type: MessageType,
+    manager: RequestSyncManager,
+    corruptSignature: Bool = false
+) throws -> FragmentedSyncFixture {
+    let ble = makeService(requestSyncManager: manager)
+    ble.prekeyBundleStore = PrekeyBundleStore(persistsToDisk: false)
+    let capture = PublicCaptureDelegate()
+    ble.delegate = capture
+    let author = NoiseEncryptionService(keychain: MockKeychain())
+    let noiseKey = try #require(author.getStaticPublicKeyData())
+    let signingKey = try #require(author.getSigningPublicKeyData())
+    let authorID = PeerID(publicKey: noiseKey)
+    let authorData = try #require(Data(hexString: authorID.id))
+    let responder = PeerID(str: "1122334455667788")
+    ble._test_bindCentral("fragment-sync-responder", to: responder)
+    let nowMs = UInt64(Date().timeIntervalSince1970 * 1_000)
+    // Pin the author's verified identity without scheduling an unrelated
+    // initial sync to that author, which could mask the responder defect.
+    ble._test_seedConnectedPeer(authorID, nickname: "Synthetic author",
+                               noisePublicKey: noiseKey,
+                               signingPublicKey: signingKey)
+
+    // Fixed pseudorandom text stays incompressible enough to span several
+    // fragments without a probabilistic fixture or external data.
+    var state: UInt64 = 0x6a09e667f3bcc909
+    let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789 ")
+    let content = String((0..<1_200).map { _ in
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return alphabet[Int((state >> 32) % UInt64(alphabet.count))]
+    })
+    let payload: Data
+    if type == .message {
+        payload = Data(content.utf8)
+    } else {
+        let bundle = try #require(author.currentPrekeyBundle())
+        payload = try #require(bundle.encode())
+    }
+    var packet = try #require(author.signPacket(BitchatPacket(
+        type: type.rawValue, senderID: authorData,
+        recipientID: nil, timestamp: nowMs, payload: payload, signature: nil, ttl: 0
+    )))
+    // Gossip preserves the author's signature and marks the replay as RSR.
+    packet.isRSR = true
+    if corruptSignature { packet.signature = Data(repeating: 0, count: 64) }
+    let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
+        for: BLEOutboundFragmentTransferRequest(packet: packet, pad: false, maxChunk: 128, directedPeer: ble.myPeerID),
+        defaultChunkSize: TransportConfig.bleDefaultFragmentSize, bleMaxMTU: 512,
+        fragmentID: Data([0x43, 0x37, 0x98, 0x21, 0x14, 0x65, 0x72, 0x08])
+    ))
+    #expect(plan.totalFragments > 1)
+    #expect(plan.fragmentPackets.allSatisfy { $0.isRSR && $0.ttl == 0 && $0.recipientID == Data(hexString: ble.myPeerID.id) })
+    return FragmentedSyncFixture(ble: ble, author: authorID, publicMessages: capture,
+                                 fragments: plan.fragmentPackets, content: content, type: type)
+}
+
+private final class FragmentSyncClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: TimeInterval = 1_000
+    var now: TimeInterval { lock.lock(); defer { lock.unlock() }; return value }
+    func advance(by interval: TimeInterval) { lock.lock(); defer { lock.unlock() }; value += interval }
 }
 
 private func makePublicPacket(content: String, sender: PeerID, timestamp: UInt64) -> BitchatPacket {

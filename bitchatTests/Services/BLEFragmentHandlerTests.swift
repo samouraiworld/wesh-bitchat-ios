@@ -11,7 +11,7 @@ struct BLEFragmentHandlerTests {
 
         var trackedPackets: [BitchatPacket] = []
         var appendedHeaders: [BLEFragmentHeader] = []
-        var ingressChecks: [(packet: BitchatPacket, innerSender: PeerID)] = []
+        var ingressChecks: [(packet: BitchatPacket, validationPeerID: PeerID)] = []
         var reinjectedPackets: [(packet: BitchatPacket, from: PeerID)] = []
     }
 
@@ -28,8 +28,8 @@ struct BLEFragmentHandlerTests {
                 recorder.appendedHeaders.append(header)
                 return recorder.appendResult?(header) ?? .stored(header: header, started: true)
             },
-            isAcceptedIngressPayload: { packet, innerSender in
-                recorder.ingressChecks.append((packet, innerSender))
+            isAcceptedIngressPayload: { packet, validationPeerID in
+                recorder.ingressChecks.append((packet, validationPeerID))
                 return recorder.accepted
             },
             processReassembledPacket: { packet, from in
@@ -130,12 +130,12 @@ struct BLEFragmentHandlerTests {
             .complete(header: header, reassembledData: reassembled, started: false)
         }
         let handler = makeHandler(recorder: recorder)
-        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2)
 
         handler.handle(packet, from: remotePeerID)
 
         #expect(recorder.ingressChecks.count == 1)
-        #expect(recorder.ingressChecks.first?.innerSender == innerSender)
+        #expect(recorder.ingressChecks.first?.validationPeerID == innerSender)
         #expect(recorder.reinjectedPackets.count == 1)
         let reinjected = recorder.reinjectedPackets.first
         #expect(reinjected?.from == remotePeerID)
@@ -164,12 +164,39 @@ struct BLEFragmentHandlerTests {
             .complete(header: header, reassembledData: reassembled, started: false)
         }
         let handler = makeHandler(recorder: recorder)
-        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2)
 
         handler.handle(packet, from: remotePeerID)
 
         #expect(recorder.ingressChecks.count == 1)
         #expect(recorder.reinjectedPackets.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func reassembledRSRRechecksTheIngressRespondersWindow(accepted: Bool) throws {
+        let author = PeerID(str: "99AABBCCDDEEFF00")
+        let inner = BitchatPacket(
+            type: MessageType.message.rawValue,
+            senderID: try #require(Data(hexString: author.id)), recipientID: nil,
+            timestamp: 900_000, payload: Data("synthetic replay".utf8),
+            signature: nil, ttl: 0, isRSR: true
+        )
+        let bytes = try #require(inner.toBinaryData(padding: false))
+        let recorder = Recorder()
+        recorder.accepted = accepted
+        recorder.appendResult = { header in
+            .complete(header: header, reassembledData: bytes, started: false)
+        }
+        var fragment = makeFragmentPacket(sender: author, index: 1, total: 2,
+                                          recipientID: Data(hexString: localPeerID.id))
+        fragment.isRSR = true
+
+        makeHandler(recorder: recorder).handle(fragment, from: remotePeerID)
+
+        // The response window may have expired since fragment ingress. It
+        // must be checked again against the link responder, never the author.
+        #expect(recorder.ingressChecks.first?.validationPeerID == remotePeerID)
+        #expect(recorder.reinjectedPackets.count == (accepted ? 1 : 0))
     }
 
     @Test
@@ -231,7 +258,7 @@ struct BLEFragmentHandlerTests {
         // A file-transfer claim buys a framed-file-sized assembly; the
         // packet it produced must be a file transfer.
         let packet = makeFragmentPacket(
-            sender: remotePeerID,
+            sender: PeerID(hexData: innerPacket.senderID),
             index: 1,
             total: 2,
             originalType: MessageType.fileTransfer.rawValue
@@ -270,7 +297,7 @@ struct BLEFragmentHandlerTests {
                 .complete(header: header, reassembledData: reassembled, started: false)
             }
             let handler = makeHandler(recorder: recorder)
-            let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, recipientID: fragmentRecipient)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: fragmentRecipient)
 
             handler.handle(packet, from: remotePeerID)
 
@@ -301,7 +328,7 @@ struct BLEFragmentHandlerTests {
                 .complete(header: header, reassembledData: reassembled, started: false)
             }
             let handler = makeHandler(recorder: recorder)
-            let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, recipientID: me)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: me)
 
             handler.handle(packet, from: remotePeerID)
 
@@ -328,7 +355,7 @@ struct BLEFragmentHandlerTests {
             .complete(header: header, reassembledData: reassembled, started: false)
         }
         let handler = makeHandler(recorder: recorder)
-        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, recipientID: me)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: me)
 
         handler.handle(packet, from: remotePeerID)
 
@@ -355,7 +382,7 @@ struct BLEFragmentHandlerTests {
                 .complete(header: header, reassembledData: reassembled, started: false)
             }
             let handler = makeHandler(recorder: recorder)
-            let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2, originalType: type.rawValue)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, originalType: type.rawValue)
 
             handler.handle(packet, from: remotePeerID)
 
