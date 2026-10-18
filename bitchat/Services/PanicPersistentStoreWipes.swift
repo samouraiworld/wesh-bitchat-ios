@@ -32,6 +32,10 @@ struct PanicPersistentStoreWipes {
     var publicArchive: @MainActor () -> Bool = { GossipMessageArchive.wipeDefault() }
     var prekeys: @MainActor () -> Bool = { PrekeyBundleStore.shared.wipe() }
     var board: @MainActor () -> Bool = { BoardStore.shared.wipe() }
+    var sightings: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return RetiredSightingsStore(defaults: .standard).wipe()
+    }
     /// Group rosters stored by builds that still accepted BitChat groups.
     var legacyGroups: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }
@@ -72,6 +76,12 @@ struct PanicRecoveryOperations {
     /// Deletes the media an older build may have stored, and the drafts.
     let wipeMedia: (PanicRecoveryIntent) throws -> Void
     let complete: () throws -> Void
+
+    func completeIfConfirmed(existingStoreResults: [Bool], legacySightingsConfirmed: Bool) throws -> Bool {
+        guard existingStoreResults.allSatisfy({ $0 }), legacySightingsConfirmed else { return false }
+        try complete()
+        return true
+    }
 
     static func ephemeral(
         wipeMedia: @escaping () throws -> Void = {}

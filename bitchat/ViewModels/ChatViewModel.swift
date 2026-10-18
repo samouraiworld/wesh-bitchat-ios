@@ -153,6 +153,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published var currentTheme: AppTheme = .matrix
     @Published var isConnected = false
     @Published private(set) var panicRecoveryBlocked = false
+    @Published private(set) var startupRetirementBlocked = false
     @Published private(set) var weshPanicGeneration: UInt64 = 0
     var networkActivationAllowed: Bool { !panicRecoveryBlocked }
     @Published var nickname: String = "" {
@@ -311,6 +312,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private let panicPersistentStoreWipes: PanicPersistentStoreWipes
     let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
+    private(set) var bootstrapConfigured = false
     private var nicknameStore: LocalNicknameStore {
         LocalNicknameStore(keychain: keychain, defaults: userDefaults)
     }
@@ -772,6 +774,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         locationManager: LocationChannelManager = .shared,
         panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
     ) {
+        let persistentWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         let livePanicRecoveryOperations = PanicRecoveryOperations.live()
         let startSuspendedForRecovery: Bool
         do {
@@ -780,12 +783,16 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         } catch {
             startSuspendedForRecovery = true
         }
+        let startupDecision = PanicStartupDecision(
+            recoveryPending: startSuspendedForRecovery,
+            legacySightingsConfirmed: persistentWipes.sightings()
+        )
         // Preserve the preflight decision used to defer CoreBluetooth. A
         // transiently successful second read must not skip recovery and leave
         // the service permanently suspended without running the wipe.
         let panicRecoveryOperations = PanicRecoveryOperations(
             isPending: {
-                if startSuspendedForRecovery {
+                if startupDecision.replayPanic {
                     return true
                 }
                 return try livePanicRecoveryOperations.isPending()
@@ -798,7 +805,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             keychain: keychain,
             idBridge: idBridge,
             identityManager: identityManager,
-            startSuspendedForPanicRecovery: startSuspendedForRecovery,
+            startSuspendedForPanicRecovery: startupDecision.suspendTransport,
             deferBluetoothPrompt: WeshMode.isActive && !WeshWelcome.isDone()
         )
         meshService.sfMetrics = .shared
@@ -816,7 +823,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             panicRecoveryOperations: panicRecoveryOperations,
             panicNetworkLifecycle: .live,
             weshPrivatePolicyEnabled: WeshMode.isActive,
-            panicPersistentStoreWipes: panicPersistentStoreWipes
+            panicPersistentStoreWipes: persistentWipes,
+            startupRetirementBlocked: startupDecision.blockOrdinaryAdmission
         )
     }
 
@@ -840,7 +848,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         panicNetworkLifecycle: PanicNetworkLifecycle = .noop,
         weshPrivatePolicyEnabled: Bool = false,
         weshMeetingNote: WeshMeetingNoteStore? = nil,
-        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
+        panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil,
+        startupRetirementBlocked: Bool = false
     ) {
         self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
@@ -941,9 +950,21 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             _ = panicClearAllData(restartServices: false)
         }
 
-        if networkActivationAllowed {
-            ChatViewModelBootstrapper(viewModel: self).configure()
+        if !recoveryRequired && startupRetirementBlocked {
+            self.startupRetirementBlocked = true
+            panicRecoveryBlocked = true
         }
+
+        if networkActivationAllowed {
+            configureBootstrapIfNeeded()
+        }
+    }
+
+    @MainActor
+    func configureBootstrapIfNeeded() {
+        guard networkActivationAllowed, !bootstrapConfigured else { return }
+        bootstrapConfigured = true
+        ChatViewModelBootstrapper(viewModel: self).configure()
     }
 
     // MARK: - Deinitialization
@@ -1361,12 +1382,37 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     // MARK: - Emergency Functions
 
+    /// Retries only legacy metadata deletion. A newly pending panic still
+    /// requires the existing explicit recovery action before admission reopens.
+    @MainActor
+    @discardableResult
+    func retryStartupRetirement() -> Bool {
+        guard startupRetirementBlocked else { return false }
+        let decision = PanicStartupDecision.retry(
+            checkPending: panicRecoveryOperations.isPending,
+            wipeSightings: panicPersistentStoreWipes.sightings
+        )
+        if decision.replayPanic {
+            startupRetirementBlocked = false
+            return false
+        }
+        guard !decision.blockOrdinaryAdmission else { return false }
+        startupRetirementBlocked = false
+        panicRecoveryBlocked = false
+        if let panicTransport = meshService as? PanicResettingTransport {
+            panicTransport.completePanicReset(restartServices: false)
+        }
+        configureBootstrapIfNeeded()
+        return true
+    }
+
     // PANIC: Emergency data clearing for activist safety
     @MainActor
     @discardableResult
     /// `restartMesh: false` keeps Bluetooth stopped after the wipe (Wesh: until the welcome ends),
     /// while the rest of the network lifecycle restarts as usual.
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
+        startupRetirementBlocked = false
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
@@ -1460,10 +1506,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let publicArchiveWipeCompleted = panicPersistentStoreWipes.publicArchive()
         StoreAndForwardMetrics.shared.reset()
 
-        // Ambient-liveliness bookkeeping: sampled nearby-chat previews, the
-        // daily sightings tally, and the echoes-dismissed watermark
+        // Ambient-liveliness bookkeeping: sampled nearby-chat previews and
+        // the echoes-dismissed watermark
         GeohashChatActivityTracker.shared.clear()
-        MeshSightingsTracker.shared.clear()
+        let sightingsWipeCompleted = panicPersistentStoreWipes.sightings()
         MeshEchoSettings.reset()
         NotificationPrivacySettings.reset()
         // A hand-added relay names an operator someone chose to route through,
@@ -1545,22 +1591,20 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let panicCompleted: Bool
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            if [networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
-                meetingNoteWipeCompleted,
-                qrContactsWipeCompleted, courierWipeCompleted,
-                bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
-                groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted,
-                sharedContentWipeCompleted].allSatisfy({ $0 }) {
-                try panicRecoveryOperations.complete()
-                panicCompleted = true
+            panicCompleted = try panicRecoveryOperations.completeIfConfirmed(
+                existingStoreResults: [
+                    networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
+                    meetingNoteWipeCompleted, qrContactsWipeCompleted, courierWipeCompleted,
+                    bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
+                    groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted, sharedContentWipeCompleted
+                ],
+                legacySightingsConfirmed: sightingsWipeCompleted
+            )
+            if panicCompleted {
                 SecureLogger.info(
                     "🗑️ Deleted all media files during panic clear",
                     category: .session
                 )
-            } else {
-                // Do not clear either durable recovery marker. Startup must
-                // retry the entire transaction before any transport restarts.
-                panicCompleted = false
             }
         } catch {
             panicCompleted = false

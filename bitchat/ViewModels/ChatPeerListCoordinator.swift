@@ -37,8 +37,6 @@ protocol ChatPeerListContext: AnyObject {
     /// Posts the "bitchatters nearby" local notification.
     func notifyNetworkAvailable(peerCount: Int)
 
-    /// Records peers seen within range for the daily ambient sightings tally.
-    func recordMeshSightings(peerIDs: [PeerID])
 }
 
 extension ChatViewModel: ChatPeerListContext {
@@ -64,11 +62,6 @@ extension ChatViewModel: ChatPeerListContext {
         NotificationService.shared.sendNetworkAvailableNotification(peerCount: peerCount)
     }
 
-    func recordMeshSightings(peerIDs: [PeerID]) {
-        for peerID in peerIDs {
-            MeshSightingsTracker.shared.recordSighting(peerID: peerID)
-        }
-    }
 }
 
 final class ChatPeerListCoordinator: @unchecked Sendable {
@@ -143,7 +136,6 @@ private extension ChatPeerListCoordinator {
         }
 
         invalidateNetworkEmptyTimer()
-        context.recordMeshSightings(peerIDs: meshPeers)
 
         let newPeers = meshPeerSet.subtracting(recentlySeenPeers)
         // Record every sighted peer even when no notification fires. A peer

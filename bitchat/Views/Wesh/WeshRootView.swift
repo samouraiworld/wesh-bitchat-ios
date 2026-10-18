@@ -304,11 +304,19 @@ struct WeshRootView: View {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Effacement local inachevé", systemImage: "exclamationmark.triangle")
-                            .font(.headline).accessibilityAddTraits(.isHeader)
-                        Text("Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité.")
-                        Button("Reprendre l’effacement local") { chrome.requestPanicWipe() }
-                            .frame(minHeight: 44)
+                        if viewModel.startupRetirementBlocked {
+                            Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
+                                .font(.headline).accessibilityAddTraits(.isHeader)
+                            Text(PaveCopy.text("pave.cleanup.body"))
+                            Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
+                                .frame(minHeight: 44)
+                        } else {
+                            Label("Effacement local inachevé", systemImage: "exclamationmark.triangle")
+                                .font(.headline).accessibilityAddTraits(.isHeader)
+                            Text("Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité.")
+                            Button("Reprendre l’effacement local") { chrome.requestPanicWipe() }
+                                .frame(minHeight: 44)
+                        }
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:
@@ -375,11 +383,12 @@ struct WeshRootView: View {
             Button("Annuler", role: .cancel) {}
             Button("Effacer les données locales", role: .destructive) {
                 sharedReview = nil
-                let completed = chrome.panicClearAllData()
-                selectedTab = 1
-                panicFeedback = completed
-                    ? "Effacement local confirmé. Vos contacts devront être vérifiés à nouveau avant tout échange privé."
-                    : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+                _ = runtime.panicEraseAction(report: { completed in
+                    selectedTab = 1
+                    panicFeedback = completed
+                        ? "Effacement local confirmé. Vos contacts devront être vérifiés à nouveau avant tout échange privé."
+                        : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+                })()
             }
         } message: {
             Text("Cette action efface l’identité Wesh, les contacts et leurs vérifications, l’historique, les fichiers reçus, les brouillons et la note de rendez-vous conservés ici. Elle ne supprime pas les copies détenues par d’autres personnes ni leurs sauvegardes. Elle ne garantit pas un effacement physique du stockage. Cette action est irréversible.")
@@ -1554,9 +1563,9 @@ private struct WeshSettings: View {
         // The hold is the confirmation: no alert after it. The wipe rebuilds the tabs, so its
         // outcome shows above the app, in the window the « Tout effacer » shortcut uses.
         PaveSettingsScreen(summary: summary, presentsOutcome: false, onErase: {
-            let erased = chrome.panicClearAllData()
-            PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
-            return erased
+            runtime.panicEraseAction(report: { erased in
+                PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
+            })()
         }, onSelect: { selected in
             if selected == .connexion { connexion = true } else { destination = selected }
         })

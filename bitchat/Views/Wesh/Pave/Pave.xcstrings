@@ -1,6 +1,40 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "pave.cleanup.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Old activity data could not be removed. Exchanges are paused. Try again to remove only this data; your identity and conversations stay unchanged."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D’anciennes données d’activité n’ont pas pu être supprimées. Les échanges sont suspendus. Réessayez pour supprimer uniquement ces données ; votre identité et vos discussions restent inchangées."
+          }
+        }
+      }
+    },
+    "pave.cleanup.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local cleanup incomplete"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nettoyage local inachevé"
+          }
+        }
+      }
+    },
     "pave.about.donate" : {
       "extractionState" : "manual",
       "localizations" : {
