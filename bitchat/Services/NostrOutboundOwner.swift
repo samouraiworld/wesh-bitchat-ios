@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Original outbound provenance. Task-batch joins never acknowledge the whole outbound owner.
 final class NostrOutboundOwner: @unchecked Sendable {
@@ -528,6 +529,256 @@ final class NostrOutboundOwner: @unchecked Sendable {
         }
     }
 
+    enum SourceEndpointCreation { case created(NostrSourceDetachmentEndpoint), protocolFault }
+    enum SourceEndpointBindingResult { case bound(Identity), protocolFault }
+    enum SourceEndpointBindingFinish { case ready(SourceDetachmentClaim?), protocolFault }
+    enum SourceDetachmentRequestResult {
+        case prepared(Identity, [SourceDetachmentClaim]), unconfirmed(SourceDetachmentGap)
+    }
+    enum SourceDetachmentInvocationResult { case invocationReturned, unconfirmed(SourceDetachmentGap) }
+    enum SourceDetachmentGap: Equatable, Sendable {
+        case foreignSubject, foreignReceipt, invalidClaim, invocationNotReturned
+    }
+    enum SourceBindingState: Equatable, Sendable { case unbound, awaitingReturn, awaitingFinish, ready }
+    enum SourceEndpointAvailability: Equatable, Sendable { case unbound, present, unavailable }
+    enum SourceInvocationState: Equatable, Sendable {
+        case unclaimed, claimedAwaitingInvocation, invocationAdmittedNotReturned, invocationReturned
+    }
+    enum SourceDetachmentFault: Equatable, Sendable {
+        case invalidEndpointSource, wrongEndpointKind, foreignEndpoint, repeatedBinding
+        case invalidBinding, repeatedFinish, foreignSubject, foreignReceipt, invalidClaim, repeatedInvocation
+    }
+    struct SourceDetachmentRow: Sendable {
+        let sourceID: Identity
+        let kind: SourceKind
+        let installation: SourceInstallationState
+        let bindingID: Identity?
+        let endpointID: Identity?
+        let binding: SourceBindingState
+        let availability: SourceEndpointAvailability
+        let requestID: Identity?
+        let closeReceipt: RootCloseReceipt?
+        let claimID: Identity?
+        let invocation: SourceInvocationState
+    }
+    struct SourceDetachmentSnapshot: Sendable {
+        let ownerID: Identity
+        let requestID: Identity?
+        let closeReceipt: RootCloseReceipt?
+        let rows: [SourceDetachmentRow]
+        let faults: [SourceDetachmentFault]
+    }
+    private final class SourceDetachmentRecord {
+        let sourceID: Identity
+        var bindingID: Identity?
+        var endpointID: Identity?
+        weak var endpoint: NostrSourceDetachmentEndpoint?
+        var ready = false
+        var requestID: Identity?
+        var closeReceipt: RootCloseReceipt?
+        var claimID: Identity?
+        var invocation: SourceInvocationState = .unclaimed
+        init(sourceID: Identity) { self.sourceID = sourceID }
+    }
+    private var sourceDetachmentRequestID: Identity?
+    private var sourceDetachmentReceipt: RootCloseReceipt?
+    private var sourceDetachments: [Identity: SourceDetachmentRecord] = [:]
+    private var sourceDetachmentFaults: [SourceDetachmentFault] = []
+
+    @MainActor
+    func makeCancellableSourceEndpoint(_ source: SourceInstallation, cancellable: AnyCancellable) -> SourceEndpointCreation {
+        guard let descriptor = endpointDescriptor(source, observer: false) else { return .protocolFault }
+        return .created(NostrSourceDetachmentEndpoint(descriptor: descriptor, cancellable: cancellable))
+    }
+    @MainActor
+    func makeObserverSourceEndpoint(_ source: SourceInstallation, center: NotificationCenter,
+                                    token: NSObjectProtocol) -> SourceEndpointCreation {
+        guard let descriptor = endpointDescriptor(source, observer: true) else { return .protocolFault }
+        return .created(NostrSourceDetachmentEndpoint(descriptor: descriptor, center: center, token: token))
+    }
+    private func endpointDescriptor(_ source: SourceInstallation, observer: Bool) -> NostrSourceEndpointDescriptor? {
+        locked {
+            guard source.ownerID === id, let record = sourceRecords[source.id], record.ticket === source else {
+                sourceDetachmentFaults.append(.invalidEndpointSource)
+                return nil
+            }
+            guard (record.kind == .legacyFavoriteObserver) == observer else {
+                sourceDetachmentFaults.append(.wrongEndpointKind)
+                return nil
+            }
+            return NostrSourceEndpointDescriptor(ownerID: id, sourceID: source.id, kind: record.kind, endpointID: Identity())
+        }
+    }
+    @MainActor
+    func bindSourceEndpoint(_ endpoint: NostrSourceDetachmentEndpoint,
+                            to source: SourceInstallation) -> SourceEndpointBindingResult {
+        // Copy actor-isolated metadata before entering the nonrecursive RAM monitor.
+        let descriptor = endpoint.descriptor
+        defer { withExtendedLifetime(endpoint) {} }
+        return locked {
+            guard source.ownerID === id, let record = sourceRecords[source.id], record.ticket === source,
+                  descriptor.ownerID === id, descriptor.sourceID === source.id, descriptor.kind == record.kind else {
+                sourceDetachmentFaults.append(.foreignEndpoint)
+                return .protocolFault
+            }
+            let association = detachmentRecordLocked(record)
+            guard association.bindingID == nil else {
+                sourceDetachmentFaults.append(.repeatedBinding)
+                return .protocolFault
+            }
+            guard record.installation == .installing else {
+                sourceDetachmentFaults.append(.invalidBinding)
+                return .protocolFault
+            }
+            let bindingID = Identity()
+            association.bindingID = bindingID
+            association.endpointID = descriptor.endpointID
+            association.endpoint = endpoint
+            return .bound(bindingID)
+        }
+    }
+    @MainActor
+    func finishSourceEndpointBinding(_ source: SourceInstallation, bindingID: Identity) -> SourceEndpointBindingFinish {
+        var pins: [NostrSourceDetachmentEndpoint] = []
+        let prepared: (Bool, NostrSourceDetachmentPreparedClaim?) = locked {
+            guard source.ownerID === id, let record = sourceRecords[source.id], record.ticket === source,
+                  let association = sourceDetachments[source.id], association.bindingID === bindingID,
+                  record.installation == .installationReturned else {
+                sourceDetachmentFaults.append(.invalidBinding)
+                return (false, nil)
+            }
+            guard !association.ready else {
+                sourceDetachmentFaults.append(.repeatedFinish)
+                return (false, nil)
+            }
+            association.ready = true
+            return (true, prepareSourceClaimLocked(association, pins: &pins))
+        }
+        let claim = prepared.1.map { SourceDetachmentClaim(prepared: $0) }
+        // No last upgraded endpoint/handle release may happen under the owner monitor.
+        withExtendedLifetime(pins) {}
+        return prepared.0 ? .ready(claim) : .protocolFault
+    }
+    @MainActor
+    func requestSourceDetachment(subject: RootPanicSubject, receipt: RootCloseReceipt) -> SourceDetachmentRequestResult {
+        var pins: [NostrSourceDetachmentEndpoint] = []
+        let prepared: Result<(Identity, [NostrSourceDetachmentPreparedClaim]), SourceDetachmentRequestError> = locked {
+            guard subject.ownerID === id, subject.nonce === originalRootSubject.nonce else {
+                sourceDetachmentFaults.append(.foreignSubject)
+                return .failure(SourceDetachmentRequestError(gap: .foreignSubject))
+            }
+            guard receipt.ownerID === id, rootCloseReceipt === receipt else {
+                sourceDetachmentFaults.append(.foreignReceipt)
+                return .failure(SourceDetachmentRequestError(gap: .foreignReceipt))
+            }
+            let requestID = sourceDetachmentRequestID ?? Identity()
+            sourceDetachmentRequestID = requestID
+            sourceDetachmentReceipt = receipt
+            var claims: [NostrSourceDetachmentPreparedClaim] = []
+            for key in sourceOrder {
+                guard let record = sourceRecords[key] else { continue }
+                let association = detachmentRecordLocked(record)
+                association.requestID = requestID
+                association.closeReceipt = receipt
+                if let claim = prepareSourceClaimLocked(association, pins: &pins) { claims.append(claim) }
+            }
+            return .success((requestID, claims))
+        }
+        let result: SourceDetachmentRequestResult
+        switch prepared {
+        case .success(let (requestID, values)):
+            result = .prepared(requestID, values.map { SourceDetachmentClaim(prepared: $0) })
+        case .failure(let error): result = .unconfirmed(error.gap)
+        }
+        withExtendedLifetime(pins) {}
+        return result
+    }
+    private struct SourceDetachmentRequestError: Error { let gap: SourceDetachmentGap }
+    private func detachmentRecordLocked(_ source: SourceRecord) -> SourceDetachmentRecord {
+        if let existing = sourceDetachments[source.ticket.id] { return existing }
+        let record = SourceDetachmentRecord(sourceID: source.ticket.id)
+        sourceDetachments[source.ticket.id] = record
+        return record
+    }
+    private func prepareSourceClaimLocked(_ record: SourceDetachmentRecord,
+                                          pins: inout [NostrSourceDetachmentEndpoint]) -> NostrSourceDetachmentPreparedClaim? {
+        guard record.ready, sourceRecords[record.sourceID]?.installation == .installationReturned,
+              record.invocation == .unclaimed, let requestID = record.requestID, let receipt = record.closeReceipt,
+              let bindingID = record.bindingID, let endpointID = record.endpointID else { return nil }
+        guard let endpoint = record.endpoint else { return nil }
+        pins.append(endpoint)
+        let claimID = Identity()
+        record.claimID = claimID
+        record.invocation = .claimedAwaitingInvocation
+        let descriptor = NostrSourceDetachmentClaimDescriptor(ownerID: id, sourceID: record.sourceID,
+            bindingID: bindingID, endpointID: endpointID, requestID: requestID, closeReceipt: receipt, claimID: claimID)
+        return NostrSourceDetachmentPreparedClaim(descriptor: descriptor, endpoint: endpoint)
+    }
+    @MainActor
+    func invokeSourceDetachment(_ claim: SourceDetachmentClaim) -> SourceDetachmentInvocationResult {
+        let descriptor = claim.descriptor
+        let endpoint = claim.endpoint
+        defer { withExtendedLifetime(claim) {}; withExtendedLifetime(endpoint) {} }
+        let admitted = locked {
+            guard descriptor.ownerID === id, let record = sourceDetachments[descriptor.sourceID],
+                  record.bindingID === descriptor.bindingID, record.endpointID === descriptor.endpointID,
+                  record.requestID === descriptor.requestID, record.closeReceipt === descriptor.closeReceipt,
+                  record.claimID === descriptor.claimID else {
+                sourceDetachmentFaults.append(.invalidClaim)
+                return false
+            }
+            guard record.invocation == .claimedAwaitingInvocation else {
+                sourceDetachmentFaults.append(.repeatedInvocation)
+                return false
+            }
+            record.invocation = .invocationAdmittedNotReturned
+            return true
+        }
+        guard admitted else { return .unconfirmed(.invalidClaim) }
+        // Real dispatch on the admitted original claim, never an action under RAM.
+        switch endpoint.invoke() {
+        case .notInvoked: return .unconfirmed(.invocationNotReturned)
+        case .invocationReturned:
+            return locked {
+                guard let record = sourceDetachments[descriptor.sourceID], record.claimID === descriptor.claimID,
+                      record.requestID === descriptor.requestID, record.closeReceipt === descriptor.closeReceipt,
+                      record.invocation == .invocationAdmittedNotReturned else {
+                    sourceDetachmentFaults.append(.invalidClaim)
+                    return .unconfirmed(.invalidClaim)
+                }
+                record.invocation = .invocationReturned
+                return .invocationReturned
+            }
+        }
+    }
+    /// Dynamic weak inspection is actor-bound; temporary strong pins outlive the RAM lock.
+    @MainActor
+    func sourceDetachmentSnapshot() -> SourceDetachmentSnapshot {
+        var pins: [NostrSourceDetachmentEndpoint] = []
+        let snapshot = locked {
+            SourceDetachmentSnapshot(ownerID: id, requestID: sourceDetachmentRequestID, closeReceipt: sourceDetachmentReceipt,
+                rows: sourceOrder.compactMap { key in
+                    guard let source = sourceRecords[key] else { return nil }
+                    let association = sourceDetachments[key]
+                    let availability: SourceEndpointAvailability
+                    if association?.bindingID == nil { availability = .unbound }
+                    else if let endpoint = association?.endpoint { pins.append(endpoint); availability = .present }
+                    else { availability = .unavailable }
+                    let phase: SourceBindingState
+                    if association?.bindingID == nil { phase = .unbound }
+                    else if association?.ready == true { phase = .ready }
+                    else if source.installation == .installing { phase = .awaitingReturn }
+                    else { phase = .awaitingFinish }
+                    return SourceDetachmentRow(sourceID: key, kind: source.kind, installation: source.installation,
+                        bindingID: association?.bindingID, endpointID: association?.endpointID, binding: phase,
+                        availability: availability, requestID: association?.requestID, closeReceipt: association?.closeReceipt,
+                        claimID: association?.claimID, invocation: association?.invocation ?? .unclaimed)
+                }, faults: sourceDetachmentFaults)
+        }
+        withExtendedLifetime(pins) {}
+        return snapshot
+    }
+
     /// Capture this installed actor's original subject, never a current/global successor.
     func captureOutboundPanicBinding() -> NostrOutboundPanicBinding {
         NostrOutboundPanicBinding(owner: self, subject: originalRootSubject)
@@ -773,4 +1024,75 @@ final class NostrOutboundPanicBinding: @unchecked Sendable {
 
 func closeCapturedNostrOutboundRoots(_ binding: NostrOutboundPanicBinding) -> NostrOutboundOwner.RootCloseOutcome {
     binding.owner.closeRootAdmission(subject: binding.subject)
+}
+
+fileprivate struct NostrSourceEndpointDescriptor {
+    let ownerID: NostrOutboundOwner.Identity
+    let sourceID: NostrOutboundOwner.Identity
+    let kind: NostrOutboundOwner.SourceKind
+    let endpointID: NostrOutboundOwner.Identity
+}
+fileprivate enum NostrSourceEndpointInvocation { case notInvoked, invocationReturned }
+
+/// The transport owns actual resources; the process journal keeps only a weak endpoint.
+@MainActor
+final class NostrSourceDetachmentEndpoint {
+    fileprivate let descriptor: NostrSourceEndpointDescriptor
+    private enum Payload {
+        case cancellable(AnyCancellable)
+        case observer(NotificationCenter, NSObjectProtocol)
+    }
+    private let payload: Payload
+    fileprivate init(descriptor: NostrSourceEndpointDescriptor, cancellable: AnyCancellable) {
+        self.descriptor = descriptor; self.payload = .cancellable(cancellable)
+    }
+    fileprivate init(descriptor: NostrSourceEndpointDescriptor, center: NotificationCenter, token: NSObjectProtocol) {
+        self.descriptor = descriptor; self.payload = .observer(center, token)
+    }
+    fileprivate func invoke() -> NostrSourceEndpointInvocation {
+        switch payload {
+        case .cancellable:
+            // Baseline: the actual payload action and its return remain unconfirmed.
+            return .notInvoked
+        case .observer:
+            // Baseline: no observer removal or invocation-return acknowledgment.
+            return .notInvoked
+        }
+    }
+}
+
+fileprivate struct NostrSourceDetachmentClaimDescriptor {
+    let ownerID: NostrOutboundOwner.Identity
+    let sourceID: NostrOutboundOwner.Identity
+    let bindingID: NostrOutboundOwner.Identity
+    let endpointID: NostrOutboundOwner.Identity
+    let requestID: NostrOutboundOwner.Identity
+    let closeReceipt: NostrOutboundOwner.RootCloseReceipt
+    let claimID: NostrOutboundOwner.Identity
+}
+fileprivate struct NostrSourceDetachmentPreparedClaim {
+    let descriptor: NostrSourceDetachmentClaimDescriptor
+    let endpoint: NostrSourceDetachmentEndpoint
+}
+
+/// Local invocation authority, never returned by metadata inspection or stored by the process owner.
+@MainActor
+final class SourceDetachmentClaim {
+    fileprivate let descriptor: NostrSourceDetachmentClaimDescriptor
+    fileprivate let endpoint: NostrSourceDetachmentEndpoint
+    fileprivate init(prepared: NostrSourceDetachmentPreparedClaim) {
+        self.descriptor = prepared.descriptor; self.endpoint = prepared.endpoint
+    }
+}
+
+@MainActor
+func closeCapturedNostrOutboundRootsAndRequestSourceDetachment(
+    _ binding: NostrOutboundPanicBinding
+) -> NostrOutboundOwner.RootCloseOutcome {
+    let original = closeCapturedNostrOutboundRoots(binding)
+    if case .closed(let receipt) = original,
+       case .prepared(_, let claims) = binding.owner.requestSourceDetachment(subject: binding.subject, receipt: receipt) {
+        for claim in claims { _ = binding.owner.invokeSourceDetachment(claim) }
+    }
+    return original
 }
