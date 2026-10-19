@@ -188,12 +188,12 @@ struct NostrOutboundRootAdmissionTests {
         try await withRootFixture { f in
             // The getter returns closures only. Stop/restart are never invoked in this fixture.
             let live = PanicNetworkLifecycle.live
-            let first = try closedReceipt(live.closeInstalledNostrRoots(f.binding), binding: f.binding)
             let initialLoads = f.favoriteLoads.read()
             let temporary = f.makeTemporaryTransport()
             let secondBinding = temporary.captureOutboundPanicBinding()
             #expect(secondBinding.ownerID === f.binding.ownerID)
             #expect(secondBinding.subject === f.binding.subject)
+            let first = try closedReceipt(live.closeInstalledNostrRoots(f.binding), binding: f.binding)
             let second = try closedReceipt(live.closeInstalledNostrRoots(secondBinding), binding: secondBinding)
             let repeated = try closedReceipt(live.closeInstalledNostrRoots(f.binding), binding: f.binding)
             #expect(second === first)
