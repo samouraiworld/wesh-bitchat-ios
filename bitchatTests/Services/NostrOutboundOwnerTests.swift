@@ -585,27 +585,27 @@ private final class Fixture: @unchecked Sendable {
 
 private final class ManualScheduler: @unchecked Sendable {
     private struct State {
-        var pending: [@Sendable () -> Void] = []
+        var pending: [DispatchWorkItem] = []
         var delays: [TimeInterval] = []
     }
     private let state = Locked(State())
     var pendingCount: Int { state.read().pending.count }
     var delays: [TimeInterval] { state.read().delays }
-    func schedule(_ delay: TimeInterval, _ action: @escaping @Sendable () -> Void) {
+    func schedule(_ delay: TimeInterval, _ action: DispatchWorkItem) {
         state.update { $0.delays.append(delay); $0.pending.append(action) }
     }
     func releaseFirst() throws {
-        let action = state.update { state -> (@Sendable () -> Void)? in
+        let action = state.update { state -> DispatchWorkItem? in
             state.pending.isEmpty ? nil : state.pending.removeFirst()
         }
         guard let action else { throw FixtureError("no submitted ACK reset callback") }
-        action()
+        action.perform()
     }
     func releaseAll() {
         let pending = state.update { state in
             let pending = state.pending; state.pending.removeAll(); return pending
         }
-        pending.forEach { $0() }
+        pending.forEach { $0.perform() }
     }
 }
 

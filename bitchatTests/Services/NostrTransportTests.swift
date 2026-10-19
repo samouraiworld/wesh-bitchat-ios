@@ -594,7 +594,7 @@ struct NostrTransportTests {
         currentIdentity: @escaping @MainActor () throws -> NostrIdentity? = { nil },
         registerPendingGiftWrap: @escaping @MainActor (String) -> Void = { _ in },
         sendEvent: @escaping @MainActor (NostrEvent) -> Void = { _ in },
-        scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { _, _ in },
+        scheduleAfter: @escaping NostrTransport.AckPacer.Scheduler = { _, _ in },
         relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() },
         weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
         weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
@@ -685,7 +685,7 @@ private final class NostrTransportProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var sentEventsStorage: [NostrEvent] = []
     private var pendingGiftWrapIDsStorage: [String] = []
-    private var scheduledActionsStorage: [(@Sendable () -> Void)] = []
+    private var scheduledActionsStorage: [DispatchWorkItem] = []
 
     var sentEvents: [NostrEvent] {
         lock.lock()
@@ -717,7 +717,7 @@ private final class NostrTransportProbe: @unchecked Sendable {
         lock.unlock()
     }
 
-    func enqueueScheduledAction(delay: TimeInterval, action: @escaping @Sendable () -> Void) {
+    func enqueueScheduledAction(delay: TimeInterval, action: DispatchWorkItem) {
         _ = delay
         lock.lock()
         scheduledActionsStorage.append(action)
@@ -726,12 +726,12 @@ private final class NostrTransportProbe: @unchecked Sendable {
 
     @discardableResult
     func runNextScheduledAction() -> Bool {
-        let action: (@Sendable () -> Void)?
+        let action: DispatchWorkItem?
         lock.lock()
         action = scheduledActionsStorage.isEmpty ? nil : scheduledActionsStorage.removeFirst()
         lock.unlock()
         guard let action else { return false }
-        action()
+        action.perform()
         return true
     }
 }

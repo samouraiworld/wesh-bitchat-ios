@@ -352,12 +352,12 @@ private final class BodyInstaller: @unchecked Sendable {
 }
 
 private final class BodyScheduler: @unchecked Sendable {
-    private let pending = BodyLocked<[@Sendable () -> Void]>([])
+    private let pending = BodyLocked<[DispatchWorkItem]>([])
     var count: Int { pending.read().count }
-    func submit(_ action: @escaping @Sendable () -> Void) { pending.update { $0.append(action) } }
+    func submit(_ action: DispatchWorkItem) { pending.update { $0.append(action) } }
     func releaseAll() {
         let actions = pending.update { let copy = $0; $0.removeAll(); return copy }
-        actions.forEach { $0() }
+        actions.forEach { $0.perform() }
     }
 }
 

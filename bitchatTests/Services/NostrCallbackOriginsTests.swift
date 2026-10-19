@@ -299,12 +299,12 @@ private final class CallbackTaskLedger: @unchecked Sendable {
 }
 
 private final class CallbackScheduler: @unchecked Sendable {
-    private let pending = CallbackLocked<[@Sendable () -> Void]>([])
-    func submit(_ action: @escaping @Sendable () -> Void) { pending.update { $0.append(action) } }
+    private let pending = CallbackLocked<[DispatchWorkItem]>([])
+    func submit(_ action: DispatchWorkItem) { pending.update { $0.append(action) } }
     var count: Int { pending.read().count }
     func releaseAll() {
         let actions = pending.update { actions in let copy = actions; actions.removeAll(); return copy }
-        actions.forEach { $0() }
+        actions.forEach { $0.perform() }
     }
 }
 

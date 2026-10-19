@@ -331,21 +331,21 @@ private final class RealInstaller: @unchecked Sendable {
 
 private final class ManualScheduler: @unchecked Sendable {
     private struct State {
-        var actions: [@Sendable () -> Void] = []
+        var actions: [DispatchWorkItem] = []
         var delays: [TimeInterval] = []
     }
     private let state = Locked(State())
     var pendingCount: Int { state.read().actions.count }
     var submissionCount: Int { state.read().delays.count }
     var delays: [TimeInterval] { state.read().delays }
-    func submit(_ delay: TimeInterval, _ action: @escaping @Sendable () -> Void) {
+    func submit(_ delay: TimeInterval, _ action: DispatchWorkItem) {
         state.update { $0.delays.append(delay); $0.actions.append(action) }
     }
     func releaseAll() {
         let actions = state.update { state in
             let actions = state.actions; state.actions.removeAll(); return actions
         }
-        actions.forEach { $0() }
+        actions.forEach { $0.perform() }
     }
 }
 

@@ -40,7 +40,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             currentIdentity: @escaping @MainActor () throws -> NostrIdentity?,
             registerPendingGiftWrap: @escaping @MainActor (String) -> Void,
             sendEvent: @escaping @MainActor (NostrEvent) -> Void,
-            scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void,
+            scheduleAfter: @escaping AckPacer.Scheduler,
             relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never>,
             ackPacer: AckPacer? = nil,
             weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
@@ -128,7 +128,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
     /// confined to the serial `queue`; the class is only touched via
     /// `enqueue` and the scheduler callback, both of which hop onto it.
     final class AckPacer: @unchecked Sendable {
-        typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+        typealias Scheduler = @Sendable (TimeInterval, DispatchWorkItem) -> Void
 
         let owner: NostrOutboundOwner
         private let queue: DispatchQueue
@@ -138,10 +138,50 @@ final class NostrTransport: Transport, @unchecked Sendable {
         }
         private var pending: [Pending] = []
         private var isSending = false
+        private var scheduledReset: ScheduledReset?
         private let interval: TimeInterval = TransportConfig.nostrReadAckInterval
         private let scheduleAfter: Scheduler
 
-        /// An injected queue MUST be serial. Nil retains the original production serial queue.
+        /// One original application item. Its notification, not this observation, proves completion.
+        private final class ScheduledReset {
+            let item: DispatchWorkItem
+            let observation: ResetObservation
+
+            init(owner: NostrOutboundOwner, ticket: NostrOutboundOwner.CallbackTicket) {
+                let observation = ResetObservation()
+                self.observation = observation
+                self.item = DispatchWorkItem {
+                    let entry = owner.callbackEntered(ticket)
+                    let returned = owner.callbackBodyReturned(ticket)
+                    observation.record(entry: entry, returned: returned)
+                }
+            }
+        }
+
+        private final class ResetObservation: @unchecked Sendable {
+            private enum Outcome { case notEntered, recorded, protocolDebt }
+            private let lock = NSLock()
+            private var outcome: Outcome = .notEntered
+
+            func record(entry: NostrOutboundOwner.ReceiptUpdate, returned: NostrOutboundOwner.ReceiptUpdate) {
+                lock.lock()
+                defer { lock.unlock() }
+                if case .recorded = entry, case .recorded = returned {
+                    outcome = .recorded
+                } else {
+                    outcome = .protocolDebt
+                }
+            }
+
+            var recordedBothReceipts: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                if case .recorded = outcome { return true }
+                return false
+            }
+        }
+
+        /// An injected queue MUST be serial. The scheduler must submit the exact item once.
         init(owner: NostrOutboundOwner, queue: DispatchQueue? = nil, scheduleAfter: @escaping Scheduler = { delay, action in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: action)
         }) {
@@ -170,18 +210,20 @@ final class NostrTransport: Transport, @unchecked Sendable {
             owner.callbackBodyReturned(next.ticket)
             guard case .reserved(let reset) = owner.reserveCallback(kind: .ackResetScheduler, parent: .child(next.ticket)) else { return }
             let owner = self.owner
-            scheduleAfter(interval) { [weak self] in
-                owner.callbackEntered(reset)
-                defer { owner.callbackBodyReturned(reset) }
-                guard let self else { return }
+            let work = ScheduledReset(owner: owner, ticket: reset)
+            scheduledReset = work
+            let observation = work.observation
+            work.item.notify(queue: queue) { [weak self, observation] in
+                guard let self, let current = self.scheduledReset,
+                      current.observation === observation, observation.recordedBothReceipts else { return }
                 guard case .reserved(let queued) = owner.reserveCallback(kind: .ackResetQueue, parent: .child(reset)) else { return }
-                self.queue.async {
-                    owner.callbackEntered(queued)
-                    defer { owner.callbackBodyReturned(queued) }
-                    self.isSending = false
-                    self.processNext()
-                }
+                guard case .recorded = owner.callbackEntered(queued) else { return }
+                defer { owner.callbackBodyReturned(queued) }
+                self.scheduledReset = nil
+                self.isSending = false
+                self.processNext()
             }
+            scheduleAfter(interval, work.item)
         }
     }
     static let sharedAckPacer = AckPacer(owner: .originalProcess)
