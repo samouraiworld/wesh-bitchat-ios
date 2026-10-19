@@ -221,11 +221,12 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 .sink { [weak self, weak sourceOwner] recipients in
                     let event = sourceOwner?.sourceEventEntered(recipientsSource)
                     defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                    guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                     guard let self else { return }
-                    let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshRecipientsState, parent: $0) }
+                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRecipientsState, permit: permit) else { return }
                     self.queue.async(flags: .barrier) {
-                        if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
-                        defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                        self.dependencies.outboundOwner.sourceWriteEntered(write)
+                        defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
                         self.weshNpubs = recipients
                     }
                 }
@@ -237,11 +238,12 @@ final class NostrTransport: Transport, @unchecked Sendable {
                     .sink { [weak self, weak sourceOwner] online in
                         let event = sourceOwner?.sourceEventEntered(onlineSource)
                         defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                        guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                         guard let self else { return }
-                        let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshOnlineState, parent: $0) }
+                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshOnlineState, permit: permit) else { return }
                         self.queue.async(flags: .barrier) {
-                            if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
-                            defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                            self.dependencies.outboundOwner.sourceWriteEntered(write)
+                            defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
                             self.weshIsOnline = online
                         }
                     }
@@ -253,11 +255,12 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 .sink { [weak self, weak sourceOwner] connected in
                     let event = sourceOwner?.sourceEventEntered(relaySource)
                     defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                    guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                     guard let self else { return }
-                    let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshRelayState, parent: $0) }
+                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRelayState, permit: permit) else { return }
                     self.queue.async(flags: .barrier) {
-                        if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
-                        defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                        self.dependencies.outboundOwner.sourceWriteEntered(write)
+                        defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
                         self.relaysConnected = connected
                     }
                 }
@@ -282,11 +285,12 @@ final class NostrTransport: Transport, @unchecked Sendable {
             .sink { [weak self, weak sourceOwner] connected in
                 let event = sourceOwner?.sourceEventEntered(relaySource)
                 defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                 guard let self else { return }
-                let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .legacyRelayState, parent: $0) }
+                guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .legacyRelayState, permit: permit) else { return }
                 self.queue.async(flags: .barrier) {
-                    if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
-                    defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                    self.dependencies.outboundOwner.sourceWriteEntered(write)
+                    defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
                     self.relaysConnected = connected
                 }
             }
@@ -309,7 +313,11 @@ final class NostrTransport: Transport, @unchecked Sendable {
         ) { [weak self, weak sourceOwner] _ in
             let event = sourceOwner?.sourceEventEntered(observerSource)
             defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-            self?.refreshReachablePeers(sourceEvent: event)
+            guard let sourceOwner, let event else { return }
+            switch sourceOwner.admitBody(event) {
+            case .accepted: self?.refreshReachablePeers(sourceEvent: event)
+            case .refusedBeforeRoot, .protocolFault: return
+            }
         }
         sourceOwner.noteSourceInstallationReturned(observerSource)
     }
