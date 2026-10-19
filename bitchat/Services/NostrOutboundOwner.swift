@@ -32,6 +32,52 @@ final class NostrOutboundOwner: @unchecked Sendable {
     enum RootCloseGap: Equatable, Sendable { case foreignSubject, participantMissing }
     enum RootCloseOutcome: Sendable { case closed(RootCloseReceipt), unconfirmed(RootCloseGap) }
 
+    final class SourceInstallation: @unchecked Sendable {
+        let ownerID: Identity
+        let id = Identity()
+        fileprivate init(ownerID: Identity) { self.ownerID = ownerID }
+    }
+    final class SourceEventTicket: @unchecked Sendable {
+        let ownerID: Identity
+        let sourceID: Identity
+        let id = Identity()
+        fileprivate init(ownerID: Identity, sourceID: Identity) { self.ownerID = ownerID; self.sourceID = sourceID }
+    }
+    final class SourceWriteTicket: @unchecked Sendable {
+        let ownerID: Identity
+        let sourceID: Identity
+        let eventID: Identity
+        let id = Identity()
+        fileprivate init(ownerID: Identity, parent: SourceEventTicket) {
+            self.ownerID = ownerID; self.sourceID = parent.sourceID; self.eventID = parent.id
+        }
+    }
+    enum SourceKind: Equatable, Sendable {
+        case weshRecipients, weshOnline, weshRelayConnectivity, legacyFavoriteObserver, legacyRelayConnectivity
+    }
+    enum SourceWriteKind: Equatable, Sendable { case weshRecipientsState, weshOnlineState, weshRelayState, legacyRelayState }
+    enum SourceInstallationState: Equatable, Sendable { case installing, installationReturned }
+    enum SourceEventState: Equatable, Sendable { case entered, bodyEndRecorded }
+    enum SourceWriteState: Equatable, Sendable { case reserved, entered, bodyEndRecorded }
+    enum SourceProtocolFault: Equatable, Sendable {
+        case foreignSource, unknownSource, repeatedInstallationReturn, invalidEvent, repeatedBodyEnd, invalidWrite, invalidExistingTask
+    }
+    enum SourceReceiptUpdate { case recorded, protocolFault }
+    struct SourceRow: Sendable { let id: Identity; let kind: SourceKind; let installation: SourceInstallationState }
+    struct SourceEventRow: Sendable { let id: Identity; let sourceID: Identity; let state: SourceEventState }
+    struct SourceWriteRow: Sendable {
+        let id: Identity; let sourceID: Identity; let eventID: Identity; let kind: SourceWriteKind; let state: SourceWriteState
+    }
+    struct SourceTaskEdge: Sendable { let sourceID: Identity; let eventID: Identity; let taskID: Identity }
+    struct SourceLedgerSnapshot: Sendable {
+        let ownerID: Identity
+        let sources: [SourceRow]
+        let events: [SourceEventRow]
+        let writes: [SourceWriteRow]
+        let taskEdges: [SourceTaskEdge]
+        let faults: [SourceProtocolFault]
+    }
+
     class Ticket: @unchecked Sendable {
         let ownerID: Identity
         let id: Identity
@@ -96,6 +142,24 @@ final class NostrOutboundOwner: @unchecked Sendable {
         }
     }
 
+    private final class SourceRecord {
+        let ticket: SourceInstallation
+        let kind: SourceKind
+        var installation: SourceInstallationState = .installing
+        init(ticket: SourceInstallation, kind: SourceKind) { self.ticket = ticket; self.kind = kind }
+    }
+    private final class SourceEventRecord {
+        let ticket: SourceEventTicket
+        var state: SourceEventState = .entered
+        init(ticket: SourceEventTicket) { self.ticket = ticket }
+    }
+    private final class SourceWriteRecord {
+        let ticket: SourceWriteTicket
+        let kind: SourceWriteKind
+        var state: SourceWriteState = .reserved
+        init(ticket: SourceWriteTicket, kind: SourceWriteKind) { self.ticket = ticket; self.kind = kind }
+    }
+
     private enum Kind { case task(TaskKind), callback(CallbackKind) }
     private final class Record {
         let ticket: Ticket
@@ -136,6 +200,14 @@ final class NostrOutboundOwner: @unchecked Sendable {
     private var pendingWaiters: [Identity: Waiter] = [:]
     private var debts: [DebtRow] = []
     private var unconfirmedHandles: [Task<Void, Never>] = []
+    private var sourceOrder: [Identity] = []
+    private var sourceRecords: [Identity: SourceRecord] = [:]
+    private var sourceEventOrder: [Identity] = []
+    private var sourceEvents: [Identity: SourceEventRecord] = [:]
+    private var sourceWriteOrder: [Identity] = []
+    private var sourceWrites: [Identity: SourceWriteRecord] = [:]
+    private var sourceTaskEdges: [SourceTaskEdge] = []
+    private var sourceFaults: [SourceProtocolFault] = []
 
     init(taskCreator: @escaping TaskCreator, waiterInstaller: @escaping WaiterInstaller) {
         let id = Identity()
@@ -143,6 +215,104 @@ final class NostrOutboundOwner: @unchecked Sendable {
         self.originalRootSubject = RootPanicSubject(ownerID: id, nonce: Identity())
         self.taskCreator = taskCreator
         self.waiterInstaller = waiterInstaller
+    }
+
+    // Separate source metadata never changes Task/callback admission, debt or batch semantics.
+    func beginSourceInstallation(kind: SourceKind) -> SourceInstallation {
+        locked {
+            let ticket = SourceInstallation(ownerID: id)
+            sourceOrder.append(ticket.id)
+            sourceRecords[ticket.id] = SourceRecord(ticket: ticket, kind: kind)
+            return ticket
+        }
+    }
+    @discardableResult
+    func noteSourceInstallationReturned(_ ticket: SourceInstallation) -> SourceReceiptUpdate {
+        locked {
+            guard ticket.ownerID === id else { return sourceFault(.foreignSource) }
+            guard let record = sourceRecords[ticket.id], record.ticket === ticket else { return sourceFault(.unknownSource) }
+            guard record.installation == .installing else { return sourceFault(.repeatedInstallationReturn) }
+            record.installation = .installationReturned
+            return .recorded
+        }
+    }
+    func sourceEventEntered(_ source: SourceInstallation) -> SourceEventTicket? {
+        locked {
+            guard source.ownerID === id else { _ = sourceFault(.foreignSource); return nil }
+            guard sourceRecords[source.id]?.ticket === source else { _ = sourceFault(.unknownSource); return nil }
+            let event = SourceEventTicket(ownerID: id, sourceID: source.id)
+            sourceEventOrder.append(event.id)
+            sourceEvents[event.id] = SourceEventRecord(ticket: event)
+            return event
+        }
+    }
+    @discardableResult
+    func noteSourceEventBodyEnd(_ event: SourceEventTicket) -> SourceReceiptUpdate {
+        locked {
+            guard event.ownerID === id, let record = sourceEvents[event.id], record.ticket === event else {
+                return sourceFault(.invalidEvent)
+            }
+            guard record.state == .entered else { return sourceFault(.repeatedBodyEnd) }
+            record.state = .bodyEndRecorded
+            return .recorded
+        }
+    }
+    func reserveSourceWrite(kind: SourceWriteKind, parent: SourceEventTicket) -> SourceWriteTicket? {
+        locked {
+            guard parent.ownerID === id, sourceEvents[parent.id]?.ticket === parent else {
+                _ = sourceFault(.invalidEvent); return nil
+            }
+            let write = SourceWriteTicket(ownerID: id, parent: parent)
+            sourceWriteOrder.append(write.id)
+            sourceWrites[write.id] = SourceWriteRecord(ticket: write, kind: kind)
+            return write
+        }
+    }
+    @discardableResult
+    func sourceWriteEntered(_ write: SourceWriteTicket) -> SourceReceiptUpdate {
+        locked {
+            guard write.ownerID === id, let record = sourceWrites[write.id], record.ticket === write,
+                  record.state == .reserved else { return sourceFault(.invalidWrite) }
+            record.state = .entered
+            return .recorded
+        }
+    }
+    @discardableResult
+    func noteSourceWriteBodyEnd(_ write: SourceWriteTicket) -> SourceReceiptUpdate {
+        locked {
+            guard write.ownerID === id, let record = sourceWrites[write.id], record.ticket === write,
+                  record.state == .entered else { return sourceFault(.invalidWrite) }
+            record.state = .bodyEndRecorded
+            return .recorded
+        }
+    }
+    @discardableResult
+    func linkSourceEvent(_ event: SourceEventTicket, toExistingTask task: TaskTicket) -> SourceReceiptUpdate {
+        locked {
+            guard event.ownerID === id, sourceEvents[event.id]?.ticket === event else { return sourceFault(.invalidEvent) }
+            guard task.ownerID === id, records[task.id]?.ticket === task else { return sourceFault(.invalidExistingTask) }
+            sourceTaskEdges.append(SourceTaskEdge(sourceID: event.sourceID, eventID: event.id, taskID: task.id))
+            return .recorded
+        }
+    }
+    private func sourceFault(_ fault: SourceProtocolFault) -> SourceReceiptUpdate {
+        sourceFaults.append(fault)
+        return .protocolFault
+    }
+    /// Installation/body-end metadata is not observer detachment, handler join or whole-owner completion.
+    func sourceLedgerSnapshot() -> SourceLedgerSnapshot {
+        locked {
+            SourceLedgerSnapshot(ownerID: id,
+                sources: sourceOrder.compactMap { sourceRecords[$0] }.map {
+                    SourceRow(id: $0.ticket.id, kind: $0.kind, installation: $0.installation)
+                },
+                events: sourceEventOrder.compactMap { sourceEvents[$0] }.map {
+                    SourceEventRow(id: $0.ticket.id, sourceID: $0.ticket.sourceID, state: $0.state)
+                },
+                writes: sourceWriteOrder.compactMap { sourceWrites[$0] }.map {
+                    SourceWriteRow(id: $0.ticket.id, sourceID: $0.ticket.sourceID, eventID: $0.ticket.eventID, kind: $0.kind, state: $0.state)
+                }, taskEdges: sourceTaskEdges, faults: sourceFaults)
+        }
     }
 
     /// Capture this installed actor's original subject, never a current/global successor.

@@ -211,27 +211,57 @@ final class NostrTransport: Transport, @unchecked Sendable {
         dependencies: Dependencies? = nil
     ) {
         self.dependencies = dependencies ?? .live(idBridge: idBridge)
+        let sourceOwner = self.dependencies.outboundOwner
 
         if let weshRecipients = self.dependencies.weshRecipients {
             // Wesh: QR contacts only; favorites are never consulted.
             queue.sync(flags: .barrier) { self.weshNpubs = [:] }
+            let recipientsSource = sourceOwner.beginSourceInstallation(kind: .weshRecipients)
             weshRecipients()
-                .sink { [weak self] recipients in
+                .sink { [weak self, weak sourceOwner] recipients in
+                    let event = sourceOwner?.sourceEventEntered(recipientsSource)
+                    defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
                     guard let self else { return }
-                    self.queue.async(flags: .barrier) { self.weshNpubs = recipients }
+                    let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshRecipientsState, parent: $0) }
+                    self.queue.async(flags: .barrier) {
+                        if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
+                        defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                        self.weshNpubs = recipients
+                    }
                 }
                 .store(in: &weshCancellables)
-            self.dependencies.weshOnline?()
-                .sink { [weak self] online in
-                    guard let self else { return }
-                    self.queue.async(flags: .barrier) { self.weshIsOnline = online }
-                }
-                .store(in: &weshCancellables)
+            sourceOwner.noteSourceInstallationReturned(recipientsSource)
+            if let weshOnline = self.dependencies.weshOnline {
+                let onlineSource = sourceOwner.beginSourceInstallation(kind: .weshOnline)
+                weshOnline()
+                    .sink { [weak self, weak sourceOwner] online in
+                        let event = sourceOwner?.sourceEventEntered(onlineSource)
+                        defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                        guard let self else { return }
+                        let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshOnlineState, parent: $0) }
+                        self.queue.async(flags: .barrier) {
+                            if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
+                            defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                            self.weshIsOnline = online
+                        }
+                    }
+                    .store(in: &weshCancellables)
+                sourceOwner.noteSourceInstallationReturned(onlineSource)
+            }
+            let relaySource = sourceOwner.beginSourceInstallation(kind: .weshRelayConnectivity)
             relayConnectivityCancellable = self.dependencies.relayConnectivity()
-                .sink { [weak self] connected in
+                .sink { [weak self, weak sourceOwner] connected in
+                    let event = sourceOwner?.sourceEventEntered(relaySource)
+                    defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
                     guard let self else { return }
-                    self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                    let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .weshRelayState, parent: $0) }
+                    self.queue.async(flags: .barrier) {
+                        if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
+                        defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                        self.relaysConnected = connected
+                    }
                 }
+            sourceOwner.noteSourceInstallationReturned(relaySource)
             return
         }
 
@@ -247,11 +277,20 @@ final class NostrTransport: Transport, @unchecked Sendable {
             self.reachablePeers = Set(reachable)
         }
 
+        let relaySource = sourceOwner.beginSourceInstallation(kind: .legacyRelayConnectivity)
         relayConnectivityCancellable = self.dependencies.relayConnectivity()
-            .sink { [weak self] connected in
+            .sink { [weak self, weak sourceOwner] connected in
+                let event = sourceOwner?.sourceEventEntered(relaySource)
+                defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
                 guard let self else { return }
-                self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                let write = event.flatMap { sourceOwner?.reserveSourceWrite(kind: .legacyRelayState, parent: $0) }
+                self.queue.async(flags: .barrier) {
+                    if let write { self.dependencies.outboundOwner.sourceWriteEntered(write) }
+                    defer { if let write { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) } }
+                    self.relaysConnected = connected
+                }
             }
+        sourceOwner.noteSourceInstallationReturned(relaySource)
     }
 
     deinit {
@@ -261,18 +300,24 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 
     private func setupObservers() {
+        let sourceOwner = dependencies.outboundOwner
+        let observerSource = sourceOwner.beginSourceInstallation(kind: .legacyFavoriteObserver)
         favoriteStatusObserver = dependencies.notificationCenter.addObserver(
             forName: .favoriteStatusChanged,
             object: nil,
             queue: nil
-        ) { [weak self] _ in
-            self?.refreshReachablePeers()
+        ) { [weak self, weak sourceOwner] _ in
+            let event = sourceOwner?.sourceEventEntered(observerSource)
+            defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+            self?.refreshReachablePeers(sourceEvent: event)
         }
+        sourceOwner.noteSourceInstallationReturned(observerSource)
     }
 
-    private func refreshReachablePeers() {
+    private func refreshReachablePeers(sourceEvent: NostrOutboundOwner.SourceEventTicket?) {
         let owner = dependencies.outboundOwner
         guard case .reserved(let ticket) = owner.reserveTask(kind: .refreshReachablePeers, parent: .root) else { return }
+        if let sourceEvent { owner.linkSourceEvent(sourceEvent, toExistingTask: ticket) }
         owner.dispatch(ticket) { @MainActor [self] in
             let favorites = dependencies.loadFavorites()
             let reachable = favorites.values
