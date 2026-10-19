@@ -52,6 +52,35 @@ final class NostrOutboundOwner: @unchecked Sendable {
             self.ownerID = ownerID; self.sourceID = parent.sourceID; self.eventID = parent.id
         }
     }
+    /// The capability is distinct from every identity exposed by inspection.
+    final class SourceEventBodyPermit: @unchecked Sendable {
+        let ownerID: Identity
+        let sourceID: Identity
+        let eventID: Identity
+        let id = Identity()
+        let kind: SourceKind
+        fileprivate init(ownerID: Identity, event: SourceEventTicket, kind: SourceKind) {
+            self.ownerID = ownerID; self.sourceID = event.sourceID; self.eventID = event.id; self.kind = kind
+        }
+    }
+    enum SourceBodyAdmission {
+        case accepted(SourceEventBodyPermit), refusedBeforeRoot(RootCloseReceipt), protocolFault
+    }
+    enum AdmittedSourceWriteReservation { case reserved(SourceWriteTicket), protocolFault }
+    enum SourceBodyDecision: Equatable, Sendable { case accepted, refusedBeforeRoot }
+    struct SourceBodyAdmissionRow: Sendable {
+        let ownerID: Identity
+        let sourceID: Identity
+        let eventID: Identity
+        let permitID: Identity?
+        let decision: SourceBodyDecision
+        let writeID: Identity?
+        let closeReceipt: RootCloseReceipt?
+    }
+    struct SourceBodyAdmissionSnapshot: Sendable {
+        let ownerID: Identity
+        let rows: [SourceBodyAdmissionRow]
+    }
     enum SourceKind: Equatable, Sendable {
         case weshRecipients, weshOnline, weshRelayConnectivity, legacyFavoriteObserver, legacyRelayConnectivity
     }
@@ -61,6 +90,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
     enum SourceWriteState: Equatable, Sendable { case reserved, entered, bodyEndRecorded }
     enum SourceProtocolFault: Equatable, Sendable {
         case foreignSource, unknownSource, repeatedInstallationReturn, invalidEvent, repeatedBodyEnd, invalidWrite, invalidExistingTask
+        case invalidBodyAdmission, repeatedBodyAdmission, invalidBodyPermit, invalidBodyWriteKind, repeatedBodyWrite
     }
     enum SourceReceiptUpdate { case recorded, protocolFault }
     struct SourceRow: Sendable { let id: Identity; let kind: SourceKind; let installation: SourceInstallationState }
@@ -160,6 +190,21 @@ final class NostrOutboundOwner: @unchecked Sendable {
         init(ticket: SourceWriteTicket, kind: SourceWriteKind) { self.ticket = ticket; self.kind = kind }
     }
 
+    private final class SourceBodyAdmissionRecord {
+        let ownerID: Identity
+        let sourceID: Identity
+        let eventID: Identity
+        let decision: SourceBodyDecision
+        let permit: SourceEventBodyPermit?
+        let closeReceipt: RootCloseReceipt?
+        var writeID: Identity?
+        init(ownerID: Identity, event: SourceEventTicket, decision: SourceBodyDecision,
+             permit: SourceEventBodyPermit?, closeReceipt: RootCloseReceipt?) {
+            self.ownerID = ownerID; self.sourceID = event.sourceID; self.eventID = event.id
+            self.decision = decision; self.permit = permit; self.closeReceipt = closeReceipt
+        }
+    }
+
     private enum Kind { case task(TaskKind), callback(CallbackKind) }
     private final class Record {
         let ticket: Ticket
@@ -208,6 +253,8 @@ final class NostrOutboundOwner: @unchecked Sendable {
     private var sourceWrites: [Identity: SourceWriteRecord] = [:]
     private var sourceTaskEdges: [SourceTaskEdge] = []
     private var sourceFaults: [SourceProtocolFault] = []
+    private var sourceBodyOrder: [Identity] = []
+    private var sourceBodies: [Identity: SourceBodyAdmissionRecord] = [:]
 
     init(taskCreator: @escaping TaskCreator, waiterInstaller: @escaping WaiterInstaller) {
         let id = Identity()
@@ -262,10 +309,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
             guard parent.ownerID === id, sourceEvents[parent.id]?.ticket === parent else {
                 _ = sourceFault(.invalidEvent); return nil
             }
-            let write = SourceWriteTicket(ownerID: id, parent: parent)
-            sourceWriteOrder.append(write.id)
-            sourceWrites[write.id] = SourceWriteRecord(ticket: write, kind: kind)
-            return write
+            return appendSourceWriteLocked(kind: kind, parent: parent)
         }
     }
     @discardableResult
@@ -295,6 +339,68 @@ final class NostrOutboundOwner: @unchecked Sendable {
             return .recorded
         }
     }
+    /// Call only with mutex held; public metadata and body-authorized paths share row creation.
+    private func appendSourceWriteLocked(kind: SourceWriteKind, parent: SourceEventTicket) -> SourceWriteTicket {
+        let write = SourceWriteTicket(ownerID: id, parent: parent)
+        sourceWriteOrder.append(write.id)
+        sourceWrites[write.id] = SourceWriteRecord(ticket: write, kind: kind)
+        return write
+    }
+
+    /// Wrapper entry metadata is not permission to run its business body.
+    func admitBody(_ event: SourceEventTicket) -> SourceBodyAdmission {
+        locked {
+            guard event.ownerID === id, let record = sourceEvents[event.id], record.ticket === event,
+                  record.state == .entered, let source = sourceRecords[event.sourceID],
+                  source.ticket.id === event.sourceID else {
+                _ = sourceFault(.invalidBodyAdmission); return .protocolFault
+            }
+            guard sourceBodies[event.id] == nil else {
+                _ = sourceFault(.repeatedBodyAdmission); return .protocolFault
+            }
+            // Baseline: valid first admission preserves existing callback effects across root closure.
+            let permit = SourceEventBodyPermit(ownerID: id, event: event, kind: source.kind)
+            sourceBodyOrder.append(event.id)
+            sourceBodies[event.id] = SourceBodyAdmissionRecord(ownerID: id, event: event, decision: .accepted,
+                                                              permit: permit, closeReceipt: nil)
+            return .accepted(permit)
+        }
+    }
+
+    func reserveAdmittedSourceWrite(kind: SourceWriteKind, permit: SourceEventBodyPermit) -> AdmittedSourceWriteReservation {
+        locked {
+            guard permit.ownerID === id, let body = sourceBodies[permit.eventID], body.ownerID === id,
+                  body.sourceID === permit.sourceID, body.eventID === permit.eventID, body.decision == .accepted,
+                  body.permit === permit, body.permit?.id === permit.id,
+                  let event = sourceEvents[permit.eventID], event.ticket.sourceID === permit.sourceID,
+                  event.state == .entered, sourceRecords[permit.sourceID]?.kind == permit.kind else {
+                _ = sourceFault(.invalidBodyPermit); return .protocolFault
+            }
+            let matches: Bool
+            switch (permit.kind, kind) {
+            case (.weshRecipients, .weshRecipientsState), (.weshOnline, .weshOnlineState),
+                 (.weshRelayConnectivity, .weshRelayState), (.legacyRelayConnectivity, .legacyRelayState): matches = true
+            default: matches = false
+            }
+            guard matches else { _ = sourceFault(.invalidBodyWriteKind); return .protocolFault }
+            guard body.writeID == nil else { _ = sourceFault(.repeatedBodyWrite); return .protocolFault }
+            // An accepted body keeps this exact child-write permission after terminal root closure.
+            let write = appendSourceWriteLocked(kind: kind, parent: event.ticket)
+            body.writeID = write.id
+            return .reserved(write)
+        }
+    }
+
+    /// Immutable inspection contains distinct IDs, never a recoverable permit or source/work ticket.
+    func sourceBodyAdmissionSnapshot() -> SourceBodyAdmissionSnapshot {
+        locked {
+            SourceBodyAdmissionSnapshot(ownerID: id, rows: sourceBodyOrder.compactMap { sourceBodies[$0] }.map {
+                SourceBodyAdmissionRow(ownerID: $0.ownerID, sourceID: $0.sourceID, eventID: $0.eventID,
+                    permitID: $0.permit?.id, decision: $0.decision, writeID: $0.writeID, closeReceipt: $0.closeReceipt)
+            })
+        }
+    }
+
     private func sourceFault(_ fault: SourceProtocolFault) -> SourceReceiptUpdate {
         sourceFaults.append(fault)
         return .protocolFault
