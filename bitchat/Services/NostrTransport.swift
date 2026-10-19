@@ -216,48 +216,94 @@ final class NostrTransport: Transport, @unchecked Sendable {
         if let weshRecipients = self.dependencies.weshRecipients {
             // Wesh: QR contacts only; favorites are never consulted.
             queue.sync(flags: .barrier) { self.weshNpubs = [:] }
-            let recipientsSource = sourceOwner.beginSourceInstallation(kind: .weshRecipients)
-            weshRecipients()
-                .sink { [weak self, weak sourceOwner] recipients in
-                    let event = sourceOwner?.sourceEventEntered(recipientsSource)
-                    defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                    guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                    guard let self else { return }
-                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRecipientsState, permit: permit) else { return }
-                    self.queue.async(flags: .barrier) {
-                        self.dependencies.outboundOwner.sourceWriteEntered(write)
-                        defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                        self.weshNpubs = recipients
-                    }
-                }
-                .store(in: &weshCancellables)
-            sourceOwner.noteSourceInstallationReturned(recipientsSource)
-            if let weshOnline = self.dependencies.weshOnline {
-                let onlineSource = sourceOwner.beginSourceInstallation(kind: .weshOnline)
-                weshOnline()
-                    .sink { [weak self, weak sourceOwner] online in
-                        let event = sourceOwner?.sourceEventEntered(onlineSource)
+            switch sourceOwner.beginSourceInstallation(kind: .weshRecipients) {
+            case .accepted(let recipientsSource):
+                weshRecipients()
+                    .sink { [weak self, weak sourceOwner] recipients in
+                        let event = sourceOwner?.sourceEventEntered(recipientsSource)
                         defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
                         guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                         guard let self else { return }
-                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshOnlineState, permit: permit) else { return }
+                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRecipientsState, permit: permit) else { return }
                         self.queue.async(flags: .barrier) {
                             self.dependencies.outboundOwner.sourceWriteEntered(write)
                             defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                            self.weshIsOnline = online
+                            self.weshNpubs = recipients
                         }
                     }
                     .store(in: &weshCancellables)
-                sourceOwner.noteSourceInstallationReturned(onlineSource)
+                sourceOwner.noteSourceInstallationReturned(recipientsSource)
+            case .refusedBeforeRoot: break
             }
-            let relaySource = sourceOwner.beginSourceInstallation(kind: .weshRelayConnectivity)
+            if let weshOnline = self.dependencies.weshOnline {
+                switch sourceOwner.beginSourceInstallation(kind: .weshOnline) {
+                case .accepted(let onlineSource):
+                    weshOnline()
+                        .sink { [weak self, weak sourceOwner] online in
+                            let event = sourceOwner?.sourceEventEntered(onlineSource)
+                            defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                            guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
+                            guard let self else { return }
+                            guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshOnlineState, permit: permit) else { return }
+                            self.queue.async(flags: .barrier) {
+                                self.dependencies.outboundOwner.sourceWriteEntered(write)
+                                defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
+                                self.weshIsOnline = online
+                            }
+                        }
+                        .store(in: &weshCancellables)
+                    sourceOwner.noteSourceInstallationReturned(onlineSource)
+                case .refusedBeforeRoot: break
+                }
+            }
+            switch sourceOwner.beginSourceInstallation(kind: .weshRelayConnectivity) {
+            case .accepted(let relaySource):
+                relayConnectivityCancellable = self.dependencies.relayConnectivity()
+                    .sink { [weak self, weak sourceOwner] connected in
+                        let event = sourceOwner?.sourceEventEntered(relaySource)
+                        defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
+                        guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
+                        guard let self else { return }
+                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRelayState, permit: permit) else { return }
+                        self.queue.async(flags: .barrier) {
+                            self.dependencies.outboundOwner.sourceWriteEntered(write)
+                            defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
+                            self.relaysConnected = connected
+                        }
+                    }
+                sourceOwner.noteSourceInstallationReturned(relaySource)
+            case .refusedBeforeRoot: break
+            }
+            return
+        }
+
+        setupObservers()
+
+        switch sourceOwner.beginColdProvider(purpose: .legacyFavoritesWarm) {
+        case .accepted(let permission):
+            // Settlement follows both the provider and the original synchronous cache barrier.
+            defer { sourceOwner.noteColdProviderReturned(permission) }
+            // Synchronously warm the cache to avoid startup race
+            let favorites = self.dependencies.loadFavorites()
+            let reachable = favorites.values
+                .filter { $0.peerNostrPublicKey != nil }
+                .map { PeerID(publicKey: $0.peerNoisePublicKey) }
+
+            queue.sync(flags: .barrier) {
+                self.reachablePeers = Set(reachable)
+            }
+        case .refusedBeforeRoot: break
+        }
+
+        switch sourceOwner.beginSourceInstallation(kind: .legacyRelayConnectivity) {
+        case .accepted(let relaySource):
             relayConnectivityCancellable = self.dependencies.relayConnectivity()
                 .sink { [weak self, weak sourceOwner] connected in
                     let event = sourceOwner?.sourceEventEntered(relaySource)
                     defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
                     guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
                     guard let self else { return }
-                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRelayState, permit: permit) else { return }
+                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .legacyRelayState, permit: permit) else { return }
                     self.queue.async(flags: .barrier) {
                         self.dependencies.outboundOwner.sourceWriteEntered(write)
                         defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
@@ -265,36 +311,8 @@ final class NostrTransport: Transport, @unchecked Sendable {
                     }
                 }
             sourceOwner.noteSourceInstallationReturned(relaySource)
-            return
+        case .refusedBeforeRoot: break
         }
-
-        setupObservers()
-        
-        // Synchronously warm the cache to avoid startup race
-        let favorites = self.dependencies.loadFavorites()
-        let reachable = favorites.values
-            .filter { $0.peerNostrPublicKey != nil }
-            .map { PeerID(publicKey: $0.peerNoisePublicKey) }
-            
-        queue.sync(flags: .barrier) {
-            self.reachablePeers = Set(reachable)
-        }
-
-        let relaySource = sourceOwner.beginSourceInstallation(kind: .legacyRelayConnectivity)
-        relayConnectivityCancellable = self.dependencies.relayConnectivity()
-            .sink { [weak self, weak sourceOwner] connected in
-                let event = sourceOwner?.sourceEventEntered(relaySource)
-                defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                guard let self else { return }
-                guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .legacyRelayState, permit: permit) else { return }
-                self.queue.async(flags: .barrier) {
-                    self.dependencies.outboundOwner.sourceWriteEntered(write)
-                    defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                    self.relaysConnected = connected
-                }
-            }
-        sourceOwner.noteSourceInstallationReturned(relaySource)
     }
 
     deinit {
@@ -305,7 +323,11 @@ final class NostrTransport: Transport, @unchecked Sendable {
 
     private func setupObservers() {
         let sourceOwner = dependencies.outboundOwner
-        let observerSource = sourceOwner.beginSourceInstallation(kind: .legacyFavoriteObserver)
+        let observerSource: NostrOutboundOwner.SourceInstallation
+        switch sourceOwner.beginSourceInstallation(kind: .legacyFavoriteObserver) {
+        case .accepted(let source): observerSource = source
+        case .refusedBeforeRoot: return
+        }
         favoriteStatusObserver = dependencies.notificationCenter.addObserver(
             forName: .favoriteStatusChanged,
             object: nil,

@@ -115,7 +115,7 @@ struct NostrCallbackBodyAdmissionTests {
     @Test
     func acceptedBodyBeforeCloseCanReserveItsExactWriteOnceAfterClose() async throws {
         let result = try await withBodyFixture { f in
-            let source = f.owner.beginSourceInstallation(kind: .weshRecipients)
+            guard case .accepted(let source) = f.owner.beginSourceInstallation(kind: .weshRecipients) else { throw BodyFixtureError("Open source installation was refused") }
             f.owner.noteSourceInstallationReturned(source)
             let event = try bodyEvent(f.owner, source)
             let permit = try bodyPermit(f.owner, event)
@@ -208,7 +208,7 @@ struct NostrCallbackBodyAdmissionTests {
     func foreignReplayAndWrongKindCannotLaunderBodyWriteAuthority() async throws {
         let result = try await withBodyFixture { first in
             try await withBodyFixture { second in
-                let source = first.owner.beginSourceInstallation(kind: .weshOnline)
+                guard case .accepted(let source) = first.owner.beginSourceInstallation(kind: .weshOnline) else { throw BodyFixtureError("Open source installation was refused") }
                 let event = try bodyEvent(first.owner, source)
                 let permit = try bodyPermit(first.owner, event)
                 let foreignEvent = bodyAdmissionRejected(second.owner.admitBody(event))
