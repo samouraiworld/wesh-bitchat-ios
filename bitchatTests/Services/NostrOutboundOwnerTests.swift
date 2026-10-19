@@ -660,11 +660,12 @@ private func requireFixture(_ condition: Bool, _ message: String) throws {
     if !condition { throw FixtureError(message) }
 }
 
-private func eventually(_ condition: () -> Bool) async throws {
+private func eventually(fileID: StaticString = #fileID, line: UInt = #line,
+                        _ condition: () -> Bool) async throws {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(5))
     while !condition() {
-        if clock.now >= deadline { throw FixtureError("owned completion/readiness guard expired") }
+        if clock.now >= deadline { throw FixtureError("owned completion/readiness guard expired at \(fileID):\(line)") }
         // Cancellation cannot skip the owned-fixture release/reap protocol. This is a readiness guard.
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(1))
