@@ -550,7 +550,6 @@ final class NostrOutboundOwner: @unchecked Sendable {
     }
     struct SourceDetachmentRow: Sendable {
         let sourceID: Identity
-        let kind: SourceKind
         let installation: SourceInstallationState
         let bindingID: Identity?
         let endpointID: Identity?
@@ -769,7 +768,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
                     else if association?.ready == true { phase = .ready }
                     else if source.installation == .installing { phase = .awaitingReturn }
                     else { phase = .awaitingFinish }
-                    return SourceDetachmentRow(sourceID: key, kind: source.kind, installation: source.installation,
+                    return SourceDetachmentRow(sourceID: key, installation: source.installation,
                         bindingID: association?.bindingID, endpointID: association?.endpointID, binding: phase,
                         availability: availability, requestID: association?.requestID, closeReceipt: association?.closeReceipt,
                         claimID: association?.claimID, invocation: association?.invocation ?? .unclaimed)
@@ -1026,13 +1025,13 @@ func closeCapturedNostrOutboundRoots(_ binding: NostrOutboundPanicBinding) -> No
     binding.owner.closeRootAdmission(subject: binding.subject)
 }
 
-fileprivate struct NostrSourceEndpointDescriptor {
+private struct NostrSourceEndpointDescriptor {
     let ownerID: NostrOutboundOwner.Identity
     let sourceID: NostrOutboundOwner.Identity
     let kind: NostrOutboundOwner.SourceKind
     let endpointID: NostrOutboundOwner.Identity
 }
-fileprivate enum NostrSourceEndpointInvocation { case notInvoked, invocationReturned }
+private enum NostrSourceEndpointInvocation { case notInvoked, invocationReturned }
 
 /// The transport owns actual resources; the process journal keeps only a weak endpoint.
 @MainActor
@@ -1061,7 +1060,7 @@ final class NostrSourceDetachmentEndpoint {
     }
 }
 
-fileprivate struct NostrSourceDetachmentClaimDescriptor {
+private struct NostrSourceDetachmentClaimDescriptor {
     let ownerID: NostrOutboundOwner.Identity
     let sourceID: NostrOutboundOwner.Identity
     let bindingID: NostrOutboundOwner.Identity
@@ -1070,7 +1069,7 @@ fileprivate struct NostrSourceDetachmentClaimDescriptor {
     let closeReceipt: NostrOutboundOwner.RootCloseReceipt
     let claimID: NostrOutboundOwner.Identity
 }
-fileprivate struct NostrSourceDetachmentPreparedClaim {
+private struct NostrSourceDetachmentPreparedClaim {
     let descriptor: NostrSourceDetachmentClaimDescriptor
     let endpoint: NostrSourceDetachmentEndpoint
 }
