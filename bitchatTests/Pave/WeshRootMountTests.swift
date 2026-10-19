@@ -79,7 +79,7 @@ struct WeshRootMountTests {
             wipes.qrContacts = { true }
             wipes.notifications = {}
             wipes.pasteboard = {}
-            let operations = PanicRecoveryOperations(isPending: { false }, begin: {
+            let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
                 PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
             }, wipeMedia: { _ in }, complete: {})
             let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),

@@ -33,7 +33,10 @@ private func makeTestableViewModel(
         identityManager: identityManager,
         transport: transport,
         panicMediaWipe: panicMediaWipe,
-        panicRecoveryOperations: panicRecoveryOperations,
+        panicRecoveryOperations: panicRecoveryOperations ?? .ephemeral(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
+            wipeMedia: panicMediaWipe ?? {}
+        ),
         panicNetworkLifecycle: panicNetworkLifecycle
     )
 
@@ -1248,6 +1251,7 @@ struct ChatViewModelPanicTests {
     func panicNetworkWipeFailureKeepsRecoveryPendingAndServicesStopped() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { false },
             begin: {
                 events.append("begin")
@@ -1284,6 +1288,7 @@ struct ChatViewModelPanicTests {
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
         let operations = PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { false },
             begin: {
                 events.append("begin")
@@ -1319,6 +1324,7 @@ struct ChatViewModelPanicTests {
     func pendingPanicRecoveryCompletesBeforeTransportBootstrap() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: {
                 events.append("read")
                 return true
@@ -1349,6 +1355,7 @@ struct ChatViewModelPanicTests {
         enum WipeFailure: Error { case failed }
         var completedMarker = false
         let operations = PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { true },
             begin: {
                 PanicRecoveryIntent(
@@ -1376,6 +1383,7 @@ struct ChatViewModelPanicTests {
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
         let operations = PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { true },
             begin: {
                 events.append("begin")

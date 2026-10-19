@@ -98,6 +98,7 @@ struct PanicRecoveryIntent {
 /// any application state is erased. Tests can inject an ephemeral operation
 /// set without touching the developer's Application Support directory.
 struct PanicRecoveryOperations {
+    let collectAppOwners: @MainActor () -> PanicAppOwnerReport
     let isPending: () throws -> Bool
     let begin: () -> PanicRecoveryIntent
     /// Deletes the media an older build may have stored, and the drafts.
@@ -111,9 +112,11 @@ struct PanicRecoveryOperations {
     }
 
     static func ephemeral(
+        collectAppOwners: @escaping @MainActor () -> PanicAppOwnerReport,
         wipeMedia: @escaping () throws -> Void = {}
     ) -> PanicRecoveryOperations {
         PanicRecoveryOperations(
+            collectAppOwners: collectAppOwners,
             isPending: { false },
             begin: {
                 PanicRecoveryIntent(
@@ -133,6 +136,7 @@ struct PanicRecoveryOperations {
     ) -> PanicRecoveryOperations {
         let defaultsKey = "bitchat.panicResetPending"
         return PanicRecoveryOperations(
+            collectAppOwners: PanicAppOwnerAdmission.liveUnconfirmed,
             isPending: {
                 if defaults.bool(forKey: defaultsKey) {
                     return true
