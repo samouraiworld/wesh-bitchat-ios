@@ -47,5 +47,12 @@ func admitPanicApplicationErasure(
     eraseApplicationData: @MainActor (PanicRecoveryIntent, PanicAppOwnerReport) -> Bool
 ) -> Bool {
     let report = collectOwners()
+    guard report.localPersistenceAndEditors == .confirmed,
+          report.meshAndGossipCallbacks == .confirmed,
+          report.nostrOutboundAndAckTasks == .confirmed,
+          report.nostrInboundKeyUsers == .confirmed,
+          report.remainingApplicationKeyUsers == .confirmed,
+          report.startupProducers == .confirmed,
+          report.internalCryptoOwners == .confirmed else { return false }
     return eraseApplicationData(intent, report)
 }
