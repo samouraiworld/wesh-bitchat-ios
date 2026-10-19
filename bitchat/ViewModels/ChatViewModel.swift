@@ -1275,6 +1275,18 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             meshService.emergencyDisconnectAll()
         }
 
+        // IMPORTANT: Clear Nostr-related state
+        // Drop relay subscriptions, handlers, pending sends, and replay state.
+        // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
+        // disconnect is not enough here.
+        NostrRelayManager.shared.resetForPanicWipe()
+        // Clearing relay handlers stops NEW events, but a detached gift-wrap
+        // decrypt spawned just before the wipe still holds a pre-wipe key and
+        // ciphertext; bump the pipeline's wipe generation so its result is
+        // dropped at the main-actor delivery hop instead of landing here.
+        nostrCoordinator.inbound.invalidateInFlightDecrypts()
+        nostrRelayManager = nil
+
         return admitPanicApplicationErasure(
             intent: recoveryIntent,
             collectOwners: panicRecoveryOperations.collectAppOwners
@@ -1398,18 +1410,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Clear read receipt tracking
         sentReadReceipts.removeAll()
         deduplicationService.clearAll()
-
-        // IMPORTANT: Clear Nostr-related state
-        // Drop relay subscriptions, handlers, pending sends, and replay state.
-        // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
-        // disconnect is not enough here.
-        NostrRelayManager.shared.resetForPanicWipe()
-        // Clearing relay handlers stops NEW events, but a detached gift-wrap
-        // decrypt spawned just before the wipe still holds a pre-wipe key and
-        // ciphertext; bump the pipeline's wipe generation so its result is
-        // dropped at the main-actor delivery hop instead of landing here.
-        nostrCoordinator.inbound.invalidateInFlightDecrypts()
-        nostrRelayManager = nil
 
         // Clear Nostr identity associations
         idBridge.clearAllAssociations()
