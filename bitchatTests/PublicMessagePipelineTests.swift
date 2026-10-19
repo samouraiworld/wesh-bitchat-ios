@@ -68,7 +68,8 @@ struct PublicMessagePipelineTests {
 
     @Test @MainActor
     func defaultTimer_automaticallyFlushesOrderedDeduplicatedMessagesToRetainedDestinations() async throws {
-        let pipeline = PublicMessagePipeline()
+        let trace = PipelineTimerTraceRecorder()
+        let pipeline = PublicMessagePipeline(trace: { stage in trace.record(stage) })
         defer { withExtendedLifetime(pipeline) {} }
         let delegate = TestPipelineDelegate()
         pipeline.delegate = delegate
@@ -93,13 +94,14 @@ struct PublicMessagePipelineTests {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
 
+        let timerDiagnostic = Comment(rawValue: trace.snapshot())
         #expect(delegate.committed.map { $0.message.id } == [
             "synthetic-mesh-early", "synthetic-retained", "synthetic-mesh-late"
-        ])
-        #expect(delegate.messages(in: .mesh).map { $0.id } == ["synthetic-mesh-early", "synthetic-mesh-late"])
-        #expect(delegate.messages(in: retainedDestination).map { $0.id } == ["synthetic-retained"])
-        #expect(delegate.recordedContentKeys.count == 3)
-        #expect(delegate.batchingStates == [true, false])
+        ], timerDiagnostic)
+        #expect(delegate.messages(in: .mesh).map { $0.id } == ["synthetic-mesh-early", "synthetic-mesh-late"], timerDiagnostic)
+        #expect(delegate.messages(in: retainedDestination).map { $0.id } == ["synthetic-retained"], timerDiagnostic)
+        #expect(delegate.recordedContentKeys.count == 3, timerDiagnostic)
+        #expect(delegate.batchingStates == [true, false], timerDiagnostic)
     }
 
     @Test @MainActor
@@ -177,5 +179,35 @@ struct PublicMessagePipelineTests {
 
         #expect(delegate.committed.isEmpty)
         #expect(delegate.recordedContentKeys.isEmpty)
+    }
+}
+
+/// Neutral test-only events. It never owns a pipeline, delegate, timer, Task or message.
+private final class PipelineTimerTraceRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startUptime = ProcessInfo.processInfo.systemUptime
+    private let startWall = Date()
+    private var events: [String] = []
+
+    func record(_ stage: String) {
+        let elapsed = ProcessInfo.processInfo.systemUptime - startUptime
+        let wallElapsed = Date().timeIntervalSince(startWall)
+        let line = "elapsed=\(elapsed) wallElapsed=\(wallElapsed) \(stage)"
+        lock.lock()
+        events.append(line)
+        lock.unlock()
+    }
+
+    func snapshot() -> String {
+        let elapsed = ProcessInfo.processInfo.systemUptime - startUptime
+        let wallElapsed = Date().timeIntervalSince(startWall)
+        let mode = RunLoop.current.currentMode
+        let modeClass = mode == nil ? "none" :
+            (mode == RunLoop.Mode.default ? "default" : (mode == RunLoop.Mode.common ? "common" : "other"))
+        lock.lock()
+        let captured = events
+        lock.unlock()
+        return "timerDiagnostic elapsed=\(elapsed) wallElapsed=\(wallElapsed) mainThread=\(Thread.isMainThread) mode=\(modeClass); " +
+            captured.joined(separator: " | ")
     }
 }
