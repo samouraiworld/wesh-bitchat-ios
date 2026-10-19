@@ -328,7 +328,11 @@ final class NostrOutboundOwner: @unchecked Sendable {
     func beginSourceInstallation(kind: SourceKind) -> SourceInstallationAdmission {
         locked {
             let requestID = Identity()
-            // Baseline: valid installation requests retain their original effects before terminal enforcement.
+            if let rootCloseReceipt {
+                installationAdmissions.append(SourceInstallationAdmissionRow(ownerID: id, requestID: requestID,
+                    kind: kind, sourceID: nil, decision: .refusedBeforeRoot, closeReceipt: rootCloseReceipt))
+                return .refusedBeforeRoot(rootCloseReceipt)
+            }
             let ticket = SourceInstallation(ownerID: id)
             sourceOrder.append(ticket.id)
             sourceRecords[ticket.id] = SourceRecord(ticket: ticket, kind: kind)
@@ -343,7 +347,12 @@ final class NostrOutboundOwner: @unchecked Sendable {
     func beginColdProvider(purpose: ColdProviderPurpose) -> ColdProviderAdmission {
         locked {
             let requestID = Identity()
-            // Baseline: valid warmup requests retain their original effects before terminal enforcement.
+            if let rootCloseReceipt {
+                coldProviderOrder.append(requestID)
+                coldProviders[requestID] = ColdProviderRecord(requestID: requestID, purpose: purpose, decision: .refusedBeforeRoot,
+                    permission: nil, closeReceipt: rootCloseReceipt)
+                return .refusedBeforeRoot(rootCloseReceipt)
+            }
             let permission = ColdProviderPermission(ownerID: id, purpose: purpose)
             coldProviderOrder.append(permission.id)
             coldProviders[permission.id] = ColdProviderRecord(requestID: requestID, purpose: purpose, decision: .accepted,
