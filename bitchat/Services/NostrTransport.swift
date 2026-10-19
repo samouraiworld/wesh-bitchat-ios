@@ -186,6 +186,10 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
     static let sharedAckPacer = AckPacer(owner: .originalProcess)
     private let dependencies: Dependencies
+
+    func captureOutboundPanicBinding() -> NostrOutboundPanicBinding {
+        dependencies.outboundOwner.captureOutboundPanicBinding()
+    }
     private var favoriteStatusObserver: NSObjectProtocol?
 
     // Reachability Cache (thread-safe)

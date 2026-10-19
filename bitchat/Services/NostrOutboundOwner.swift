@@ -19,6 +19,19 @@ final class NostrOutboundOwner: @unchecked Sendable {
         static func == (lhs: Identity, rhs: Identity) -> Bool { lhs === rhs }
         func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
     }
+    final class RootPanicSubject: @unchecked Sendable {
+        let ownerID: Identity
+        fileprivate let nonce: Identity
+        fileprivate init(ownerID: Identity, nonce: Identity) { self.ownerID = ownerID; self.nonce = nonce }
+    }
+    final class RootCloseReceipt: @unchecked Sendable {
+        let ownerID: Identity
+        let eventID: Identity
+        fileprivate init(ownerID: Identity, eventID: Identity) { self.ownerID = ownerID; self.eventID = eventID }
+    }
+    enum RootCloseGap: Equatable, Sendable { case foreignSubject, participantMissing }
+    enum RootCloseOutcome: Sendable { case closed(RootCloseReceipt), unconfirmed(RootCloseGap) }
+
     class Ticket: @unchecked Sendable {
         let ownerID: Identity
         let id: Identity
@@ -36,7 +49,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
     enum CallbackState: Equatable, Sendable { case reserved, entered, bodyReturned }
     enum WaiterState: Equatable, Sendable { case prepared, boundPendingInstall, cancelRequestedPendingInstall, waitingForHandle, delivered, cancelledDischarged }
     enum ProtocolFault: Equatable, Sendable { case foreignOwner, invalidParent, replayedSubmission, duplicateInstallation, unknownHandleRegistration }
-    enum Reservation<T> { case reserved(T), protocolDebt(Identity) }
+    enum Reservation<T> { case reserved(T), protocolDebt(Identity), refusedBeforeRoot(RootCloseReceipt) }
     enum Submission { case handleRegistered(Identity), protocolDebt(Identity) }
     enum ReceiptUpdate { case recorded, protocolDebt(Identity) }
     enum JoinError: Error { case foreignBatch, protocolDebt }
@@ -112,7 +125,9 @@ final class NostrOutboundOwner: @unchecked Sendable {
         func run() { continuation.resume(with: result) }
     }
 
-    let id = Identity()
+    let id: Identity
+    private let originalRootSubject: RootPanicSubject
+    private var rootCloseReceipt: RootCloseReceipt?
     private let mutex = NSLock()
     private let taskCreator: TaskCreator
     private let waiterInstaller: WaiterInstaller
@@ -123,8 +138,29 @@ final class NostrOutboundOwner: @unchecked Sendable {
     private var unconfirmedHandles: [Task<Void, Never>] = []
 
     init(taskCreator: @escaping TaskCreator, waiterInstaller: @escaping WaiterInstaller) {
+        let id = Identity()
+        self.id = id
+        self.originalRootSubject = RootPanicSubject(ownerID: id, nonce: Identity())
         self.taskCreator = taskCreator
         self.waiterInstaller = waiterInstaller
+    }
+
+    /// Capture this installed actor's original subject, never a current/global successor.
+    func captureOutboundPanicBinding() -> NostrOutboundPanicBinding {
+        NostrOutboundPanicBinding(owner: self, subject: originalRootSubject)
+    }
+
+    /// Terminal root admission event only; accepted work and all drain evidence remain separate.
+    func closeRootAdmission(subject: RootPanicSubject) -> RootCloseOutcome {
+        locked {
+            guard subject.ownerID === id, subject.nonce === originalRootSubject.nonce else {
+                return .unconfirmed(.foreignSubject)
+            }
+            if let rootCloseReceipt { return .closed(rootCloseReceipt) }
+            let receipt = RootCloseReceipt(ownerID: id, eventID: Identity())
+            rootCloseReceipt = receipt
+            return .closed(receipt)
+        }
     }
 
     private func locked<T>(_ body: () throws -> T) rethrows -> T {
@@ -338,4 +374,18 @@ final class NostrOutboundOwner: @unchecked Sendable {
                 debts: debts, unconfirmedHandleCount: unconfirmedHandles.count)
         }
     }
+}
+
+/// Immutable binding to the owner actually installed by the transport. No transport or key payload.
+final class NostrOutboundPanicBinding: @unchecked Sendable {
+    let ownerID: NostrOutboundOwner.Identity
+    let subject: NostrOutboundOwner.RootPanicSubject
+    fileprivate let owner: NostrOutboundOwner
+    fileprivate init(owner: NostrOutboundOwner, subject: NostrOutboundOwner.RootPanicSubject) {
+        self.owner = owner; self.ownerID = owner.id; self.subject = subject
+    }
+}
+
+func closeCapturedNostrOutboundRoots(_ binding: NostrOutboundPanicBinding) -> NostrOutboundOwner.RootCloseOutcome {
+    binding.owner.closeRootAdmission(subject: binding.subject)
 }
