@@ -304,14 +304,6 @@ final class NostrOutboundOwner: @unchecked Sendable {
             return .recorded
         }
     }
-    func reserveSourceWrite(kind: SourceWriteKind, parent: SourceEventTicket) -> SourceWriteTicket? {
-        locked {
-            guard parent.ownerID === id, sourceEvents[parent.id]?.ticket === parent else {
-                _ = sourceFault(.invalidEvent); return nil
-            }
-            return appendSourceWriteLocked(kind: kind, parent: parent)
-        }
-    }
     @discardableResult
     func sourceWriteEntered(_ write: SourceWriteTicket) -> SourceReceiptUpdate {
         locked {
@@ -339,7 +331,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
             return .recorded
         }
     }
-    /// Call only with mutex held; public metadata and body-authorized paths share row creation.
+    /// Call only with mutex held when appending a body-authorized write row.
     private func appendSourceWriteLocked(kind: SourceWriteKind, parent: SourceEventTicket) -> SourceWriteTicket {
         let write = SourceWriteTicket(ownerID: id, parent: parent)
         sourceWriteOrder.append(write.id)
@@ -358,7 +350,13 @@ final class NostrOutboundOwner: @unchecked Sendable {
             guard sourceBodies[event.id] == nil else {
                 _ = sourceFault(.repeatedBodyAdmission); return .protocolFault
             }
-            // Baseline: valid first admission preserves existing callback effects across root closure.
+            // Refuse a new business body after this original owner's terminal root event.
+            if let rootCloseReceipt {
+                sourceBodyOrder.append(event.id)
+                sourceBodies[event.id] = SourceBodyAdmissionRecord(ownerID: id, event: event, decision: .refusedBeforeRoot,
+                                                                  permit: nil, closeReceipt: rootCloseReceipt)
+                return .refusedBeforeRoot(rootCloseReceipt)
+            }
             let permit = SourceEventBodyPermit(ownerID: id, event: event, kind: source.kind)
             sourceBodyOrder.append(event.id)
             sourceBodies[event.id] = SourceBodyAdmissionRecord(ownerID: id, event: event, decision: .accepted,
