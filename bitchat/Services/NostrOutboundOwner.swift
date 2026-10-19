@@ -37,6 +37,48 @@ final class NostrOutboundOwner: @unchecked Sendable {
         let id = Identity()
         fileprivate init(ownerID: Identity) { self.ownerID = ownerID }
     }
+    enum SourceInstallationAdmission {
+        case accepted(SourceInstallation), refusedBeforeRoot(RootCloseReceipt)
+    }
+    enum SourceAdmissionDecision: Equatable, Sendable { case accepted, refusedBeforeRoot }
+    struct SourceInstallationAdmissionRow: Sendable {
+        let ownerID: Identity
+        let requestID: Identity
+        let kind: SourceKind
+        let sourceID: Identity?
+        let decision: SourceAdmissionDecision
+        let closeReceipt: RootCloseReceipt?
+    }
+    struct SourceInstallationAdmissionSnapshot: Sendable {
+        let ownerID: Identity
+        let rows: [SourceInstallationAdmissionRow]
+    }
+    enum ColdProviderPurpose: Equatable, Sendable { case legacyFavoritesWarm }
+    enum ColdProviderState: Equatable, Sendable { case inFlight, returned }
+    final class ColdProviderPermission: @unchecked Sendable {
+        let ownerID: Identity
+        let id = Identity()
+        let purpose: ColdProviderPurpose
+        fileprivate init(ownerID: Identity, purpose: ColdProviderPurpose) {
+            self.ownerID = ownerID; self.purpose = purpose
+        }
+    }
+    enum ColdProviderAdmission {
+        case accepted(ColdProviderPermission), refusedBeforeRoot(RootCloseReceipt)
+    }
+    struct ColdProviderRow: Sendable {
+        let ownerID: Identity
+        let requestID: Identity
+        let purpose: ColdProviderPurpose
+        let permissionID: Identity?
+        let state: ColdProviderState?
+        let decision: SourceAdmissionDecision
+        let closeReceipt: RootCloseReceipt?
+    }
+    struct ColdProviderSnapshot: Sendable {
+        let ownerID: Identity
+        let rows: [ColdProviderRow]
+    }
     final class SourceEventTicket: @unchecked Sendable {
         let ownerID: Identity
         let sourceID: Identity
@@ -91,6 +133,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
     enum SourceProtocolFault: Equatable, Sendable {
         case foreignSource, unknownSource, repeatedInstallationReturn, invalidEvent, repeatedBodyEnd, invalidWrite, invalidExistingTask
         case invalidBodyAdmission, repeatedBodyAdmission, invalidBodyPermit, invalidBodyWriteKind, repeatedBodyWrite
+        case invalidColdProviderPermission, repeatedColdProviderReturn
     }
     enum SourceReceiptUpdate { case recorded, protocolFault }
     struct SourceRow: Sendable { let id: Identity; let kind: SourceKind; let installation: SourceInstallationState }
@@ -178,6 +221,20 @@ final class NostrOutboundOwner: @unchecked Sendable {
         var installation: SourceInstallationState = .installing
         init(ticket: SourceInstallation, kind: SourceKind) { self.ticket = ticket; self.kind = kind }
     }
+    private final class ColdProviderRecord {
+        let requestID: Identity
+        let purpose: ColdProviderPurpose
+        let decision: SourceAdmissionDecision
+        let permission: ColdProviderPermission?
+        let closeReceipt: RootCloseReceipt?
+        var state: ColdProviderState?
+        init(requestID: Identity, purpose: ColdProviderPurpose, decision: SourceAdmissionDecision,
+             permission: ColdProviderPermission?, closeReceipt: RootCloseReceipt?) {
+            self.requestID = requestID; self.purpose = purpose; self.decision = decision
+            self.permission = permission; self.closeReceipt = closeReceipt
+            self.state = permission == nil ? nil : .inFlight
+        }
+    }
     private final class SourceEventRecord {
         let ticket: SourceEventTicket
         var state: SourceEventState = .entered
@@ -245,6 +302,9 @@ final class NostrOutboundOwner: @unchecked Sendable {
     private var pendingWaiters: [Identity: Waiter] = [:]
     private var debts: [DebtRow] = []
     private var unconfirmedHandles: [Task<Void, Never>] = []
+    private var installationAdmissions: [SourceInstallationAdmissionRow] = []
+    private var coldProviderOrder: [Identity] = []
+    private var coldProviders: [Identity: ColdProviderRecord] = [:]
     private var sourceOrder: [Identity] = []
     private var sourceRecords: [Identity: SourceRecord] = [:]
     private var sourceEventOrder: [Identity] = []
@@ -264,13 +324,53 @@ final class NostrOutboundOwner: @unchecked Sendable {
         self.waiterInstaller = waiterInstaller
     }
 
-    // Separate source metadata never changes Task/callback admission, debt or batch semantics.
-    func beginSourceInstallation(kind: SourceKind) -> SourceInstallation {
+    // Source admission remains separate from existing Task/callback debt and batch semantics.
+    func beginSourceInstallation(kind: SourceKind) -> SourceInstallationAdmission {
         locked {
+            let requestID = Identity()
+            // Baseline: valid installation requests retain their original effects before terminal enforcement.
             let ticket = SourceInstallation(ownerID: id)
             sourceOrder.append(ticket.id)
             sourceRecords[ticket.id] = SourceRecord(ticket: ticket, kind: kind)
-            return ticket
+            installationAdmissions.append(SourceInstallationAdmissionRow(ownerID: id, requestID: requestID,
+                kind: kind, sourceID: ticket.id, decision: .accepted, closeReceipt: nil))
+            return .accepted(ticket)
+        }
+    }
+    func sourceInstallationAdmissionSnapshot() -> SourceInstallationAdmissionSnapshot {
+        locked { SourceInstallationAdmissionSnapshot(ownerID: id, rows: installationAdmissions) }
+    }
+    func beginColdProvider(purpose: ColdProviderPurpose) -> ColdProviderAdmission {
+        locked {
+            let requestID = Identity()
+            // Baseline: valid warmup requests retain their original effects before terminal enforcement.
+            let permission = ColdProviderPermission(ownerID: id, purpose: purpose)
+            coldProviderOrder.append(permission.id)
+            coldProviders[permission.id] = ColdProviderRecord(requestID: requestID, purpose: purpose, decision: .accepted,
+                permission: permission, closeReceipt: nil)
+            return .accepted(permission)
+        }
+    }
+    @discardableResult
+    func noteColdProviderReturned(_ permission: ColdProviderPermission) -> SourceReceiptUpdate {
+        locked {
+            guard permission.ownerID === id,
+                  let record = coldProviders[permission.id], record.permission === permission,
+                  record.purpose == permission.purpose, record.decision == .accepted else {
+                return sourceFault(.invalidColdProviderPermission)
+            }
+            guard record.state == .inFlight else { return sourceFault(.repeatedColdProviderReturn) }
+            record.state = .returned
+            return .recorded
+        }
+    }
+    /// Inspection exposes IDs and settlement metadata, never installation or warmup capabilities.
+    func coldProviderSnapshot() -> ColdProviderSnapshot {
+        locked {
+            ColdProviderSnapshot(ownerID: id, rows: coldProviderOrder.compactMap { coldProviders[$0] }.map {
+                ColdProviderRow(ownerID: id, requestID: $0.requestID, purpose: $0.purpose,
+                    permissionID: $0.permission?.id, state: $0.state, decision: $0.decision, closeReceipt: $0.closeReceipt)
+            })
         }
     }
     @discardableResult
