@@ -679,6 +679,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // transiently successful second read must not skip recovery and leave
         // the service permanently suspended without running the wipe.
         let panicRecoveryOperations = PanicRecoveryOperations(
+            collectAppOwners: livePanicRecoveryOperations.collectAppOwners,
             isPending: {
                 if startupDecision.replayPanic {
                     return true
@@ -749,7 +750,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         self.keychain = keychain
         self.panicRecoveryOperations = panicRecoveryOperations
-            ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
+            ?? .ephemeral(collectAppOwners: PanicAppOwnerAdmission.liveUnconfirmed,
+                          wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
@@ -1273,6 +1275,26 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             meshService.emergencyDisconnectAll()
         }
 
+        return admitPanicApplicationErasure(
+            intent: recoveryIntent,
+            collectOwners: panicRecoveryOperations.collectAppOwners
+        ) { intent, report in
+            self.erasePanicApplicationData(
+                recoveryIntent: intent, ownerReport: report,
+                networkWipeCompleted: networkWipeCompleted,
+                restartServices: restartServices, restartMesh: restartMesh
+            )
+        }
+    }
+
+    @MainActor
+    private func erasePanicApplicationData(
+        recoveryIntent: PanicRecoveryIntent,
+        ownerReport _: PanicAppOwnerReport,
+        networkWipeCompleted: Bool,
+        restartServices: Bool,
+        restartMesh: Bool
+    ) -> Bool {
         // Clear all messages (public timelines and private chats live in the
         // single-writer ConversationStore; the derived `messages` view and
         // the legacy mirror empty with it)

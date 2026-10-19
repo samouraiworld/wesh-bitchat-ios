@@ -169,7 +169,7 @@ struct SharedContentRetirementTests {
         wipes.notifications = {}
         wipes.pasteboard = {}
         var commits = 0
-        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
+        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: { commits += 1 })
         let keychain = MockKeychain()

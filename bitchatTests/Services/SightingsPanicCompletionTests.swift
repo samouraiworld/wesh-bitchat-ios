@@ -59,7 +59,7 @@ private final class SightingsMarkerFixture {
     var rejectCommit = false
 
     var operations: PanicRecoveryOperations {
-        PanicRecoveryOperations(isPending: { self.pending }, begin: {
+        PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { self.pending }, begin: {
             self.pending = true
             return PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: {
