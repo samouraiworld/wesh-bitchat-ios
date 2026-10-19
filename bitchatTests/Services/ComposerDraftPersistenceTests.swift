@@ -74,14 +74,14 @@ struct ComposerDraftPersistenceTests {
             throw primary
         }
         if let cleanup { throw cleanup }
-        let observed = try #require(observed)
-        #expect(observed.status == .durable)
-        #expect(observed.pending == 0)
-        #expect(observed.writesAfter == observed.writesBefore)
-        #expect(observed.ciphertextAfter == observed.ciphertextBefore)
-        #expect(observed.mesh == "synthetic durable sentinel")
-        #expect(observed.location == "synthetic location RAM")
-        #expect(observed.fallback == "synthetic fallback RAM")
+        let snapshot = try #require(observed)
+        #expect(snapshot.status == .durable)
+        #expect(snapshot.pending == 0)
+        #expect(snapshot.writesAfter == snapshot.writesBefore)
+        #expect(snapshot.ciphertextAfter == snapshot.ciphertextBefore)
+        #expect(snapshot.mesh == "synthetic durable sentinel")
+        #expect(snapshot.location == "synthetic location RAM")
+        #expect(snapshot.fallback == "synthetic fallback RAM")
     }
 
     @Test func restartRestoresOnlyMeshAndFullNoiseKeysWithoutPlaintext() async throws {
