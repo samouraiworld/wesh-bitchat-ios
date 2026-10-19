@@ -110,7 +110,7 @@ struct PanicNetworkLifecycle {
             restart: {
                 NetworkActivationService.shared.start()
             },
-            closeInstalledNostrRoots: { binding in closeCapturedNostrOutboundRoots(binding) }
+            closeInstalledNostrRoots: { binding in closeCapturedNostrOutboundRootsAndRequestSourceDetachment(binding) }
         )
     }
 }

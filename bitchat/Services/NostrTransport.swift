@@ -202,6 +202,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
     private var weshNpubs: [PeerID: String]?
     private var weshIsOnline = false
     private var weshCancellables: Set<AnyCancellable> = []
+    private var sourceDetachmentEndpoints: [NostrSourceDetachmentEndpoint] = []
     private let queue = DispatchQueue(label: "nostr.transport.state", attributes: .concurrent)
 
     @MainActor
@@ -218,7 +219,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             queue.sync(flags: .barrier) { self.weshNpubs = [:] }
             switch sourceOwner.beginSourceInstallation(kind: .weshRecipients) {
             case .accepted(let recipientsSource):
-                weshRecipients()
+                let recipientsCancellable = weshRecipients()
                     .sink { [weak self, weak sourceOwner] recipients in
                         let event = sourceOwner?.sourceEventEntered(recipientsSource)
                         defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
@@ -231,14 +232,17 @@ final class NostrTransport: Transport, @unchecked Sendable {
                             self.weshNpubs = recipients
                         }
                     }
-                    .store(in: &weshCancellables)
-                sourceOwner.noteSourceInstallationReturned(recipientsSource)
+                recipientsCancellable.store(in: &weshCancellables)
+                let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(recipientsSource,
+                    cancellable: recipientsCancellable), to: recipientsSource)
+                let installationReturn = sourceOwner.noteSourceInstallationReturned(recipientsSource)
+                finishOwnedEndpoint(recipientsSource, bindingID: endpointBinding, installationReturn: installationReturn)
             case .refusedBeforeRoot: break
             }
             if let weshOnline = self.dependencies.weshOnline {
                 switch sourceOwner.beginSourceInstallation(kind: .weshOnline) {
                 case .accepted(let onlineSource):
-                    weshOnline()
+                    let onlineCancellable = weshOnline()
                         .sink { [weak self, weak sourceOwner] online in
                             let event = sourceOwner?.sourceEventEntered(onlineSource)
                             defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
@@ -251,14 +255,17 @@ final class NostrTransport: Transport, @unchecked Sendable {
                                 self.weshIsOnline = online
                             }
                         }
-                        .store(in: &weshCancellables)
-                    sourceOwner.noteSourceInstallationReturned(onlineSource)
+                    onlineCancellable.store(in: &weshCancellables)
+                    let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(onlineSource,
+                        cancellable: onlineCancellable), to: onlineSource)
+                    let installationReturn = sourceOwner.noteSourceInstallationReturned(onlineSource)
+                    finishOwnedEndpoint(onlineSource, bindingID: endpointBinding, installationReturn: installationReturn)
                 case .refusedBeforeRoot: break
                 }
             }
             switch sourceOwner.beginSourceInstallation(kind: .weshRelayConnectivity) {
             case .accepted(let relaySource):
-                relayConnectivityCancellable = self.dependencies.relayConnectivity()
+                let relayCancellable = self.dependencies.relayConnectivity()
                     .sink { [weak self, weak sourceOwner] connected in
                         let event = sourceOwner?.sourceEventEntered(relaySource)
                         defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
@@ -271,7 +278,11 @@ final class NostrTransport: Transport, @unchecked Sendable {
                             self.relaysConnected = connected
                         }
                     }
-                sourceOwner.noteSourceInstallationReturned(relaySource)
+                relayConnectivityCancellable = relayCancellable
+                let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(relaySource,
+                    cancellable: relayCancellable), to: relaySource)
+                let installationReturn = sourceOwner.noteSourceInstallationReturned(relaySource)
+                finishOwnedEndpoint(relaySource, bindingID: endpointBinding, installationReturn: installationReturn)
             case .refusedBeforeRoot: break
             }
             return
@@ -297,7 +308,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
 
         switch sourceOwner.beginSourceInstallation(kind: .legacyRelayConnectivity) {
         case .accepted(let relaySource):
-            relayConnectivityCancellable = self.dependencies.relayConnectivity()
+            let relayCancellable = self.dependencies.relayConnectivity()
                 .sink { [weak self, weak sourceOwner] connected in
                     let event = sourceOwner?.sourceEventEntered(relaySource)
                     defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
@@ -310,7 +321,11 @@ final class NostrTransport: Transport, @unchecked Sendable {
                         self.relaysConnected = connected
                     }
                 }
-            sourceOwner.noteSourceInstallationReturned(relaySource)
+            relayConnectivityCancellable = relayCancellable
+            let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(relaySource,
+                cancellable: relayCancellable), to: relaySource)
+            let installationReturn = sourceOwner.noteSourceInstallationReturned(relaySource)
+            finishOwnedEndpoint(relaySource, bindingID: endpointBinding, installationReturn: installationReturn)
         case .refusedBeforeRoot: break
         }
     }
@@ -321,6 +336,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func setupObservers() {
         let sourceOwner = dependencies.outboundOwner
         let observerSource: NostrOutboundOwner.SourceInstallation
@@ -328,7 +344,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
         case .accepted(let source): observerSource = source
         case .refusedBeforeRoot: return
         }
-        favoriteStatusObserver = dependencies.notificationCenter.addObserver(
+        let observerToken = dependencies.notificationCenter.addObserver(
             forName: .favoriteStatusChanged,
             object: nil,
             queue: nil
@@ -341,7 +357,30 @@ final class NostrTransport: Transport, @unchecked Sendable {
             case .refusedBeforeRoot, .protocolFault: return
             }
         }
-        sourceOwner.noteSourceInstallationReturned(observerSource)
+        favoriteStatusObserver = observerToken
+        let endpointBinding = bindOwnedEndpoint(sourceOwner.makeObserverSourceEndpoint(observerSource,
+            center: dependencies.notificationCenter, token: observerToken), to: observerSource)
+        let installationReturn = sourceOwner.noteSourceInstallationReturned(observerSource)
+        finishOwnedEndpoint(observerSource, bindingID: endpointBinding, installationReturn: installationReturn)
+    }
+
+    @MainActor
+    private func bindOwnedEndpoint(_ creation: NostrOutboundOwner.SourceEndpointCreation,
+                                   to source: NostrOutboundOwner.SourceInstallation) -> NostrOutboundOwner.Identity? {
+        guard case .created(let endpoint) = creation else { return nil }
+        sourceDetachmentEndpoints.append(endpoint)
+        guard case .bound(let bindingID) = dependencies.outboundOwner.bindSourceEndpoint(endpoint, to: source) else { return nil }
+        return bindingID
+    }
+
+    @MainActor
+    private func finishOwnedEndpoint(_ source: NostrOutboundOwner.SourceInstallation,
+                                     bindingID: NostrOutboundOwner.Identity?,
+                                     installationReturn: NostrOutboundOwner.SourceReceiptUpdate) {
+        guard let bindingID, case .recorded = installationReturn,
+              case .ready(let claim) = dependencies.outboundOwner.finishSourceEndpointBinding(source, bindingID: bindingID),
+              let claim else { return }
+        _ = dependencies.outboundOwner.invokeSourceDetachment(claim)
     }
 
     private func refreshReachablePeers(sourceEvent: NostrOutboundOwner.SourceEventTicket?) {
