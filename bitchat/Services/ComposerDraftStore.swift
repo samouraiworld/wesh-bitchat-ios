@@ -239,7 +239,7 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
                 pending[removed.storageString] = Mutation(entry: nil, revision: revision)
             }
         }
-        if backend != nil && loaded { state = .dirty }
+        if backend != nil && loaded && !pending.isEmpty { state = .dirty }
         notify(keys: [key])
         return true
     }
