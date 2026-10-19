@@ -1233,7 +1233,8 @@ struct ChatViewModelPanicTests {
         var events: [String] = []
         let lifecycle = PanicNetworkLifecycle(
             stop: { events.append("stop"); return true },
-            restart: { events.append("restart") }
+            restart: { events.append("restart") },
+            closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
         let (viewModel, _) = makeTestableViewModel(
             panicMediaWipe: { events.append("wipe") },
@@ -1266,7 +1267,8 @@ struct ChatViewModelPanicTests {
         // E.g. the Arti directory survived because Tor did not stop in time.
         let lifecycle = PanicNetworkLifecycle(
             stop: { events.append("stop"); return false },
-            restart: { events.append("restart") }
+            restart: { events.append("restart") },
+            closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
         let (viewModel, transport) = makeTestableViewModel(
             panicRecoveryOperations: operations,
@@ -1302,7 +1304,8 @@ struct ChatViewModelPanicTests {
         )
         let lifecycle = PanicNetworkLifecycle(
             stop: { events.append("stop"); return true },
-            restart: { events.append("restart") }
+            restart: { events.append("restart") },
+            closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
         let (viewModel, transport) = makeTestableViewModel(
             keychain: keychain,
