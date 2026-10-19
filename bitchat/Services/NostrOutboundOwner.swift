@@ -189,6 +189,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
     func reserveTask(kind: TaskKind, parent: Parent) -> Reservation<TaskTicket> {
         locked {
             guard valid(parent) else { return .protocolDebt(debt(.invalidParent, workID: nil)) }
+            if case .root = parent, let rootCloseReceipt { return .refusedBeforeRoot(rootCloseReceipt) }
             let ticket = TaskTicket(ownerID: id)
             order.append(ticket.id)
             records[ticket.id] = Record(ticket: ticket, parent: parentID(parent), kind: .task(kind))
@@ -198,6 +199,7 @@ final class NostrOutboundOwner: @unchecked Sendable {
     func reserveCallback(kind: CallbackKind, parent: Parent) -> Reservation<CallbackTicket> {
         locked {
             guard valid(parent) else { return .protocolDebt(debt(.invalidParent, workID: nil)) }
+            if case .root = parent, let rootCloseReceipt { return .refusedBeforeRoot(rootCloseReceipt) }
             let ticket = CallbackTicket(ownerID: id)
             order.append(ticket.id)
             records[ticket.id] = Record(ticket: ticket, parent: parentID(parent), kind: .callback(kind))
