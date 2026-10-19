@@ -1050,12 +1050,12 @@ final class NostrSourceDetachmentEndpoint {
     }
     fileprivate func invoke() -> NostrSourceEndpointInvocation {
         switch payload {
-        case .cancellable:
-            // Baseline: the actual payload action and its return remain unconfirmed.
-            return .notInvoked
-        case .observer:
-            // Baseline: no observer removal or invocation-return acknowledgment.
-            return .notInvoked
+        case .cancellable(let cancellable):
+            cancellable.cancel()
+            return .invocationReturned
+        case .observer(let center, let token):
+            center.removeObserver(token)
+            return .invocationReturned
         }
     }
 }
