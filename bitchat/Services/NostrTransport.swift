@@ -6,6 +6,7 @@ import Combine
 // Minimal Nostr transport conforming to Transport for offline sending
 final class NostrTransport: Transport, @unchecked Sendable {
     struct Dependencies {
+        let outboundOwner: NostrOutboundOwner
         let notificationCenter: NotificationCenter
         let loadFavorites: @MainActor () -> [Data: FavoritesPersistenceService.FavoriteRelationship]
         let favoriteStatusForNoiseKey: @MainActor (Data) -> FavoritesPersistenceService.FavoriteRelationship?
@@ -31,6 +32,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
         let weshIsBlocked: (@MainActor (Data) -> Bool)?
 
         init(
+            outboundOwner: NostrOutboundOwner,
             notificationCenter: NotificationCenter,
             loadFavorites: @escaping @MainActor () -> [Data: FavoritesPersistenceService.FavoriteRelationship],
             favoriteStatusForNoiseKey: @escaping @MainActor (Data) -> FavoritesPersistenceService.FavoriteRelationship?,
@@ -45,6 +47,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
             weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
         ) {
+            self.outboundOwner = outboundOwner
             self.notificationCenter = notificationCenter
             self.loadFavorites = loadFavorites
             self.favoriteStatusForNoiseKey = favoriteStatusForNoiseKey
@@ -56,7 +59,8 @@ final class NostrTransport: Transport, @unchecked Sendable {
             // Default pacer drives its throttle through the same injected
             // scheduler, so tests that step scheduleAfter manually keep
             // control of the ack cadence.
-            self.ackPacer = ackPacer ?? AckPacer(scheduleAfter: scheduleAfter)
+            self.ackPacer = ackPacer ?? AckPacer(owner: outboundOwner, scheduleAfter: scheduleAfter)
+            precondition(self.ackPacer.owner === outboundOwner, "ACK pacer must retain the same original outbound owner")
             self.weshRecipients = weshRecipients
             self.weshOnline = weshOnline
             self.weshIsBlocked = weshIsBlocked
@@ -79,6 +83,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 weshIsBlocked = isBlocked ?? { _ in true }
             }
             return Dependencies(
+                outboundOwner: .originalProcess,
                 notificationCenter: .default,
                 loadFavorites: { FavoritesPersistenceService.shared.favorites },
                 favoriteStatusForNoiseKey: { FavoritesPersistenceService.shared.getFavoriteStatus(for: $0) },
@@ -125,41 +130,61 @@ final class NostrTransport: Transport, @unchecked Sendable {
     final class AckPacer: @unchecked Sendable {
         typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-        private let queue = DispatchQueue(label: "chat.bitchat.nostr-ack-pacer")
-        private var pending: [() -> Void] = []
+        let owner: NostrOutboundOwner
+        private let queue: DispatchQueue
+        private struct Pending {
+            let ticket: NostrOutboundOwner.CallbackTicket
+            let send: (NostrOutboundOwner.CallbackTicket) -> Void
+        }
+        private var pending: [Pending] = []
         private var isSending = false
         private let interval: TimeInterval = TransportConfig.nostrReadAckInterval
         private let scheduleAfter: Scheduler
 
-        init(scheduleAfter: @escaping Scheduler = { delay, action in
+        /// An injected queue MUST be serial. Nil retains the original production serial queue.
+        init(owner: NostrOutboundOwner, queue: DispatchQueue? = nil, scheduleAfter: @escaping Scheduler = { delay, action in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: action)
         }) {
+            self.owner = owner
+            self.queue = queue ?? DispatchQueue(label: "chat.bitchat.nostr-ack-pacer")
             self.scheduleAfter = scheduleAfter
         }
 
-        func enqueue(_ send: @escaping () -> Void) {
+        func enqueue(ticket: NostrOutboundOwner.CallbackTicket, _ send: @escaping (NostrOutboundOwner.CallbackTicket) -> Void) {
+            guard case .reserved(let appended) = owner.reserveCallback(kind: .ackQueueAppend, parent: .child(ticket)) else { return }
             queue.async {
-                self.pending.append(send)
+                self.owner.callbackEntered(appended)
+                defer { self.owner.callbackBodyReturned(appended) }
+                self.pending.append(Pending(ticket: ticket, send: send))
                 self.processNext()
             }
         }
 
-        /// Must be called on `queue`.
+        /// Must be called on `queue`; callback return is never a child-task join.
         private func processNext() {
             guard !isSending, !pending.isEmpty else { return }
             isSending = true
-            let send = pending.removeFirst()
-            send()
+            let next = pending.removeFirst()
+            owner.callbackEntered(next.ticket)
+            next.send(next.ticket)
+            owner.callbackBodyReturned(next.ticket)
+            guard case .reserved(let reset) = owner.reserveCallback(kind: .ackResetScheduler, parent: .child(next.ticket)) else { return }
+            let owner = self.owner
             scheduleAfter(interval) { [weak self] in
+                owner.callbackEntered(reset)
+                defer { owner.callbackBodyReturned(reset) }
                 guard let self else { return }
+                guard case .reserved(let queued) = owner.reserveCallback(kind: .ackResetQueue, parent: .child(reset)) else { return }
                 self.queue.async {
+                    owner.callbackEntered(queued)
+                    defer { owner.callbackBodyReturned(queued) }
                     self.isSending = false
                     self.processNext()
                 }
             }
         }
     }
-    static let sharedAckPacer = AckPacer()
+    static let sharedAckPacer = AckPacer(owner: .originalProcess)
     private let dependencies: Dependencies
     private var favoriteStatusObserver: NSObjectProtocol?
 
@@ -242,13 +267,18 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
 
     private func refreshReachablePeers() {
-        Task { @MainActor in
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveTask(kind: .refreshReachablePeers, parent: .root) else { return }
+        owner.dispatch(ticket) { @MainActor [self] in
             let favorites = dependencies.loadFavorites()
             let reachable = favorites.values
                 .filter { $0.peerNostrPublicKey != nil }
                 .map { PeerID(publicKey: $0.peerNoisePublicKey) }
             
+            guard case .reserved(let write) = owner.reserveCallback(kind: .refreshStateWrite, parent: .child(ticket)) else { return }
             self.queue.async(flags: .barrier) { [weak self] in
+                owner.callbackEntered(write)
+                defer { owner.callbackBodyReturned(write) }
                 self?.reachablePeers = Set(reachable)
             }
         }
@@ -314,7 +344,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
     func sendMessage(_ content: String, mentions: [String]) { /* no-op */ }
 
     func sendPrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
-        Task { @MainActor in
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveTask(kind: .privateMessage, parent: .root) else { return }
+        owner.dispatch(ticket) { @MainActor [self] in
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -335,13 +367,17 @@ final class NostrTransport: Transport, @unchecked Sendable {
     /// Explicit-identity acks ride throwaway transport instances that must stay alive
     /// until their ack leaves the queue.
     private func enqueueAck(_ ack: QueuedAck) {
-        dependencies.ackPacer.enqueue { self.sendAckItem(ack) }
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveCallback(kind: .pendingAckHandoff, parent: .root) else { return }
+        dependencies.ackPacer.enqueue(ticket: ticket) { parent in self.sendAckItem(ack, parent: parent) }
     }
 
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
         // Wesh sends `[FAVORITED]:npub` only over a Noise session, never over a relay.
         if queue.sync(execute: { weshNpubs != nil }) { return }
-        Task { @MainActor in
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveTask(kind: .favoriteNotification, parent: .root) else { return }
+        owner.dispatch(ticket) { @MainActor [self] in
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -376,7 +412,9 @@ extension NostrTransport {
 
     // MARK: Private messages using the supplied Nostr identity
     func sendPrivateMessageForNostrIdentity(content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        Task { @MainActor in
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveTask(kind: .explicitIdentityMessage, parent: .root) else { return }
+        owner.dispatch(ticket) { @MainActor [self] in
             guard !recipientHex.isEmpty else { return }
             SecureLogger.debug("GeoDM: send PM mid=\(messageID.prefix(8))…", category: .session)
             guard let embedded = NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: content, messageID: messageID) else {
@@ -419,8 +457,10 @@ extension NostrTransport {
 
 
     /// Sends a single ack item (invoked by the pacer, one per interval)
-    private func sendAckItem(_ item: QueuedAck) {
-        Task { @MainActor in
+    private func sendAckItem(_ item: QueuedAck, parent: NostrOutboundOwner.CallbackTicket) {
+        let owner = dependencies.outboundOwner
+        guard case .reserved(let ticket) = owner.reserveTask(kind: .ackItem, parent: .child(parent)) else { return }
+        owner.dispatch(ticket) { @MainActor [self] in
             switch item {
             case .readDirect(let receipt, let peerID):
                 guard let recipientNpub = resolveRecipientNpub(for: peerID),
