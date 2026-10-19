@@ -600,7 +600,9 @@ struct NostrTransportTests {
         weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
         weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
     ) -> NostrTransport.Dependencies {
-        NostrTransport.Dependencies(
+        let owner = NostrOutboundOwner(taskCreator: NostrOutboundOwner.mainActorTaskCreator, waiterInstaller: NostrOutboundOwner.inlineWaiterInstaller)
+        return NostrTransport.Dependencies(
+            outboundOwner: owner,
             notificationCenter: notificationCenter,
             loadFavorites: loadFavorites,
             favoriteStatusForNoiseKey: favoriteStatusForNoiseKey,
