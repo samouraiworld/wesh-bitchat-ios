@@ -345,7 +345,7 @@ private final class CallbackWeakProbe: @unchecked Sendable {
 
 @MainActor
 private func makeAndDropWeshTransport(owner: NostrOutboundOwner, pacer: NostrTransport.AckPacer,
-                                     publishers: CallbackPublisherBox, errors: CallbackLocked<[String]>) -> (CallbackWeakProbe, CallbackPublisherBox) {
+                                      publishers: CallbackPublisherBox, errors: CallbackLocked<[String]>) -> (CallbackWeakProbe, CallbackPublisherBox) {
     let dependencies = callbackDependencies(owner: owner, pacer: pacer, notifications: NotificationCenter(), errors: errors,
         loadFavorites: { errors.update { $0.append("Temporary Wesh transport loaded favorites") }; return [:] },
         relay: { publishers.relayPublisher() }, recipients: { publishers.recipientsPublisher() }, online: { publishers.onlinePublisher() })
@@ -469,7 +469,13 @@ private func callbackDependencies(owner: NostrOutboundOwner, pacer: NostrTranspo
                                   relay: @escaping @MainActor () -> AnyPublisher<Bool, Never>,
                                   recipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
                                   online: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil) -> NostrTransport.Dependencies {
-    NostrTransport.Dependencies(outboundOwner: owner, notificationCenter: notifications, loadFavorites: loadFavorites,
+    let blockCheck: (@MainActor (Data) -> Bool)?
+    if recipients == nil {
+        blockCheck = nil
+    } else {
+        blockCheck = { _ in false }
+    }
+    return NostrTransport.Dependencies(outboundOwner: owner, notificationCenter: notifications, loadFavorites: loadFavorites,
         favoriteStatusForNoiseKey: { _ in errors.update { $0.append("Unexpected favorite key lookup") }; return nil },
         favoriteStatusForPeerID: { _ in errors.update { $0.append("Unexpected favorite peer lookup") }; return nil },
         currentIdentity: { errors.update { $0.append("Unexpected identity provider") }; return nil },
@@ -477,7 +483,7 @@ private func callbackDependencies(owner: NostrOutboundOwner, pacer: NostrTranspo
         sendEvent: { _ in errors.update { $0.append("Unexpected crypto send") } },
         scheduleAfter: { _, _ in errors.update { $0.append("Unexpected dependency scheduler") } },
         relayConnectivity: relay, ackPacer: pacer, weshRecipients: recipients, weshOnline: online,
-        weshIsBlocked: recipients == nil ? nil : { _ in false })
+        weshIsBlocked: blockCheck)
 }
 
 private func callbackFavorites() -> [Data: FavoritesPersistenceService.FavoriteRelationship] {
