@@ -69,6 +69,7 @@ struct PublicMessagePipelineTests {
     @Test @MainActor
     func defaultTimer_automaticallyFlushesOrderedDeduplicatedMessagesToRetainedDestinations() async throws {
         let pipeline = PublicMessagePipeline()
+        defer { withExtendedLifetime(pipeline) {} }
         let delegate = TestPipelineDelegate()
         pipeline.delegate = delegate
         let base = Date(timeIntervalSince1970: 1_700_000_000)
