@@ -136,6 +136,7 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     var ephemeralPeerIDsByNoiseKey: [Data: PeerID] = [:]
     var peerIDsByNickname: [String: PeerID] = [:]
     var fingerprintsByPeerID: [PeerID: String] = [:]
+    private(set) var fingerprintLookups: [PeerID] = []
     private(set) var clearedFingerprints: [PeerID] = []
 
     func peerNickname(for peerID: PeerID) -> String? { nicknamesByPeerID[peerID] }
@@ -145,7 +146,10 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     func noisePublicKey(for peerID: PeerID) -> Data? { noiseKeysByPeerID[peerID] }
     func ephemeralPeerID(forNoiseKey noiseKey: Data) -> PeerID? { ephemeralPeerIDsByNoiseKey[noiseKey] }
     func getPeerIDForNickname(_ nickname: String) -> PeerID? { peerIDsByNickname[nickname] }
-    func getFingerprint(for peerID: PeerID) -> String? { fingerprintsByPeerID[peerID] }
+    func getFingerprint(for peerID: PeerID) -> String? {
+        fingerprintLookups.append(peerID)
+        return fingerprintsByPeerID[peerID]
+    }
     func storedFingerprint(for peerID: PeerID) -> String? { fingerprintsByPeerID[peerID] }
 
     func clearStoredFingerprint(for peerID: PeerID) {
@@ -1093,5 +1097,113 @@ struct ChatPrivateConversationCoordinatorContextTests {
                                          id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
         #expect(context.nostrDeliveryAcks.map(\.messageID) == ["nostr-1"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["nostr-1"])
+    }
+
+    @Test @MainActor
+    func populatedMigrationTargetSkipsFingerprintLookupAndPreservesState() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let oldPeer = PeerID(str: "1111111111111111")
+        let target = PeerID(str: String(repeating: "ab", count: 32))
+        let timestamp = Date(timeIntervalSince1970: 4_102_444_800)
+        let oldMessage = makeIncomingMessage(id: "retained-old", timestamp: timestamp, senderPeerID: oldPeer)
+        let targetMessage = makeIncomingMessage(id: "retained-target", timestamp: timestamp, senderPeerID: target)
+        context.privateChats = [oldPeer: [oldMessage], target: [targetMessage]]
+        context.fingerprintsByPeerID = [oldPeer: "same-fingerprint", target: "same-fingerprint"]
+        context.selectedPrivateChatPeer = oldPeer
+        context.unreadPrivateMessages = [oldPeer, target]
+
+        #expect(target.bare.count == 64)
+        #expect(target.noiseKey?.count == 32)
+
+        coordinator.migratePrivateChatsIfNeeded(for: target, senderNickname: "alice")
+
+        #expect(context.fingerprintLookups.isEmpty)
+        #expect(context.privateChats.count == 2)
+        #expect(context.privateChats[oldPeer]?.map(\.id) == ["retained-old"])
+        #expect(context.privateChats[target]?.map(\.id) == ["retained-target"])
+        #expect(context.privateChats[oldPeer]?.first === oldMessage)
+        #expect(context.privateChats[target]?.first === targetMessage)
+        #expect(context.selectedPrivateChatPeer == oldPeer)
+        #expect(context.unreadPrivateMessages == [oldPeer, target])
+        #expect(context.migratedChats.isEmpty)
+        #expect(context.upsertedMessages.isEmpty)
+        #expect(context.clearedFingerprints.isEmpty)
+        #expect(context.fingerprintsByPeerID == [oldPeer: "same-fingerprint", target: "same-fingerprint"])
+        #expect(context.notifyUIChangedCount == 0)
+    }
+
+    @Test @MainActor
+    func emptyMigrationTargetUsesCurrentFingerprintAndPreservesUnmatchedHistory() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let matchingPeer = PeerID(str: "2222222222222222")
+        let unmatchedPeer = PeerID(str: "3333333333333333")
+        let target = PeerID(str: String(repeating: "cd", count: 32))
+        let timestamp = Date(timeIntervalSince1970: 4_102_444_800)
+        let matchingMessage = makeIncomingMessage(id: "current-match", timestamp: timestamp, senderPeerID: matchingPeer)
+        let unmatchedMessage = makeIncomingMessage(id: "prior-match", timestamp: timestamp, senderPeerID: unmatchedPeer)
+        context.privateChats = [matchingPeer: [matchingMessage], unmatchedPeer: [unmatchedMessage], target: []]
+        context.fingerprintsByPeerID = [matchingPeer: "current", unmatchedPeer: "previous", target: "previous"]
+        context.selectedPrivateChatPeer = matchingPeer
+        context.unreadPrivateMessages = [matchingPeer, unmatchedPeer]
+        context.fingerprintsByPeerID[target] = "current"
+
+        #expect(target.bare.count == 64)
+        #expect(target.noiseKey?.count == 32)
+
+        coordinator.migratePrivateChatsIfNeeded(for: target, senderNickname: "alice")
+
+        #expect(context.fingerprintLookups == [target])
+        #expect(context.privateChats[matchingPeer] == nil)
+        #expect(context.privateChats[target]?.map(\.id) == ["current-match"])
+        #expect(context.privateChats[target]?.first === matchingMessage)
+        #expect(context.privateChats[unmatchedPeer]?.map(\.id) == ["prior-match"])
+        #expect(context.privateChats[unmatchedPeer]?.first === unmatchedMessage)
+        #expect(context.selectedPrivateChatPeer == target)
+        #expect(context.unreadPrivateMessages == [unmatchedPeer])
+        #expect(context.migratedChats.map(\.from) == [matchingPeer])
+        #expect(context.migratedChats.map(\.to) == [target])
+        #expect(context.clearedFingerprints == [matchingPeer])
+        #expect(context.fingerprintsByPeerID[target] == "current")
+        #expect(context.fingerprintsByPeerID[unmatchedPeer] == "previous")
+        #expect(context.notifyUIChangedCount == 1)
+    }
+
+    @Test @MainActor
+    func populatedShortIDMigrationTargetKeepsEagerFingerprintLookup() {
+        let cases: [(raw: String, characterCount: Int, keyByteCount: Int?)] = [
+            ("5555555555555555", 16, nil),
+            ("0x" + String(repeating: "a", count: 62), 64, 31)
+        ]
+        for input in cases {
+            let context = MockChatPrivateConversationContext()
+            let coordinator = ChatPrivateConversationCoordinator(context: context)
+            let oldPeer = PeerID(str: "4444444444444444")
+            let target = PeerID(str: input.raw)
+            let timestamp = Date(timeIntervalSince1970: 4_102_444_800)
+            let oldMessage = makeIncomingMessage(id: "short-old", timestamp: timestamp, senderPeerID: oldPeer)
+            let targetMessage = makeIncomingMessage(id: "short-target", timestamp: timestamp, senderPeerID: target)
+            context.privateChats = [oldPeer: [oldMessage], target: [targetMessage]]
+            context.fingerprintsByPeerID = [oldPeer: "same-short-fingerprint", target: "same-short-fingerprint"]
+            context.selectedPrivateChatPeer = oldPeer
+            context.unreadPrivateMessages = [oldPeer, target]
+
+            #expect(target.bare.count == input.characterCount)
+            #expect(target.noiseKey?.count == input.keyByteCount)
+            #expect(target.noiseKey?.count != 32)
+            coordinator.migratePrivateChatsIfNeeded(for: target, senderNickname: "alice")
+
+            #expect(context.fingerprintLookups == [target])
+            #expect(context.privateChats[oldPeer]?.map(\.id) == ["short-old"])
+            #expect(context.privateChats[target]?.map(\.id) == ["short-target"])
+            #expect(context.privateChats[oldPeer]?.first === oldMessage)
+            #expect(context.privateChats[target]?.first === targetMessage)
+            #expect(context.selectedPrivateChatPeer == oldPeer)
+            #expect(context.unreadPrivateMessages == [oldPeer, target])
+            #expect(context.migratedChats.isEmpty)
+            #expect(context.clearedFingerprints.isEmpty)
+            #expect(context.notifyUIChangedCount == 0)
+        }
     }
 }
