@@ -73,6 +73,7 @@ PUBLIC_DISPOSITIONS = frozenset(('PUBLISHED_INCOMPLETE', 'NOT_PUBLISHED',
                                 'WITHHELD_CLEANUP_UNKNOWN', 'UNKNOWN'))
 PUBLIC_FAILURES = frozenset(('NONE', 'UNSUPPORTED_HOST', 'SOURCE_BINDING', 'TOOL_SUPPORT',
                             'READINESS', 'PROCESS_RETURN', 'PROCESS_LIMIT', 'RAW_LIMIT',
+                            'RAW_SYMLINK',
                             'SERIAL_CONTRACT', 'EXPORT_SCHEMA', 'SYMBOL_MATERIAL',
                             'SEALING', 'PUBLICATION_BINDING', 'CLEANUP_UNKNOWN',
                             'INTERRUPTED', 'UNKNOWN'))
@@ -86,7 +87,7 @@ PUBLIC_FAILURE_CONSTANTS = {
     'process-failed': 'PROCESS_RETURN', 'recorder-ended-before-command': 'PROCESS_RETURN',
     'serial-failed': 'PROCESS_RETURN', 'recorder-incomplete': 'PROCESS_RETURN',
     'process-budget': 'PROCESS_LIMIT', 'capture-budget': 'PROCESS_LIMIT',
-    'raw-budget': 'RAW_LIMIT', 'raw-symlink': 'RAW_LIMIT',
+    'raw-budget': 'RAW_LIMIT', 'raw-symlink': 'RAW_SYMLINK',
     'serial-case-inventory': 'SERIAL_CONTRACT', 'metric-inventory': 'SERIAL_CONTRACT',
     'unsupported-or-ambiguous-sample-schema': 'EXPORT_SCHEMA',
     'unsupported-toc': 'EXPORT_SCHEMA', 'duplicate-or-empty-XML-ID': 'EXPORT_SCHEMA',
