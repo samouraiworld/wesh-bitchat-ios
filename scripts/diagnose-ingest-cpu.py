@@ -15,6 +15,7 @@ import re
 import select
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -45,36 +46,192 @@ def interrupted(_sig, _frame):
     STOP = True
 
 
-def digest(path):
+def digest(owner, path):
     h = hashlib.sha256()
-    with path.open('rb') as f:
+    f = owner.open_owned_file(path, 'rb')
+    primary_error = None
+    try:
         for b in iter(lambda: f.read(1024 * 1024), b''):
             h.update(b)
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            owner.close_owned_file(f)
+        except BaseException:
+            if primary_error is None:
+                raise
+            # The original read/hash failure stays primary. Close debt is sticky.
     return h.hexdigest()
 
 
-class Run:
+# Final public output is a fixed scalar vocabulary, never exception text.
+PUBLIC_PHASES = frozenset(('INITIALIZE', 'SOURCE', 'PRELUDE', 'RECORD', 'EXPORT',
+                          'SEAL', 'CLEANUP', 'PUBLISH', 'FINAL', 'UNKNOWN'))
+PUBLIC_DISPOSITIONS = frozenset(('PUBLISHED_INCOMPLETE', 'NOT_PUBLISHED',
+                                'WITHHELD_CLEANUP_UNKNOWN', 'UNKNOWN'))
+PUBLIC_FAILURES = frozenset(('NONE', 'UNSUPPORTED_HOST', 'SOURCE_BINDING', 'TOOL_SUPPORT',
+                            'READINESS', 'PROCESS_RETURN', 'PROCESS_LIMIT', 'RAW_LIMIT',
+                            'SERIAL_CONTRACT', 'EXPORT_SCHEMA', 'SYMBOL_MATERIAL',
+                            'SEALING', 'PUBLICATION_BINDING', 'CLEANUP_UNKNOWN',
+                            'INTERRUPTED', 'UNKNOWN'))
+PUBLIC_FAILURE_CONSTANTS = {
+    'head-binding': 'SOURCE_BINDING', 'source-scope': 'SOURCE_BINDING',
+    'dirty-source': 'SOURCE_BINDING', 'certificate-binding': 'SOURCE_BINDING',
+    'unsupported-record-tool': 'TOOL_SUPPORT', 'unsupported-export-tool': 'TOOL_SUPPORT',
+    'openssl3-unavailable': 'TOOL_SUPPORT', 'openssl3-required': 'TOOL_SUPPORT',
+    'notification-registration': 'READINESS', 'recorder-not-ready': 'READINESS',
+    'foreign-notification-token': 'READINESS', 'readiness-budget': 'READINESS',
+    'process-failed': 'PROCESS_RETURN', 'recorder-ended-before-command': 'PROCESS_RETURN',
+    'serial-failed': 'PROCESS_RETURN', 'recorder-incomplete': 'PROCESS_RETURN',
+    'process-budget': 'PROCESS_LIMIT', 'capture-budget': 'PROCESS_LIMIT',
+    'raw-budget': 'RAW_LIMIT', 'raw-symlink': 'RAW_LIMIT',
+    'serial-case-inventory': 'SERIAL_CONTRACT', 'metric-inventory': 'SERIAL_CONTRACT',
+    'unsupported-or-ambiguous-sample-schema': 'EXPORT_SCHEMA',
+    'unsupported-toc': 'EXPORT_SCHEMA', 'duplicate-or-empty-XML-ID': 'EXPORT_SCHEMA',
+    'ambiguous-XML-reference': 'EXPORT_SCHEMA', 'missing-XML-reference': 'EXPORT_SCHEMA',
+    'cyclic-XML-provenance': 'EXPORT_SCHEMA', 'missing-original-binpath': 'SYMBOL_MATERIAL',
+    'ambiguous-built-test-image': 'SYMBOL_MATERIAL', 'symbol-material-budget': 'SYMBOL_MATERIAL',
+    'encryption-budget': 'SEALING', 'archive-or-encryption-failed': 'SEALING',
+    'upload-allowlist': 'PUBLICATION_BINDING',
+    'ciphertext-publication-binding': 'PUBLICATION_BINDING',
+    'descendant-outlived-command': 'CLEANUP_UNKNOWN',
+    'cleanup-not-complete': 'CLEANUP_UNKNOWN', 'notification-cancel': 'CLEANUP_UNKNOWN',
+    'interrupted': 'INTERRUPTED',
+}
+
+
+class PublicDisposition:
     def __init__(self):
-        self.repo = Path.cwd().resolve()
-        self.out = self.repo / '.diagnostic-upload'
-        if self.out.exists():
-            raise Incomplete('existing-output')
-        self.out.mkdir(mode=0o700)
-        self.root = Path(tempfile.mkdtemp(prefix='ingest-cpu-', dir=os.environ['RUNNER_TEMP']))
-        self.root.chmod(0o700)
-        self.raw = self.root / 'raw'
-        self.raw.mkdir(mode=0o700)
-        self.processes = []
+        self.phase = 'INITIALIZE'
+        self.blocking_phase = None
+        self.failure = 'NONE'
+        self.disposition = 'NOT_PUBLISHED'
+        self.cleanup_known = False
+        self.cleanup_uncertain = False
+
+    def enter(self, phase):
+        self.phase = phase if type(phase) is str and phase in PUBLIC_PHASES else 'UNKNOWN'
+
+    def blocked(self, error):
+        # Match ONLY exact known Incomplete literals. Never stringify an error,
+        # classify arbitrary subclasses or expose errno/type/path/message data.
+        category = 'UNKNOWN'
+        if (type(error) is Incomplete and len(error.args) == 1 and
+                type(error.args[0]) is str):
+            category = PUBLIC_FAILURE_CONSTANTS.get(error.args[0], 'UNKNOWN')
+        if self.blocking_phase is None:
+            self.blocking_phase = self.phase
+            self.failure = category
+        if category == 'CLEANUP_UNKNOWN':
+            self.uncertain_cleanup()
+
+    def uncertain_cleanup(self):
+        self.cleanup_uncertain = True  # A later successful retry cannot clear it.
+        self.cleanup_known = False
+        self.disposition = 'WITHHELD_CLEANUP_UNKNOWN'
+
+    def observed_cleanup(self, known):
+        if type(known) is bool and known and not self.cleanup_uncertain:
+            self.cleanup_known = True
+        else:
+            self.uncertain_cleanup()
+
+    def payload(self):
+        if (type(self.cleanup_uncertain) is not bool or
+                (self.blocking_phase is not None and type(self.blocking_phase) is not str)):
+            return {'diagnostic': 'incomplete', 'collection_only': True,
+                    'phase': 'UNKNOWN', 'disposition': 'UNKNOWN',
+                    'failure_class': 'UNKNOWN', 'cleanup_known': False}
+        phase = self.blocking_phase if self.blocking_phase is not None else self.phase
+        failure = self.failure
+        if self.cleanup_uncertain:
+            phase, failure = 'CLEANUP', 'CLEANUP_UNKNOWN'
+        valid = (type(phase) is str and phase in PUBLIC_PHASES and
+                 type(self.disposition) is str and self.disposition in PUBLIC_DISPOSITIONS and
+                 type(failure) is str and failure in PUBLIC_FAILURES and
+                 type(self.cleanup_known) is bool)
+        return {'diagnostic': 'incomplete', 'collection_only': True,
+                'phase': phase if valid else 'UNKNOWN',
+                'disposition': self.disposition if valid else 'UNKNOWN',
+                'failure_class': failure if valid else 'UNKNOWN',
+                'cleanup_known': self.cleanup_known if valid else False}
+
+
+class Run:
+    def __init__(self, public):
+        # RAM custody precedes EVERY fallible owned-path acquisition.
+        self.public = public
+        self.owned_close_uncertain = False
+        self.file_io_uncertain = False
+        self.path_cleanup_uncertain = False
         self.files = []
+        self.pending_file = None
+        self.processes = []
+        self.pending_process = None
+        self.pending_process_name = None
+        self.process_custody_uncertain = False
+        self.observer_custody_uncertain = False
         self.events = []
         self.errors = []
         self.notifier = None
         self.observer = None
         self.recorder = None
         self.serial = None
+        self.repo = None
+        self.out = None
+        self.out_created = False
+        self.out_identity = None
+        self.stage_name = None
+        self.stage = None
+        self.stage_identity = None
+        self.root_name = None
+        self.root = None
+        self.root_identity = None
+        self.raw = None
+        self.plaintext_removed = False
+        self.cipher_identity = None
+        self.manifest_identity = None
         self.case_count = 0
         self.sequence = 0
         self.binpath = None
+        self.epoch = time.monotonic()
+
+    @staticmethod
+    def directory_identity(path):
+        value = path.lstat()
+        if (not stat.S_ISDIR(value.st_mode) or value.st_uid != os.geteuid() or
+                stat.S_IMODE(value.st_mode) != 0o700):
+            raise Incomplete('owned-directory-binding')
+        return (value.st_dev, value.st_ino, value.st_uid, stat.S_IMODE(value.st_mode))
+
+    @staticmethod
+    def file_identity(path):
+        value = path.lstat()
+        if (not stat.S_ISREG(value.st_mode) or value.st_uid != os.geteuid() or
+                stat.S_IMODE(value.st_mode) != 0o600 or value.st_nlink != 1):
+            raise Incomplete('owned-file-binding')
+        return (value.st_dev, value.st_ino, value.st_uid, stat.S_IMODE(value.st_mode))
+
+    def acquire_owned_paths(self):
+        self.repo = Path.cwd().resolve()
+        self.out = self.repo / '.diagnostic-upload'
+        if self.out.exists() or self.out.is_symlink():
+            raise Incomplete('existing-output')
+        self.out.mkdir(mode=0o700)
+        self.out_created = True
+        self.out_identity = self.directory_identity(self.out)
+        # Retain the actual returned name BEFORE Path/configuration can fail.
+        self.stage_name = tempfile.mkdtemp(prefix='.ingest-cpu-stage-', dir=self.repo)
+        self.stage = Path(self.stage_name)
+        self.stage_identity = self.directory_identity(self.stage)
+        self.root_name = tempfile.mkdtemp(prefix='ingest-cpu-', dir=os.environ['RUNNER_TEMP'])
+        self.root = Path(self.root_name)
+        self.root_identity = self.directory_identity(self.root)
+        self.root.chmod(0o700)
+        self.raw = self.root / 'raw'
+        self.raw.mkdir(mode=0o700)
         self.epoch = time.monotonic()
 
     def note(self, kind, **values):
@@ -97,15 +254,41 @@ class Run:
             raise Incomplete('raw-budget')
 
     def spawn(self, args, name, env=None, stdin=None, stdout=None, scratch=False):
+        if self.pending_process is not None:
+            self.record_process_uncertainty()
+            raise Incomplete('pending-process-registration')
         self.sequence += 1
         log = (self.root if scratch else self.raw) / f'{self.sequence:02d}-{name}.log'
-        f = log.open('wb')
-        self.files.append(f)
-        p = subprocess.Popen(args, cwd=self.repo, env=env, stdin=stdin,
-                             stdout=stdout if stdout is not None else f,
-                             stderr=f, start_new_session=True)
-        self.processes.append((p, p.pid, name))
-        self.note('spawn', name=name, pid=p.pid, args=args)
+        f = self.open_owned_file(log, 'wb')
+        self.pending_process_name = name
+        try:
+            p = subprocess.Popen(args, cwd=self.repo, env=env, stdin=stdin,
+                                 stdout=stdout if stdout is not None else f,
+                                 stderr=f, start_new_session=True)
+        except BaseException:
+            self.record_process_uncertainty()
+            raise  # A failed factory is not proof of an absent internal child.
+        self.pending_process = p  # Actual returned object BEFORE tuple/list/note.
+        try:
+            self.processes.append((p, p.pid, name))
+            stream = p.stdout
+            if stream is not None:
+                if self.pending_file is not None:
+                    self.record_io_uncertainty()
+                    raise Incomplete('pending-file-registration')
+                self.pending_file = stream  # SAME returned PIPE before list append.
+                try:
+                    self.files.append(stream)
+                except BaseException:
+                    self.record_io_uncertainty()
+                    raise  # Both pending originals retain actual custody.
+                self.pending_file = None
+            self.pending_process = None
+            self.pending_process_name = None
+            self.note('spawn', name=name, pid=p.pid, args=args)
+        except BaseException:
+            self.record_process_uncertainty()
+            raise
         return p, log
 
     def wait(self, p, seconds, *, started_at=None):
@@ -123,6 +306,180 @@ class Run:
         if p.returncode != 0:
             raise Incomplete('process-failed')
 
+    def record_process_uncertainty(self):
+        self.process_custody_uncertain = True
+        self.public.uncertain_cleanup()
+        try:
+            self.errors.append('cleanup-process-custody-unknown')
+        except BaseException:
+            pass
+
+    def record_observer_uncertainty(self):
+        self.observer_custody_uncertain = True
+        self.public.uncertain_cleanup()
+        try:
+            self.errors.append('cleanup-observer-custody-unknown')
+        except BaseException:
+            pass
+
+    def record_io_uncertainty(self):
+        self.file_io_uncertain = True
+        self.public.uncertain_cleanup()
+        try:
+            self.errors.append('cleanup-file-io-unknown')
+        except BaseException:
+            pass  # Sticky debt survives even failed private bookkeeping.
+
+    def open_owned_file(self, path, mode, **options):
+        if self.pending_file is not None:
+            self.record_io_uncertainty()
+            raise Incomplete('pending-file-registration')
+        try:
+            handle = path.open(mode, **options)
+        except BaseException:
+            self.record_io_uncertainty()
+            raise
+        self.pending_file = handle  # Exact returned handle BEFORE registration.
+        try:
+            self.files.append(handle)
+        except BaseException:
+            self.record_io_uncertainty()
+            raise  # pending_file retains the actual handle for final cleanup.
+        self.pending_file = None
+        return handle
+
+    def close_owned_file(self, handle):
+        try:
+            handle.close()
+        except BaseException:
+            self.owned_close_uncertain = True
+            self.public.uncertain_cleanup()
+            try:
+                self.errors.append('cleanup-owned-file-close')
+            except BaseException:
+                pass  # Sticky debt survives even failed private bookkeeping.
+            raise
+
+    def read_text(self, path, **options):
+        try:
+            return path.read_text(**options)
+        except BaseException:
+            self.record_io_uncertainty()
+            raise
+
+    def read_bytes(self, path):
+        try:
+            return path.read_bytes()
+        except BaseException:
+            self.record_io_uncertainty()
+            raise
+
+    def write_text(self, path, data, **options):
+        try:
+            return path.write_text(data, **options)
+        except BaseException:
+            self.record_io_uncertainty()
+            raise
+
+    def copy_capture_file(self, source, target):
+        try:
+            return shutil.copyfile(source, target)
+        except BaseException:
+            self.record_io_uncertainty()
+            raise
+
+    def cleanup_owned_files(self):
+        handles = self.files  # Retain originals; no fallible cleanup list clone.
+        pending = self.pending_file
+        pending_registered = False
+        index = 0
+        while index < len(handles):
+            handle = handles[index]
+            if handle is pending:
+                pending_registered = True
+            try:
+                self.close_owned_file(handle)
+            except BaseException as error:
+                self.public.blocked(error)
+            index += 1
+        if pending is not None and not pending_registered:
+            try:
+                self.close_owned_file(pending)
+            except BaseException as error:
+                self.public.blocked(error)
+        # Do not clear pending custody/debt after a registration failure.
+
+    def path_cleanup_unknown(self):
+        self.path_cleanup_uncertain = True
+        self.public.uncertain_cleanup()
+        try:
+            self.errors.append('cleanup-owned-path-unknown')
+        except BaseException:
+            pass  # Sticky debt survives even failed private bookkeeping.
+
+    def remove_owned_plaintext(self):
+        if self.root_name is None:
+            self.plaintext_removed = True  # No root was acquired.
+            return
+        try:
+            if (self.root is None or self.root_identity is None or
+                    self.directory_identity(self.root) != self.root_identity):
+                raise Incomplete('owned-directory-binding')
+            shutil.rmtree(self.root)
+            try:
+                self.root.lstat()
+            except FileNotFoundError:
+                self.plaintext_removed = True
+            else:
+                raise Incomplete('plaintext-removal-unconfirmed')
+        except BaseException:
+            self.path_cleanup_unknown()
+            raise
+
+    def cleanup_stage(self):
+        if self.stage_name is None:
+            return
+        try:
+            if (self.stage is None or self.stage_identity is None or
+                    self.directory_identity(self.stage) != self.stage_identity):
+                raise Incomplete('owned-directory-binding')
+        except BaseException:
+            self.path_cleanup_unknown()
+            return  # Never delete an unrecognized directory.
+        # Each known path is attempted independently; no recursive stranger delete.
+        for name, identity in (('.pending.cms', self.cipher_identity),
+                               ('ingest-cpu.cms', self.cipher_identity),
+                               ('manifest.json', self.manifest_identity)):
+            try:
+                path = self.stage / name
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    continue
+                if identity is None or self.file_identity(path) != identity:
+                    raise Incomplete('owned-file-binding')
+                path.unlink()
+            except BaseException:
+                self.path_cleanup_unknown()
+        try:
+            if self.directory_identity(self.stage) != self.stage_identity:
+                raise Incomplete('owned-directory-binding')
+            self.stage.rmdir()  # Fails on unexpected content; never repair it.
+        except BaseException:
+            self.path_cleanup_unknown()
+
+    def cleanup_is_known(self):
+        cleanup_gaps = ('notify-close-', 'process-observer-close-', 'unreaped-',
+                        'unresolved-group-', 'cleanup-')
+        return (not self.processes and self.pending_process is None and
+                not self.process_custody_uncertain and not self.observer_custody_uncertain and
+                self.plaintext_removed and
+                self.notifier is None and self.observer is None and
+                not self.owned_close_uncertain and not self.file_io_uncertain and
+                not self.path_cleanup_uncertain and self.pending_file is None and
+                all(f.closed for f in self.files) and
+                not any(e.startswith(cleanup_gaps) for e in self.errors))
+
     def command(self, args, name, seconds=60, env=None, stdout_only=False):
         # Path-valued stdout must not be contaminated by benign tool stderr.
         # Both streams are still preserved privately.
@@ -130,13 +487,12 @@ class Run:
         destination = None
         if stdout_only:
             destination = self.raw / f'{self.sequence + 1:02d}-{name}.stdout'
-            output = destination.open('wb')
-            self.files.append(output)
+            output = self.open_owned_file(destination, 'wb')
         p, log = self.spawn(args, name, env=env, stdout=output)
         self.wait(p, seconds)
         if output is not None:
-            output.close()
-        return (destination if destination is not None else log).read_text(errors='replace')
+            self.close_owned_file(output)
+        return self.read_text(destination if destination is not None else log, errors='replace')
 
     @staticmethod
     def group_exists(pgid):
@@ -174,39 +530,88 @@ class Run:
         if p.returncode is not None and not self.group_exists(pgid):
             self.processes = [row for row in self.processes if row[0] is not p]
 
-    def cleanup_processes(self):
-        # All actual direct children/groups are attempted independently.
-        for p, pgid, name in reversed(list(self.processes)):
+    def cleanup_returned_process(self, p, pgid, name):
+        # Capture SAME pipe BEFORE any group/reap can remove process metadata.
+        stream = None
+        try:
+            stream = p.stdout
+        except BaseException:
+            self.record_process_uncertainty()
+        # SAME original escalation/reap logic; capture failure cannot skip it.
+        try:
+            if p.poll() is None or self.group_exists(pgid):
+                self.stop_group(p, pgid, name, orderly=(p is self.recorder))
+            else:
+                p.wait(timeout=2)
+                self.processes = [row for row in self.processes if row[0] is not p]
+        except BaseException as e:
+            self.record_process_uncertainty()
             try:
-                if p.poll() is None or self.group_exists(pgid):
-                    self.stop_group(p, pgid, name, orderly=(p is self.recorder))
-                else:
-                    p.wait(timeout=2)
-                    self.processes = [row for row in self.processes if row[0] is not p]
-            except Exception as e:
                 self.errors.append('cleanup-' + type(e).__name__)
+            except BaseException:
+                pass
+        finally:
+            # The original Popen owns this SAME stdout PIPE even when spawn
+            # raised before encrypt obtained its local or entered its finally.
+            try:
+                if stream is not None and not stream.closed:
+                    self.close_owned_file(stream)
+            except BaseException:
+                self.record_process_uncertainty()
+
+    def cleanup_processes(self):
+        # Retain original containers/objects without a fallible list clone.
+        registered = self.processes
+        pending = self.pending_process
+        pending_name = self.pending_process_name
+        index = len(registered) - 1
+        pending_registered = False
+        while index >= 0:
+            p, pgid, name = registered[index]
+            if p is pending:
+                pending_registered = True
+            self.cleanup_returned_process(p, pgid, name)
+            index -= 1
+        if pending is not None and not pending_registered:
+            self.cleanup_returned_process(pending, pending.pid, pending_name)
+        # Failed registration debt/pending custody is never erased by a reap.
         if self.notifier is not None:
             try:
                 self.notifier.close()
             except BaseException as e:
-                self.errors.append('notify-close-' + type(e).__name__)
-            # Never forget a registration while its actual release is unknown.
-            # A later successful retry cannot erase the sticky failed release.
+                self.public.uncertain_cleanup()
+                try:
+                    self.errors.append('notify-close-' + type(e).__name__)
+                except BaseException:
+                    pass
             if self.notifier.closed and not self.notifier.release_unknown:
                 self.notifier = None
         if self.observer is not None:
             try:
                 self.observer.close()
-            except Exception as e:
-                self.errors.append('process-observer-close-' + type(e).__name__)
-            self.observer = None
+            except BaseException as e:
+                self.record_observer_uncertainty()
+                try:
+                    self.errors.append('process-observer-close-' + type(e).__name__)
+                except BaseException:
+                    pass
+            # Logical closed is NOT authority for actual kqueue release.
+            if (self.observer.queue_close_returned and not self.observer.release_unknown and
+                    not self.observer_custody_uncertain):
+                self.observer = None
         for f in self.files:
             if not f.closed:
                 try:
                     f.flush()
-                except Exception as e:
-                    self.errors.append('flush-' + type(e).__name__)
-        self.note('all-owned-process-cleanup-attempted', errors=list(self.errors))
+                except BaseException as e:
+                    try:
+                        self.errors.append('flush-' + type(e).__name__)
+                    except BaseException:
+                        self.record_io_uncertainty()
+        try:
+            self.note('all-owned-process-cleanup-attempted', errors=list(self.errors))
+        except BaseException:
+            self.record_process_uncertainty()
 
     def verify_source(self):
         actual = self.command(['git', 'rev-parse', 'HEAD'], 'head').strip()
@@ -219,7 +624,7 @@ class Run:
         if self.command(['git', 'status', '--porcelain', '--untracked-files=no'], 'tracked-clean').strip():
             raise Incomplete('dirty-source')
         cert = self.repo / '.github/diagnostics/ingest-cpu-recipient.pem'
-        if digest(cert) != CERT_SHA or b'PRIVATE KEY' in cert.read_bytes():
+        if digest(self, cert) != CERT_SHA or b'PRIVATE KEY' in self.read_bytes(cert):
             raise Incomplete('certificate-binding')
         return actual, cert
 
@@ -233,7 +638,7 @@ class Run:
         catalog = self.repo / 'bitchat/Views/Wesh/Pave/Pave.xcstrings'
         bundle = binpath / 'bitchat_bitchat.bundle'
         catalogs = list(bundle.rglob('Pave.xcstrings'))
-        if len(catalogs) != 1 or catalogs[0].read_bytes() != catalog.read_bytes() or catalogs[0].parent not in (bundle, bundle / 'Contents/Resources'):
+        if len(catalogs) != 1 or self.read_bytes(catalogs[0]) != self.read_bytes(catalog) or catalogs[0].parent not in (bundle, bundle / 'Contents/Resources'):
             raise Incomplete('localization-input')
         directory = catalogs[0].parent
         self.command(['xcrun', 'xcstringstool', 'compile', str(catalog), '--output-directory', str(directory),
@@ -286,8 +691,14 @@ class Run:
         serial_start = time.monotonic()
         try:
             self.observer = ProcessObservation(self, self.serial)
-        except Exception as e:
-            self.note('process-observer-unavailable', reason=type(e).__name__ + ':' + str(e))
+            self.note('serial-process-identity', identity=self.observer.root_identity)
+        except BaseException as e:
+            self.record_observer_uncertainty()
+            try:
+                self.note('process-observer-unavailable', reason=type(e).__name__ + ':' + str(e))
+            except BaseException:
+                pass
+            raise  # Stop new collection; no failed factory means known absence.
         while self.serial.poll() is None:
             self.guard()
             if self.observer is not None:
@@ -310,15 +721,15 @@ class Run:
         self.notifier.close()
         if not self.notifier.release_unknown:
             self.notifier = None
-        text = serial_log.read_text(errors='replace')
+        text = self.read_text(serial_log, errors='replace')
         rows = re.findall(r"Test Case '([^']+)' passed \(", text)
-        expected = re.findall(r'func (test\w+)\(', (self.repo / 'bitchatTests/Performance/PerformanceBaselineTests.swift').read_text())
+        expected = re.findall(r'func (test\w+)\(', self.read_text(self.repo / 'bitchatTests/Performance/PerformanceBaselineTests.swift'))
         actual = [x.rsplit(' ', 1)[-1].rstrip(']') for x in rows]
         if len(expected) != 11 or len(rows) != 11 or sorted(actual) != sorted(expected):
             raise Incomplete('serial-case-inventory')
         self.case_count = len(rows)
         metrics = re.findall(r'PERF\[([^\]]+)\]:\s*([0-9.]+)\s*(\S+)/sec', text)
-        floors = json.loads((self.repo / 'bitchatTests/Performance/perf-floors.json').read_text())['floors']
+        floors = json.loads(self.read_text(self.repo / 'bitchatTests/Performance/perf-floors.json'))['floors']
         if len(metrics) != 10 or {x[0] for x in metrics} != set(floors):
             raise Incomplete('metric-inventory')
         # Values are preserved, NEVER evaluated as qualification or selected.
@@ -326,6 +737,7 @@ class Run:
         self.export_samples(trace)
 
     def export_samples(self, trace):
+        self.public.enter('EXPORT')
         # Preserve actual tool data; do not guess a timestamp origin/unit or
         # certify a PID by differentPID + image + symbol. Private review later.
         toc_text = self.command(['xcrun', 'xctrace', 'export', '--input', str(trace), '--toc'],
@@ -364,10 +776,10 @@ class Run:
             raise Incomplete('ambiguous-built-test-image')
         binary = candidates[0].resolve()
         uuid_text = self.command(['xcrun', 'dwarfdump', '--uuid', str(binary)], 'actual-image-uuid')
-        self.note('built-image-unverified', image=str(binary), sha256=digest(binary), uuid_output=uuid_text)
+        self.note('built-image-unverified', image=str(binary), sha256=digest(self, binary), uuid_output=uuid_text)
         if binary.stat().st_size > RAW_LIMIT // 2 or self.size() + binary.stat().st_size > RAW_LIMIT:
             raise Incomplete('symbol-material-budget')
-        shutil.copyfile(binary, self.raw / 'built-test-image')
+        self.copy_capture_file(binary, self.raw / 'built-test-image')
         self.guard()
 
     def encrypt(self, cert, head, complete):
@@ -382,21 +794,23 @@ class Run:
         version = self.command([str(openssl), 'version'], 'openssl-version', stdout_only=True)
         if not version.startswith('OpenSSL 3.'):
             raise Incomplete('openssl3-required')
-        (self.raw / 'private-manifest.json').write_text(json.dumps({'head': head, 'complete': complete,
+        self.write_text(self.raw / 'private-manifest.json', json.dumps({'head': head, 'complete': complete,
                        'events': self.events, 'errors': self.errors}, indent=2))
         self.guard()
         for f in self.files:
-            f.close()
+            self.close_owned_file(f)
         partial = self.root / 'ciphertext.partial'
-        staged = self.out / '.pending.cms'  # Not in workflow upload allowlist.
+        self.verify_empty_stage()
+        staged = self.stage / '.pending.cms'  # Outside workflow upload paths.
         pipe, _ = self.spawn(['/usr/bin/tar', '-czf', '-', '-C', str(self.root), 'raw'],
                              'archive', stdout=subprocess.PIPE, scratch=True)
+        primary_error = None
         try:
             enc, _ = self.spawn([str(openssl), 'cms', '-encrypt', '-binary', '-stream', '-outform', 'DER',
                                  '-aes-256-gcm', '-recip', str(cert), '-keyopt', 'rsa_padding_mode:oaep',
                                  '-keyopt', 'rsa_oaep_md:sha256', '-keyopt', 'rsa_mgf1_md:sha256',
                                  '-out', str(partial)], 'encrypt', stdin=pipe.stdout, scratch=True)
-            pipe.stdout.close()
+            self.close_owned_file(pipe.stdout)
             deadline = time.monotonic() + 120
             while enc.poll() is None or pipe.poll() is None:
                 if STOP or time.monotonic() > deadline or (partial.exists() and partial.stat().st_size > CIPHER_LIMIT):
@@ -405,36 +819,120 @@ class Run:
             if pipe.returncode != 0 or enc.returncode != 0 or not partial.is_file() or not 0 < partial.stat().st_size <= CIPHER_LIMIT:
                 raise Incomplete('archive-or-encryption-failed')
             os.replace(partial, staged)
+            self.cipher_identity = self.file_identity(staged)
             manifest = {'source_commit': head, 'kind': 'diagnostic-only-never-qualification',
-                        'status': 'incomplete', 'ciphertext_sha256': digest(staged),
+                        'status': 'incomplete', 'ciphertext_sha256': digest(self, staged),
                         'ciphertext_bytes': staged.stat().st_size, 'certificate_sha256': CERT_SHA,
                         'sample_ownership_verified': False, 'serial_case_count': self.case_count}
             return False, manifest
-        except BaseException:
-            partial.unlink(missing_ok=True)
-            staged.unlink(missing_ok=True)
+        except BaseException as error:
+            primary_error = error
             raise
         finally:
             if pipe.stdout is not None:
-                pipe.stdout.close()
+                try:
+                    self.close_owned_file(pipe.stdout)
+                except BaseException:
+                    if primary_error is None:
+                        raise
+                    # Keep the first actual failure primary; the independent
+                    # close failure is sticky cleanup debt, never completion.
 
-    def publish(self, manifest, complete):
-        # Called ONLY after process cleanup and owned plaintext removal succeed.
-        staged = self.out / '.pending.cms'
-        cleanup_gaps = ('notify-close-', 'process-observer-close-', 'unreaped-', 'unresolved-group-', 'cleanup-')
-        if (self.processes or self.root.exists() or self.notifier is not None or
-                any(e.startswith(cleanup_gaps) for e in self.errors)):
+    def directory_entries(self, path):
+        try:
+            return {p.name for p in path.iterdir()}
+        except BaseException:
+            self.path_cleanup_unknown()
+            raise
+
+    def verify_empty_stage(self):
+        if (self.stage is None or self.stage_identity is None or
+                self.directory_identity(self.stage) != self.stage_identity or
+                self.stage.parent != self.repo or self.directory_entries(self.stage)):
+            raise Incomplete('upload-allowlist')
+
+    def prepare_closed_pair(self, manifest):
+        # All actual recorded processes/streams/plaintext are already retired.
+        if not self.cleanup_is_known():
             raise Incomplete('cleanup-not-complete')
-        if {p.name for p in self.out.iterdir()} != {'.pending.cms'}:
+        if (self.stage is None or self.stage_identity is None or
+                self.directory_identity(self.stage) != self.stage_identity or
+                self.stage.parent != self.repo or
+                self.directory_entries(self.stage) != {'.pending.cms'}):
             raise Incomplete('upload-allowlist')
-        if digest(staged) != manifest['ciphertext_sha256'] or staged.stat().st_size != manifest['ciphertext_bytes']:
+        expected_keys = {'source_commit', 'kind', 'status', 'ciphertext_sha256',
+                         'ciphertext_bytes', 'certificate_sha256',
+                         'sample_ownership_verified', 'serial_case_count'}
+        if (type(manifest) is not dict or set(manifest) != expected_keys or
+                type(manifest['source_commit']) is not str or
+                not re.fullmatch('[0-9a-f]{40}', manifest['source_commit']) or
+                manifest['kind'] != 'diagnostic-only-never-qualification' or
+                manifest['status'] != 'incomplete' or
+                type(manifest['ciphertext_sha256']) is not str or
+                not re.fullmatch('[0-9a-f]{64}', manifest['ciphertext_sha256']) or
+                type(manifest['ciphertext_bytes']) is not int or
+                not 0 < manifest['ciphertext_bytes'] <= CIPHER_LIMIT or
+                manifest['certificate_sha256'] != CERT_SHA or
+                manifest['sample_ownership_verified'] is not False or
+                type(manifest['serial_case_count']) is not int or
+                manifest['serial_case_count'] not in (0, 11)):
             raise Incomplete('ciphertext-publication-binding')
-        os.replace(staged, self.out / 'ingest-cpu.cms')
-        temporary = self.out / '.manifest.partial'
-        temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
-        os.replace(temporary, self.out / 'manifest.json')
-        if {p.name for p in self.out.iterdir()} != {'ingest-cpu.cms', 'manifest.json'}:
+        staged = self.stage / '.pending.cms'
+        if (self.cipher_identity is None or self.file_identity(staged) != self.cipher_identity or
+                digest(self, staged) != manifest['ciphertext_sha256'] or
+                staged.stat().st_size != manifest['ciphertext_bytes']):
+            raise Incomplete('ciphertext-publication-binding')
+        os.replace(staged, self.stage / 'ingest-cpu.cms')
+        expected = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode('ascii')
+        if len(expected) > 4096:
+            raise Incomplete('ciphertext-publication-binding')
+        target = self.stage / 'manifest.json'
+        handle = self.open_owned_file(target, 'xb')
+        primary_error = None
+        try:
+            value = os.fstat(handle.fileno())
+            self.manifest_identity = (value.st_dev, value.st_ino, value.st_uid,
+                                      stat.S_IMODE(value.st_mode))
+            if handle.write(expected) != len(expected):
+                raise Incomplete('ciphertext-publication-binding')
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                self.close_owned_file(handle)
+            except BaseException:
+                if primary_error is None:
+                    raise
+        reader = self.open_owned_file(target, 'rb')
+        primary_error = None
+        try:
+            if reader.read(4097) != expected:
+                raise Incomplete('ciphertext-publication-binding')
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                self.close_owned_file(reader)
+            except BaseException:
+                if primary_error is None:
+                    raise
+        if (self.file_identity(self.stage / 'ingest-cpu.cms') != self.cipher_identity or
+                self.file_identity(target) != self.manifest_identity or
+                self.directory_entries(self.stage) != {'ingest-cpu.cms', 'manifest.json'}):
             raise Incomplete('upload-allowlist')
+        if (not self.out_created or self.out_identity is None or self.out.parent != self.repo or
+                self.directory_identity(self.out) != self.out_identity or self.directory_entries(self.out) or
+                self.directory_identity(self.stage) != self.stage_identity or
+                self.out_identity[0] != self.stage_identity[0]):
+            raise Incomplete('upload-allowlist')
+        if not self.cleanup_is_known():
+            raise Incomplete('cleanup-not-complete')
+        if STOP:
+            raise Incomplete('interrupted')
+        # No file access is permitted after the following terminal commit call.
+        return os.fspath(self.stage), os.fspath(self.out)
 
 
 def strict_xml_graph(document):
@@ -519,8 +1017,10 @@ class ProcessObservation:
         self.rejected_count = 0
         self.rejected_budget_exhausted = False
         self.closed = False
-        self.queue = select.kqueue()
-        run.note('serial-process-identity', identity=self.root_identity)
+        self.release_unknown = False
+        self.queue_close_returned = False
+        self.queue = None
+        self.queue = select.kqueue()  # FINAL acquisition/action; Run owns next.
 
     def read(self, pid):
         value = ProcBSDInfo()
@@ -691,17 +1191,33 @@ class ProcessObservation:
 
     def close(self):
         if not self.closed:
-            self.closed = True
+            self.closed = True  # Logical entry only, never a release witness.
+            primary_error = None
             try:
-                self.drain_events()
-            except Exception as e:
-                self.run.note('process-exit-observation-gap', reason=type(e).__name__ + ':' + str(e))
+                try:
+                    self.drain_events()
+                except Exception as e:
+                    self.run.note('process-exit-observation-gap', reason=type(e).__name__ + ':' + str(e))
+            except BaseException as error:
+                primary_error = error
             finally:
                 try:
                     self.run.note('process-observation-final', records=list(self.records.values()),
                                   unresolved_exit_cookies=list(self.watchers))
+                except BaseException as error:
+                    if primary_error is None:
+                        primary_error = error
                 finally:
-                    self.queue.close()  # Release every still-registered notifier.
+                    try:
+                        self.queue.close()  # SAME actual kqueue; no extra drain/retry.
+                    except BaseException as error:
+                        self.release_unknown = True
+                        if primary_error is None:
+                            primary_error = error
+                    else:
+                        self.queue_close_returned = True
+            if primary_error is not None:
+                raise primary_error
 
 
 class Notification:
@@ -757,9 +1273,10 @@ class Notification:
 
 
 def main():
+    public = PublicDisposition()
     if sys.platform != 'darwin' or os.geteuid() == 0:
-        print('{"diagnostic":"incomplete"}')
-        return 1
+        public.failure = 'UNSUPPORTED_HOST'
+        return json.dumps(public.payload())
     os.umask(0o077)
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, interrupted)
@@ -768,41 +1285,105 @@ def main():
     result = False
     manifest = None
     try:
-        run = Run()
+        run = Run(public)
+        try:
+            run.acquire_owned_paths()  # The original Run already has main custody.
+        except BaseException:
+            run.path_cleanup_unknown()  # A failed factory is not known absence.
+            raise
+        public.enter('SOURCE')
         head, cert = run.verify_source()
         try:
+            public.enter('PRELUDE')
             run.prelude()
+            public.enter('RECORD')
             run.profile()
             complete = False  # Actual trace/schema/child proof needs private review.
         except BaseException as e:
             # Detailed reasons only in ciphertext, never public exception text.
             run.errors.append(type(e).__name__ + ':' + str(e))
         finally:
+            public.enter('CLEANUP')
             run.cleanup_processes()
+        public.enter('SEAL')
         result, manifest = run.encrypt(cert, head, complete)
-    except BaseException:
+    except BaseException as error:
+        public.blocked(error)
         result = False
     finally:
         if run is not None:
-            run.cleanup_processes()  # Encryption/archive children too.
-            for f in run.files:
-                try:
-                    f.close()
-                except Exception:
-                    result = False
+            public.enter('CLEANUP')
             try:
-                shutil.rmtree(run.root)
-                if manifest is not None:
-                    result = False
-                    manifest['status'] = 'incomplete'
-                    run.publish(manifest, result)
-            except Exception:
-                result = False
-                for name in ('ingest-cpu.cms', 'manifest.json', '.pending.cms', '.manifest.partial'):
-                    (run.out / name).unlink(missing_ok=True)
-    print(json.dumps({'diagnostic': 'incomplete', 'collection_only': True}))
-    return 1  # An artifact never self-certifies success or product qualification.
+                run.cleanup_processes()  # Encryption/archive children too.
+            except BaseException as error:
+                public.blocked(error)
+                public.uncertain_cleanup()
+            try:
+                run.cleanup_owned_files()
+            except BaseException as error:
+                public.blocked(error)
+                public.uncertain_cleanup()
+            try:
+                run.remove_owned_plaintext()
+            except BaseException as error:
+                public.blocked(error)
+                public.uncertain_cleanup()
+    # ALL cleanup finally blocks are over before either pair preparation or commit.
+    try:
+        if run is None:
+            return json.dumps(public.payload())
+        if manifest is None or not run.cleanup_is_known() or public.cleanup_uncertain:
+            run.cleanup_stage()
+            public.observed_cleanup(run.cleanup_is_known())
+            return json.dumps(public.payload())
+        public.enter('PUBLISH')
+        source, destination = run.prepare_closed_pair(manifest)
+        public.observed_cleanup(run.cleanup_is_known())
+        if not public.cleanup_known or public.cleanup_uncertain:
+            raise Incomplete('cleanup-not-complete')
+        # Both outputs are prepared BEFORE the one terminal namespace operation.
+        published = json.dumps({'diagnostic': 'incomplete', 'collection_only': True,
+                                'phase': 'FINAL', 'disposition': 'PUBLISHED_INCOMPLETE',
+                                'failure_class': 'NONE', 'cleanup_known': True})
+        unknown = json.dumps({'diagnostic': 'incomplete', 'collection_only': True,
+                              'phase': 'UNKNOWN', 'disposition': 'UNKNOWN',
+                              'failure_class': 'UNKNOWN', 'cleanup_known': True})
+    except BaseException as error:
+        public.blocked(error)
+        if run is not None:
+            try:
+                run.cleanup_owned_files()  # Includes new validation/pair handles.
+            except BaseException as cleanup_error:
+                public.blocked(cleanup_error)
+                public.uncertain_cleanup()
+            try:
+                run.cleanup_stage()
+            except BaseException as cleanup_error:
+                public.blocked(cleanup_error)
+                public.uncertain_cleanup()
+            try:
+                public.observed_cleanup(run.cleanup_is_known())
+            except BaseException as cleanup_error:
+                public.blocked(cleanup_error)
+                public.uncertain_cleanup()
+        return json.dumps(public.payload())
+    # Terminal commit: outside EVERY cleanup/finally. On EIO/unknown outcome,
+    # ONLY a prevalidated closed encrypted pair may be exposed. No post-call I/O.
+    try:
+        os.replace(source, destination)
+    except BaseException:
+        return unknown
+    return published
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        payload = main()
+    except BaseException:
+        # An unexpected path gets no exception text, success or release claim.
+        payload = '{"diagnostic": "incomplete", "collection_only": true, "phase": "UNKNOWN", "disposition": "UNKNOWN", "failure_class": "UNKNOWN", "cleanup_known": false}'
+    try:
+        print(payload)  # Exactly one already-encoded fixed-object output attempt.
+    except BaseException:
+        pass  # A failed stdout never licenses an exception-text fallback.
+    sys.exit(1)  # Always incomplete; no artifact qualifies the product.
