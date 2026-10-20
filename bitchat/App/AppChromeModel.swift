@@ -82,20 +82,11 @@ final class AppChromeModel: ObservableObject {
         showPanicConfirmation = true
     }
 
-    @discardableResult
-    func panicClearAllData() -> Bool {
+    func beginPanicClearAllDataAwaitingKnownOutboundTasks() -> PanicEraseCommand.Erase? {
         showPanicConfirmation = false
-        // A wipe invalidates everything on screen, and its outcome must be
-        // visible: the success message and the failed-wipe banner both live
-        // on the root timeline, so a sheet left up (the App Info danger-zone
-        // path keeps its sheet presented) would hide the one signal that says
-        // whether the wipe worked.
         isAppInfoPresented = false
         showingFingerprintFor = nil
-
-        // Wesh: Bluetooth stays off until the welcome and its terms are accepted again, so the new
-        // identity announces nothing before (`AppRuntime.welcomeFinished`).
-        return chatViewModel.panicClearAllData(restartMesh: !WeshMode.isActive)
+        return chatViewModel.beginPanicClearAllDataAwaitingKnownOutboundTasks(restartMesh: !WeshMode.isActive)
     }
 
     private func bind(privateInboxModel: PrivateInboxModel) {

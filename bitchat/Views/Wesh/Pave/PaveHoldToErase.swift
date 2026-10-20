@@ -155,22 +155,24 @@ struct PaveEraseScreen: View {
         }
     }
 
-    /// Runs the local wipe; returns whether it completed.
-    let erase: () -> Bool
+    /// The runtime retains the operation independently of this presentation.
+    @ObservedObject private var command: PanicEraseCommand
     let onClose: () -> Void
 
     @Environment(\.paveTheme) private var theme
     @State private var outcome: Outcome
 
-    init(outcome: Outcome = .ready, erase: @escaping () -> Bool, onClose: @escaping () -> Void) {
+    init(outcome: Outcome = .ready, command: PanicEraseCommand, onClose: @escaping () -> Void) {
         _outcome = State(initialValue: outcome)
-        self.erase = erase
+        self.command = command
         self.onClose = onClose
     }
 
     var body: some View {
         Group {
-            switch outcome {
+            if command.isRunning {
+                page { ProgressView().accessibilityLabel(PaveCopy.text("pave.erase.title")) }
+            } else { switch outcome {
             case .ready:
                 // Not inside a ScrollView: a scroll must never compete with the hold.
                 page { ready }
@@ -179,7 +181,7 @@ struct PaveEraseScreen: View {
                 ScrollView { page { erased } }
             case .failed:
                 ScrollView { page { failed } }
-            }
+            } }
         }
         .paveScreenBackground()
     }
@@ -210,8 +212,10 @@ struct PaveEraseScreen: View {
             // Not inside a ScrollView: a scroll must never compete with the hold.
             VStack(spacing: PaveSpace.s4) {
                 PaveHoldToErase {
-                    outcome = Outcome(erased: erase())
-                    if outcome == .failed { PaveHaptics.play(.failure) }
+                    _ = command.submit { completed in
+                        outcome = Outcome(erased: completed)
+                        if outcome == .failed { PaveHaptics.play(.failure) }
+                    }
                 }
                 .padding(.vertical, PaveSpace.s12)
                 Text(PaveCopy.text("pave.erase.othersKeepCopies"))
@@ -250,6 +254,10 @@ struct PaveEraseScreen: View {
 }
 
 struct PaveHoldToErase_Previews: PreviewProvider {
+    @MainActor private static func previewCommand(completed: Bool) -> PanicEraseCommand {
+        PanicEraseCommand(begin: { { completed } }, creator: PanicEraseCommand.mainActorCreator,
+            needsBootstrap: { false }, bootstrap: {}, needsRuntimeStart: { false }, startRuntime: {})
+    }
     static var previews: some View {
         PavePreview.variants {
             VStack(spacing: PaveSpace.s6) {
@@ -259,13 +267,13 @@ struct PaveHoldToErase_Previews: PreviewProvider {
             .padding(PaveSpace.s4)
         }
         PavePreview.variants {
-            PaveEraseScreen(erase: { true }, onClose: {})
+            PaveEraseScreen(command: previewCommand(completed: true), onClose: {})
         }
         PavePreview.variants {
-            PaveEraseScreen(outcome: .erased, erase: { true }, onClose: {})
+            PaveEraseScreen(outcome: .erased, command: previewCommand(completed: true), onClose: {})
         }
         PavePreview.variants {
-            PaveEraseScreen(outcome: .failed, erase: { false }, onClose: {})
+            PaveEraseScreen(outcome: .failed, command: previewCommand(completed: false), onClose: {})
         }
     }
 }

@@ -729,6 +729,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         idBridge: NostrIdentityBridge,
         identityManager: SecureIdentityStateManagerProtocol,
         transport: Transport,
+        nostrDependencies: NostrTransport.Dependencies? = nil,
         conversations: ConversationStore? = nil,
         peerIdentityStore: PeerIdentityStore? = nil,
         readReceiptsDefaults: UserDefaults? = nil,
@@ -751,7 +752,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             identityManager: identityManager,
             meshService: transport,
             outboxStore: outboxStore,
-            sfMetrics: sfMetrics
+            sfMetrics: sfMetrics,
+            nostrDependencies: nostrDependencies
         )
 
         self.keychain = keychain
@@ -1252,14 +1254,65 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// `restartMesh: false` keeps Bluetooth stopped after the wipe (Wesh: until the welcome ends),
     /// while the rest of the network lifecycle restarts as usual.
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
+        guard let attempt = claimPanicAttempt() else { return false }
+        defer { finishPanicAttempt(attempt) }
+        let prepared = preparePanicApplicationErasure()
+        return finishPanicApplicationErasure(prepared, restartServices: restartServices, restartMesh: restartMesh)
+    }
+
+    /// Synchronous protective begin; only its authentic continuation enters the retained Task.
+    @MainActor
+    func beginPanicClearAllDataAwaitingKnownOutboundTasks(restartServices: Bool = true, restartMesh: Bool = true) -> PanicEraseCommand.Erase? {
+        guard let attempt = claimPanicAttempt() else { return nil }
+        let prepared = preparePanicApplicationErasure()
+        return { [self] in
+            guard activePanicAttempt == attempt, !panicContinuationStarted else { return false }
+            panicContinuationStarted = true
+            defer { finishPanicAttempt(attempt) }
+            try Task.checkCancellation()
+            let known = try await awaitCapturedOriginalReturnedTaskBatch(prepared.binding, closeOutcome: prepared.closeOutcome)
+            try Task.checkCancellation()
+            guard known.permitsExistingOwnerCheck else { return false }
+            return finishPanicApplicationErasure(prepared, restartServices: restartServices, restartMesh: restartMesh)
+        }
+    }
+
+    private struct PreparedPanicApplicationErasure {
+        let binding: NostrOutboundPanicBinding
+        let closeOutcome: NostrOutboundOwner.RootCloseOutcome
+        let recoveryIntent: PanicRecoveryIntent
+        let networkWipeCompleted: Bool
+    }
+    private var activePanicAttempt: UUID?
+    private var panicContinuationStarted = false
+
+    @MainActor
+    private func claimPanicAttempt() -> UUID? {
+        guard activePanicAttempt == nil else { return nil }
+        let attempt = UUID()
+        activePanicAttempt = attempt
+        panicContinuationStarted = false
+        return attempt
+    }
+
+    @MainActor
+    private func finishPanicAttempt(_ attempt: UUID) {
+        guard activePanicAttempt == attempt else { return }
+        activePanicAttempt = nil
+        panicContinuationStarted = false
+        isPanicResetting = false
+    }
+
+    @MainActor
+    private func preparePanicApplicationErasure() -> PreparedPanicApplicationErasure {
         startupRetirementBlocked = false
         panicRecoveryBlocked = true
-        _ = panicNetworkLifecycle.closeInstalledNostrRoots(nostrOutboundPanicBinding)
+        let originalBinding = nostrOutboundPanicBinding
+        let closeOutcome = panicNetworkLifecycle.closeInstalledNostrRoots(originalBinding)
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
         weshAnnouncedInternetKeys.removeAll()
         isPanicResetting = true
-        defer { isPanicResetting = false }
         weshMeetingNote.suspendForPanic()
 
         // Stop internet and location-presence work before clearing identity or
@@ -1295,13 +1348,20 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         nostrCoordinator.inbound.invalidateInFlightDecrypts()
         nostrRelayManager = nil
 
+        return PreparedPanicApplicationErasure(binding: originalBinding, closeOutcome: closeOutcome,
+            recoveryIntent: recoveryIntent, networkWipeCompleted: networkWipeCompleted)
+    }
+
+    @MainActor
+    private func finishPanicApplicationErasure(_ prepared: PreparedPanicApplicationErasure,
+                                                restartServices: Bool, restartMesh: Bool) -> Bool {
         return admitPanicApplicationErasure(
-            intent: recoveryIntent,
+            intent: prepared.recoveryIntent,
             collectOwners: panicRecoveryOperations.collectAppOwners
         ) { intent, report in
             self.erasePanicApplicationData(
                 recoveryIntent: intent, ownerReport: report,
-                networkWipeCompleted: networkWipeCompleted,
+                networkWipeCompleted: prepared.networkWipeCompleted,
                 restartServices: restartServices, restartMesh: restartMesh
             )
         }

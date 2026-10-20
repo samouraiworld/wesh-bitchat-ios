@@ -61,7 +61,7 @@ struct WeshAppShortcuts: AppShortcutsProvider {
 }
 
 private struct PaveEraseShortcutPresenter: ViewModifier {
-    let erase: () -> Bool
+    let command: PanicEraseCommand
     @ObservedObject private var request = PaveEraseRequest.shared
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
@@ -85,7 +85,7 @@ private struct PaveEraseShortcutPresenter: ViewModifier {
     }
 
     private var screen: some View {
-        PaveEraseScreen(outcome: request.outcome, erase: erase) { request.close() }
+        PaveEraseScreen(outcome: request.outcome, command: command) { request.close() }
             .paveTheme(.nuit)
     }
 }
@@ -135,7 +135,7 @@ private final class PaveEraseOverlayWindow {
 
 extension View {
     /// Presents the hold-to-erase screen when the « Tout effacer » App Shortcut runs.
-    func paveEraseShortcut(erase: @escaping () -> Bool) -> some View {
-        modifier(PaveEraseShortcutPresenter(erase: erase))
+    func paveEraseShortcut(command: PanicEraseCommand) -> some View {
+        modifier(PaveEraseShortcutPresenter(command: command))
     }
 }

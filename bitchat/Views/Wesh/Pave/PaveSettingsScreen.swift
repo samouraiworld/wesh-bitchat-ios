@@ -45,8 +45,8 @@ struct PaveSettingsScreen: View {
     let summary: PaveSettingsSummary
     /// False when the caller shows the wipe's result itself (the app's root rebuilds after a wipe).
     var presentsOutcome = true
-    /// Runs the local wipe; returns whether it completed, like `PaveEraseScreen`.
-    let onErase: () -> Bool
+    @ObservedObject var eraseCommand: PanicEraseCommand
+    var onOutcome: (Bool) -> Void = { _ in }
     let onSelect: (PaveSettingsDestination) -> Void
 
     @Environment(\.paveTheme) private var theme
@@ -55,7 +55,7 @@ struct PaveSettingsScreen: View {
 
     var body: some View {
         if let eraseOutcome {
-            PaveEraseScreen(outcome: eraseOutcome, erase: onErase) { self.eraseOutcome = nil }
+            PaveEraseScreen(outcome: eraseOutcome, command: eraseCommand) { self.eraseOutcome = nil }
         } else {
             settings
         }
@@ -69,10 +69,15 @@ struct PaveSettingsScreen: View {
                 .padding(.bottom, PaveSpace.s1)
             // Pinned above the scrolling rows: a scroll must never compete with the hold.
             PaveHoldToErase(layout: .row) {
-                let outcome = PaveEraseScreen.Outcome(erased: onErase())
-                if outcome == .failed { PaveHaptics.play(.failure) }
-                if presentsOutcome { eraseOutcome = outcome }
+                _ = eraseCommand.submit { completed in
+                    let outcome = PaveEraseScreen.Outcome(erased: completed)
+                    if outcome == .failed { PaveHaptics.play(.failure) }
+                    if presentsOutcome { eraseOutcome = outcome }
+                    onOutcome(completed)
+                }
             }
+            .disabled(eraseCommand.isRunning)
+            if eraseCommand.isRunning { ProgressView().accessibilityLabel(PaveCopy.text("pave.erase.title")) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PaveSpace.s3) {
                     VStack(spacing: 0) {
@@ -196,7 +201,9 @@ struct PaveSettingsScreen_Previews: PreviewProvider {
             PaveSettingsScreen(summary: PaveSettingsSummary(nickname: "Renard 42", previewsHidden: true,
                                                             meetingNote: "Fontaine, 18 h", blockedCount: 2,
                                                             theme: .nuit),
-                               onErase: { true }, onSelect: { _ in })
+                               eraseCommand: PanicEraseCommand(begin: { { true } }, creator: PanicEraseCommand.mainActorCreator,
+                                   needsBootstrap: { false }, bootstrap: {}, needsRuntimeStart: { false }, startRuntime: {}),
+                               onSelect: { _ in })
         }
         PavePreview.variants {
             PaveAboutScreen(version: "1.0 (1)")

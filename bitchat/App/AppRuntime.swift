@@ -124,16 +124,23 @@ final class AppRuntime: ObservableObject {
         .store(in: &cancellables)
     }
 
-    func panicEraseAction(report: @escaping (Bool) -> Void = { _ in }) -> () -> Bool {
-        makePanicEraseAction(
-            erase: { self.appChromeModel.panicClearAllData() },
-            report: report,
-            needsBootstrap: { !self.chatViewModel.bootstrapConfigured },
-            bootstrap: { self.chatViewModel.configureBootstrapIfNeeded() },
-            needsRuntimeStart: { !self.hasStarted },
-            startRuntime: { self.start() }
-        )
-    }
+    /// One command for this installed runtime; presentation never owns its Task.
+    private(set) lazy var panicEraseCommand = PanicEraseCommand(
+        begin: { [weak self] in
+            guard let self,
+                  let prepared = self.appChromeModel.beginPanicClearAllDataAwaitingKnownOutboundTasks() else { return nil }
+            return { [self] in
+                // Retain this original runtime through its prepared continuation and result routing.
+                defer { withExtendedLifetime(self) {} }
+                return try await prepared()
+            }
+        },
+        creator: PanicEraseCommand.mainActorCreator,
+        needsBootstrap: { [weak self] in self.map { !$0.chatViewModel.bootstrapConfigured } ?? false },
+        bootstrap: { [weak self] in self?.chatViewModel.configureBootstrapIfNeeded() },
+        needsRuntimeStart: { [weak self] in self.map { !$0.hasStarted } ?? false },
+        startRuntime: { [weak self] in self?.start() }
+    )
 
     func retryStartupRetirement() {
         guard chatViewModel.retryStartupRetirement() else { return }

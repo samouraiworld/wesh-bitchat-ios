@@ -2,6 +2,7 @@ import BitFoundation
 import CryptoKit
 import CoreBluetooth
 import Foundation
+import Combine
 import Testing
 @testable import bitchat
 
@@ -262,70 +263,108 @@ struct WeshNativeUITests {
     }
 
     @Test(arguments: [false, true]) @MainActor
-    func confirmedGlobalWipeKeepsAdmissionClosedUntilNoteErasureAndRetryCommit(failNote: Bool) {
-        var allowNoteErasure = !failNote
-        var eraseAttempts = 0
-        let note = WeshMeetingNoteStore(erasePersisted: {
-            eraseAttempts += 1
-            return allowNoteErasure
-        })
-        let oldGeneration = note.generation
-        #expect(note.edit(\.note, value: "Note synthétique privée", generation: oldGeneration))
-        let keychain = MockKeychain()
-        keychain.simulatedDeleteAllResult = failNote
-        let transport = MockTransport()
-        var begun = 0
-        var committed = 0
-        let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
-            isPending: { false },
-            begin: {
-                begun += 1
-                return PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
-            },
-            wipeMedia: { _ in },
-            complete: { committed += 1 }
-        )
-        let vm = ChatViewModel(
-            keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
-            identityManager: MockIdentityManager(keychain), transport: transport,
-            panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true, weshMeetingNote: note
-        )
-        vm.bluetoothState = .poweredOn
-        let chrome = AppChromeModel(chatViewModel: vm, privateInboxModel: PrivateInboxModel(conversations: vm.conversations))
-        let starts = transport.startServicesCallCount
-        chrome.requestPanicWipe()
-        #expect(chrome.showPanicConfirmation)
-        #expect(begun == 0 && eraseAttempts == 0 && keychain.deleteAllCallCount == 0)
-        // Cancelling the confirmation never enters the destructive path.
-        chrome.showPanicConfirmation = false
-        #expect(note.content.note == "Note synthétique privée")
-        chrome.requestPanicWipe()
-        #expect(!chrome.panicClearAllData())
-        #expect(!chrome.showPanicConfirmation)
-        #expect(vm.panicRecoveryBlocked && note.isSuspended)
-        #expect(note.content.note.isEmpty)
-        #expect(committed == 0 && begun == 1 && eraseAttempts == 1)
-        #expect(transport.startServicesCallCount == starts)
-        #expect(!vm.canSendWeshPublic)
-        var draft = "Brouillon après refus"
-        #expect(!vm.sendWeshDraft(&draft, to: nil))
-        #expect(draft == "Brouillon après refus")
-        #expect(transport.sentMessages.isEmpty)
-        let failedGeneration = note.generation
-        #expect(!note.edit(\.note, value: "Retour ancien éditeur", generation: oldGeneration))
-        allowNoteErasure = true
-        keychain.simulatedDeleteAllResult = true
-        chrome.requestPanicWipe()
-        #expect(chrome.panicClearAllData())
-        #expect(!vm.panicRecoveryBlocked && !note.isSuspended)
-        #expect(committed == 1 && begun == 2 && eraseAttempts == 2)
-        #expect(vm.weshPanicGeneration == 2)
-        // In Wesh the mesh stays stopped until the welcome that follows a wipe ends.
-        #expect(transport.startServicesCallCount == starts + (WeshMode.isActive ? 0 : 1))
-        #expect(note.edit(\.note, value: "Note après reprise", generation: note.generation))
-        #expect(!note.edit(\.note, value: "Ancienne vue", generation: failedGeneration))
-        #expect(note.content.note == "Note après reprise")
+    func confirmedGlobalWipeKeepsAdmissionClosedUntilNoteErasureAndRetryCommit(failNote: Bool) async throws {
+        try await withPanicSpineFixture { f in
+            var allowNoteErasure = !failNote
+            var eraseAttempts = 0
+            let note = WeshMeetingNoteStore(erasePersisted: {
+                eraseAttempts += 1
+                return allowNoteErasure
+            })
+            let oldGeneration = note.generation
+            #expect(note.edit(\.note, value: "Note synthétique privée", generation: oldGeneration))
+            let keychain = MockKeychain()
+            keychain.simulatedDeleteAllResult = failNote
+            let transport = MockTransport()
+            var begun = 0
+            var committed = 0
+            let operations = PanicRecoveryOperations(
+                collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
+                isPending: { false },
+                begin: {
+                    begun += 1
+                    return PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
+                },
+                wipeMedia: { _ in },
+                complete: { committed += 1 }
+            )
+            // The real installed Nostr transport uses this fixture's original owner.
+            // Empty publishers produce no source events or Task roots during construction.
+            let owner = f.owner(tail: f.gate(open: true))
+            let dependencies = NostrTransport.Dependencies(
+                outboundOwner: owner, notificationCenter: NotificationCenter(),
+                loadFavorites: { [:] }, favoriteStatusForNoiseKey: { _ in nil },
+                favoriteStatusForPeerID: { _ in nil }, currentIdentity: { nil },
+                registerPendingGiftWrap: { _ in Issue.record("Unexpected gift-wrap registration") },
+                sendEvent: { _ in Issue.record("Unexpected Nostr send") },
+                scheduleAfter: { _, action in
+                    Issue.record("Unexpected ACK scheduling in the nonemitting fixture")
+                    action()
+                },
+                relayConnectivity: { Empty<Bool, Never>(completeImmediately: false).eraseToAnyPublisher() }
+            )
+            var actualClose: NostrOutboundOwner.RootCloseOutcome?
+            var actualInstalledOwnerMatches = false
+            let lifecycle = PanicNetworkLifecycle(stop: { true }, restart: {}, closeInstalledNostrRoots: { binding in
+                actualInstalledOwnerMatches = binding.ownerID === owner.id
+                let outcome = closeCapturedNostrOutboundRootsAndRequestSourceDetachment(binding)
+                actualClose = outcome
+                return outcome
+            })
+            defer { _ = closeCapturedNostrOutboundRootsAndRequestSourceDetachment(owner.captureOutboundPanicBinding()) }
+            let vm = ChatViewModel(
+                keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+                identityManager: MockIdentityManager(keychain), transport: transport, nostrDependencies: dependencies,
+                panicRecoveryOperations: operations, panicNetworkLifecycle: lifecycle,
+                weshPrivatePolicyEnabled: true, weshMeetingNote: note
+            )
+            vm.bluetoothState = .poweredOn
+            let chrome = AppChromeModel(chatViewModel: vm, privateInboxModel: PrivateInboxModel(conversations: vm.conversations))
+            let starts = transport.startServicesCallCount
+            chrome.requestPanicWipe()
+            #expect(chrome.showPanicConfirmation)
+            #expect(begun == 0 && eraseAttempts == 0 && keychain.deleteAllCallCount == 0)
+            // Cancelling the confirmation never enters the destructive path.
+            chrome.showPanicConfirmation = false
+            #expect(note.content.note == "Note synthétique privée")
+            chrome.requestPanicWipe()
+            try #require(owner.taskBatchSnapshot().taskIDs.isEmpty && f.tasks.snapshot().isEmpty)
+            let firstContinuation = try #require(chrome.beginPanicClearAllDataAwaitingKnownOutboundTasks())
+            try #require(actualInstalledOwnerMatches)
+            guard let actualClose, case .closed = actualClose else {
+                throw PanicSpineFailure.messages(["Actual installed original owner did not close"])
+            }
+            let firstCompleted = try await firstContinuation()
+            #expect(!firstCompleted)
+            #expect(!chrome.showPanicConfirmation)
+            #expect(vm.panicRecoveryBlocked && note.isSuspended)
+            #expect(note.content.note.isEmpty)
+            #expect(committed == 0 && begun == 1 && eraseAttempts == 1)
+            #expect(transport.startServicesCallCount == starts)
+            #expect(!vm.canSendWeshPublic)
+            var draft = "Brouillon après refus"
+            #expect(!vm.sendWeshDraft(&draft, to: nil))
+            #expect(draft == "Brouillon après refus")
+            #expect(transport.sentMessages.isEmpty)
+            let failedGeneration = note.generation
+            #expect(!note.edit(\.note, value: "Retour ancien éditeur", generation: oldGeneration))
+            allowNoteErasure = true
+            keychain.simulatedDeleteAllResult = true
+            chrome.requestPanicWipe()
+            try #require(owner.taskBatchSnapshot().taskIDs.isEmpty && f.tasks.snapshot().isEmpty)
+            let secondContinuation = try #require(chrome.beginPanicClearAllDataAwaitingKnownOutboundTasks())
+            let secondCompleted = try await secondContinuation()
+            #expect(secondCompleted)
+            #expect(!vm.panicRecoveryBlocked && !note.isSuspended)
+            #expect(committed == 1 && begun == 2 && eraseAttempts == 2)
+            #expect(vm.weshPanicGeneration == 2)
+            // In Wesh the mesh stays stopped until the welcome that follows a wipe ends.
+            #expect(transport.startServicesCallCount == starts + (WeshMode.isActive ? 0 : 1))
+            #expect(note.edit(\.note, value: "Note après reprise", generation: note.generation))
+            #expect(!note.edit(\.note, value: "Ancienne vue", generation: failedGeneration))
+            #expect(note.content.note == "Note après reprise")
+            return {}
+        }
     }
 
     @Test func noiseRecoveryNoticesExplainEveryUnavailableStateWithoutDestructiveAction() {

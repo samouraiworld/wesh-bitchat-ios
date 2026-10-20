@@ -927,6 +927,56 @@ final class NostrOutboundOwner: @unchecked Sendable {
         }
     }
 
+    enum OriginalReturnedTaskGap: Equatable, Sendable {
+        case invalidOriginalBinding, missingCloseReceipt, protocolUncertainty, unsettledTask
+        case requestedNotAwaited(ownerID: Identity, batchID: Identity, taskIDs: [Identity])
+    }
+    /// Authentic empty preparation only; contains no owner, receipt or restore authority.
+    struct EmptyOriginalReturnedTasks: Sendable {
+        fileprivate init() {}
+    }
+    struct OriginalReturnedTaskResult: Sendable {
+        let joined: JoinedTaskBatch?
+        let empty: EmptyOriginalReturnedTasks?
+        let gap: OriginalReturnedTaskGap?
+        var permitsExistingOwnerCheck: Bool { joined != nil || empty != nil }
+        fileprivate init(joined: JoinedTaskBatch?, empty: EmptyOriginalReturnedTasks?, gap: OriginalReturnedTaskGap?) {
+            self.joined = joined; self.empty = empty; self.gap = gap
+        }
+    }
+    private enum OriginalReturnedPreparation {
+        case ready(TaskBatch), empty(EmptyOriginalReturnedTasks), unconfirmed(OriginalReturnedTaskGap)
+    }
+
+    /// Known returned bodies only, not a closed callback frontier or whole-owner drain.
+    private func prepareOriginalReturnedTasks(subject: RootPanicSubject, receipt: RootCloseReceipt) -> OriginalReturnedPreparation {
+        locked {
+            guard subject === originalRootSubject else { return .unconfirmed(.invalidOriginalBinding) }
+            guard let actual = rootCloseReceipt, receipt === actual else { return .unconfirmed(.missingCloseReceipt) }
+            guard debts.isEmpty, unconfirmedHandles.isEmpty else { return .unconfirmed(.protocolUncertainty) }
+            let taskIDs = order.filter { records[$0]?.ticket is TaskTicket }
+            for key in taskIDs {
+                guard let record = records[key], record.dispatched, record.body == .returned,
+                      record.handle != nil, !record.failedProtocol else { return .unconfirmed(.unsettledTask) }
+            }
+            if taskIDs.isEmpty { return .empty(EmptyOriginalReturnedTasks()) }
+            return .ready(TaskBatch(ownerID: id, taskIDs: taskIDs))
+        }
+    }
+
+    @MainActor
+    fileprivate func awaitOriginalReturnedTasks(subject: RootPanicSubject, receipt: RootCloseReceipt) async throws -> OriginalReturnedTaskResult {
+        try Task.checkCancellation()
+        switch prepareOriginalReturnedTasks(subject: subject, receipt: receipt) {
+        case .unconfirmed(let gap): return OriginalReturnedTaskResult(joined: nil, empty: nil, gap: gap)
+        case .empty(let witness): return OriginalReturnedTaskResult(joined: nil, empty: witness, gap: nil)
+        case .ready(let batch):
+            // BASELINE omission: the same batch's actual Task.value await is not performed yet.
+            return OriginalReturnedTaskResult(joined: nil, empty: nil,
+                gap: .requestedNotAwaited(ownerID: batch.ownerID, batchID: batch.id, taskIDs: batch.taskIDs))
+        }
+    }
+
     private func registeredHandle(_ taskID: Identity) async throws -> Task<Void, Never> {
         let waiter = locked { () -> Waiter in
             let waiter = Waiter(taskID: taskID)
@@ -1094,4 +1144,17 @@ func closeCapturedNostrOutboundRootsAndRequestSourceDetachment(
         for claim in claims { _ = binding.owner.invokeSourceDetachment(claim) }
     }
     return original
+}
+
+/// Caller contract: the application command is outside this owner. Only returned synchronous
+/// live Task bodies are eligible; arbitrary custom async tails are not a universal self-safety proof.
+@MainActor
+func awaitCapturedOriginalReturnedTaskBatch(
+    _ binding: NostrOutboundPanicBinding,
+    closeOutcome: NostrOutboundOwner.RootCloseOutcome
+) async throws -> NostrOutboundOwner.OriginalReturnedTaskResult {
+    guard case .closed(let receipt) = closeOutcome else {
+        return NostrOutboundOwner.OriginalReturnedTaskResult(joined: nil, empty: nil, gap: .missingCloseReceipt)
+    }
+    return try await binding.owner.awaitOriginalReturnedTasks(subject: binding.subject, receipt: receipt)
 }

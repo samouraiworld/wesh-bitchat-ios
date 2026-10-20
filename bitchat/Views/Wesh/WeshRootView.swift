@@ -302,6 +302,7 @@ private struct WeshNoiseIdentityRecoveryPanel: View {
 struct WeshRootView: View {
     let runtime: AppRuntime
     @ObservedObject private var viewModel: ChatViewModel
+    @ObservedObject private var eraseCommand: PanicEraseCommand
     @EnvironmentObject private var chrome: AppChromeModel
     @State private var panicFeedback = ""
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
@@ -315,11 +316,15 @@ struct WeshRootView: View {
     init(runtime: AppRuntime) {
         self.runtime = runtime
         _viewModel = ObservedObject(wrappedValue: runtime.chatViewModel)
+        _eraseCommand = ObservedObject(wrappedValue: runtime.panicEraseCommand)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            switch WeshRootScreen(panicRecoveryBlocked: viewModel.panicRecoveryBlocked, welcomed: welcomed) {
+            if eraseCommand.isRunning {
+                ProgressView().accessibilityLabel(PaveCopy.text("pave.erase.title"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { switch WeshRootScreen(panicRecoveryBlocked: viewModel.panicRecoveryBlocked, welcomed: welcomed) {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -369,7 +374,7 @@ struct WeshRootView: View {
                         tab(PaveCopy.text("pave.settings.title"), symbol: "gearshape", index: 1)
                     }.padding(.top, 8).padding(.bottom, 4)
                 }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
-            }
+            } }
         }
         .overlay { if WeshPrivacyCover.covers(scenePhase) { WeshPrivacyCoverView() } }
         .environment(\.weshTheme, theme)
@@ -390,10 +395,10 @@ struct WeshRootView: View {
         .alert(PaveCopy.text("pave.wesh.erase.confirmTitle"), isPresented: $chrome.showPanicConfirmation) {
             Button(PaveCopy.text("pave.action.cancel"), role: .cancel) {}
             Button(PaveCopy.text("pave.wesh.erase.confirmAction"), role: .destructive) {
-                _ = runtime.panicEraseAction(report: { completed in
+                _ = runtime.panicEraseCommand.submit(report: { completed in
                     selectedTab = 1
                     panicFeedback = WeshFeedbackCopy.eraseOutcome(completed)
-                })()
+                })
             }
         } message: {
             Text(WeshFeedbackCopy.eraseWarning())
@@ -1279,10 +1284,9 @@ private struct WeshSettings: View {
     var body: some View {
         // The hold is the confirmation: no alert after it. The wipe rebuilds the tabs, so its
         // outcome shows above the app, in the window the « Tout effacer » shortcut uses.
-        PaveSettingsScreen(summary: summary, presentsOutcome: false, onErase: {
-            runtime.panicEraseAction(report: { erased in
-                PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
-            })()
+        PaveSettingsScreen(summary: summary, presentsOutcome: false, eraseCommand: runtime.panicEraseCommand,
+                           onOutcome: { erased in
+            PaveEraseRequest.shared.show(PaveEraseScreen.Outcome(erased: erased))
         }, onSelect: { selected in
             if selected == .connexion { connexion = true } else { destination = selected }
         })

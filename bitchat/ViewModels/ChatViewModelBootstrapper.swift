@@ -20,7 +20,8 @@ struct ChatViewModelServiceBundle {
         identityManager: SecureIdentityStateManagerProtocol,
         meshService: Transport,
         outboxStore: MessageOutboxStore? = nil,
-        sfMetrics: StoreAndForwardMetrics? = nil
+        sfMetrics: StoreAndForwardMetrics? = nil,
+        nostrDependencies: NostrTransport.Dependencies? = nil
     ) {
         let commandProcessor = CommandProcessor(identityManager: identityManager)
         let privateChatManager = PrivateChatManager(meshService: meshService)
@@ -31,7 +32,7 @@ struct ChatViewModelServiceBundle {
         )
         let nostrTransport = NostrTransport(
             keychain: keychain, idBridge: idBridge,
-            dependencies: .live(idBridge: idBridge, isBlocked: { identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) })
+            dependencies: nostrDependencies ?? .live(idBridge: idBridge, isBlocked: { identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) })
         )
         nostrTransport.senderPeerID = meshService.myPeerID
         let nostrOutboundPanicBinding = nostrTransport.captureOutboundPanicBinding()
