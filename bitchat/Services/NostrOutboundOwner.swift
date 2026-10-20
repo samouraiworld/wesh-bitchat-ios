@@ -929,7 +929,6 @@ final class NostrOutboundOwner: @unchecked Sendable {
 
     enum OriginalReturnedTaskGap: Equatable, Sendable {
         case invalidOriginalBinding, missingCloseReceipt, protocolUncertainty, unsettledTask
-        case requestedNotAwaited(ownerID: Identity, batchID: Identity, taskIDs: [Identity])
     }
     /// Authentic empty preparation only; contains no owner, receipt or restore authority.
     struct EmptyOriginalReturnedTasks: Sendable {
@@ -971,9 +970,8 @@ final class NostrOutboundOwner: @unchecked Sendable {
         case .unconfirmed(let gap): return OriginalReturnedTaskResult(joined: nil, empty: nil, gap: gap)
         case .empty(let witness): return OriginalReturnedTaskResult(joined: nil, empty: witness, gap: nil)
         case .ready(let batch):
-            // BASELINE omission: the same batch's actual Task.value await is not performed yet.
-            return OriginalReturnedTaskResult(joined: nil, empty: nil,
-                gap: .requestedNotAwaited(ownerID: batch.ownerID, batchID: batch.id, taskIDs: batch.taskIDs))
+            let joined = try await joinTaskBatch(batch)
+            return OriginalReturnedTaskResult(joined: joined, empty: nil, gap: nil)
         }
     }
 

@@ -28,7 +28,7 @@ func makePanicEraseAction(
 /// Application-owned continuation. Running is submission, never erase completion.
 @MainActor
 final class PanicEraseCommand: ObservableObject {
-    struct AttemptID: Equatable { fileprivate let value = UUID() }
+    typealias AttemptID = UUID
     enum Phase: Equatable { case idle, running(AttemptID), finished(AttemptID, Bool) }
     enum Submission { case started(AttemptID), busy(AttemptID), unavailable }
     typealias Work = @MainActor () async -> Void
@@ -40,7 +40,7 @@ final class PanicEraseCommand: ObservableObject {
 
     @MainActor private final class Attempt {
         let id = AttemptID()
-        var handle: Task<Void, Never>?
+        var retainedTasks: [Task<Void, Never>] = []
         var bodyStarted = false
     }
     @Published private(set) var phase: Phase = .idle
@@ -101,14 +101,14 @@ final class PanicEraseCommand: ObservableObject {
                 needsRuntimeStart: needsRuntimeStart, startRuntime: startRuntime
             )()
             if active === attempt {
-                attempt.handle = nil
+                attempt.retainedTasks.removeAll()
                 active = nil
                 phase = .finished(attempt.id, completed)
             }
         }
         // Always attach the actual returned Task, even if a custom creator completed inline.
-        attempt.handle = handle
-        if active !== attempt { attempt.handle = nil }
+        attempt.retainedTasks.append(handle)
+        if active !== attempt { attempt.retainedTasks.removeAll() }
         return .started(attempt.id)
     }
 }
