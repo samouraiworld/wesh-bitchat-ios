@@ -411,7 +411,7 @@ struct AppArchitectureTests {
 
     @Test("Panic wipe dismisses chrome sheets so its outcome is visible")
     @MainActor
-    func panicWipeDismissesChromePresentation() {
+    func panicWipeDismissesChromePresentation() async throws {
         let viewModel = makeArchitectureViewModel()
         let privateInboxModel = PrivateInboxModel(conversations: ConversationStore())
         let chromeModel = AppChromeModel(chatViewModel: viewModel, privateInboxModel: privateInboxModel)
@@ -423,7 +423,8 @@ struct AppArchitectureTests {
         chromeModel.presentAppInfo()
         chromeModel.showFingerprint(for: PeerID(str: "peer-3"))
 
-        chromeModel.panicClearAllData()
+        let operation = try #require(chromeModel.beginPanicClearAllDataAwaitingKnownOutboundTasks())
+        _ = try await operation()
 
         #expect(!chromeModel.isAppInfoPresented)
         #expect(chromeModel.showingFingerprintFor == nil)

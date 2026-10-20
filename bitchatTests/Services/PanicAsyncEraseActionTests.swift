@@ -69,7 +69,7 @@ final class PanicSpineWorker: @unchecked Sendable {
         self.body = body
         let retained = Unmanaged.passRetained(self).toOpaque()
         let code = pthread_create(&thread, nil, { pointer in
-            let worker = Unmanaged<PanicSpineWorker>.fromOpaque(pointer!).takeRetainedValue()
+            let worker = Unmanaged<PanicSpineWorker>.fromOpaque(pointer).takeRetainedValue()
             worker.body()
             worker.lock.lock(); worker.returned = true; worker.lock.unlock()
             return nil

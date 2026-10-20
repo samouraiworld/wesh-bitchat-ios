@@ -1354,7 +1354,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     @MainActor
     private func finishPanicApplicationErasure(_ prepared: PreparedPanicApplicationErasure,
-                                                restartServices: Bool, restartMesh: Bool) -> Bool {
+                                               restartServices: Bool, restartMesh: Bool) -> Bool {
         return admitPanicApplicationErasure(
             intent: prepared.recoveryIntent,
             collectOwners: panicRecoveryOperations.collectAppOwners
