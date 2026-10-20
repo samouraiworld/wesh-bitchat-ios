@@ -32,6 +32,7 @@ RAW_LIMIT = 512 * 1024 * 1024
 CIPHER_LIMIT = 256 * 1024 * 1024
 BENCH_SECONDS = 360
 TRACE_SECONDS = 420
+TRACE_FINALIZE_SECONDS = 90
 STOP = False
 
 
@@ -107,8 +108,8 @@ class Run:
         self.note('spawn', name=name, pid=p.pid, args=args)
         return p, log
 
-    def wait(self, p, seconds):
-        deadline = time.monotonic() + seconds
+    def wait(self, p, seconds, *, started_at=None):
+        deadline = (time.monotonic() if started_at is None else started_at) + seconds
         while p.poll() is None:
             self.guard()
             if time.monotonic() >= deadline:
@@ -301,7 +302,9 @@ class Run:
             time.sleep(0.1)
         if self.serial.returncode != 0:
             raise Incomplete('serial-failed')
-        self.stop_group(self.recorder, self.recorder.pid, 'recorder', orderly=True)
+        self.note('serial-return', returncode=self.serial.returncode)
+        self.note('recorder-natural-finalization', absolute_deadline=trace_start - self.epoch + TRACE_SECONDS + TRACE_FINALIZE_SECONDS)
+        self.wait(self.recorder, TRACE_SECONDS + TRACE_FINALIZE_SECONDS, started_at=trace_start)
         if self.errors or self.recorder.returncode != 0:
             raise Incomplete('recorder-incomplete')
         self.notifier.close()
@@ -513,6 +516,8 @@ class ProcessObservation:
         self.records = {}
         self.watchers = {}
         self.next_cookie = 1
+        self.rejected_count = 0
+        self.rejected_budget_exhausted = False
         self.closed = False
         self.queue = select.kqueue()
         run.note('serial-process-identity', identity=self.root_identity)
@@ -540,6 +545,66 @@ class ProcessObservation:
     @staticmethod
     def identity(value):
         return (value['pid'], value['birth_sec'], value['birth_usec'])
+
+    @staticmethod
+    def copy_rejected_identity(value):
+        # Copy ONLY the exact primitive schema returned by read(), never an
+        # arbitrary mapping, accepted-record dictionary or authority object.
+        fields = ('pid', 'ppid', 'pgid', 'birth_sec', 'birth_usec', 'path')
+        if (type(value) is not dict or len(value) != 6 or
+                any(type(key) is not str for key in value) or
+                any(key not in value for key in fields)):
+            return None
+        pid, ppid, pgid = value['pid'], value['ppid'], value['pgid']
+        birth_sec, birth_usec, path = value['birth_sec'], value['birth_usec'], value['path']
+        if (type(pid) is not int or not 0 < pid <= 0x7fffffff or
+                type(ppid) is not int or not 0 <= ppid <= 0xffffffff or
+                type(pgid) is not int or not 0 <= pgid <= 0xffffffff or
+                type(birth_sec) is not int or not 0 < birth_sec <= 0xffffffffffffffff or
+                type(birth_usec) is not int or not 0 <= birth_usec < 1000000 or
+                type(path) is not str):
+            return None
+        try:
+            path_bytes = path.encode('utf-8', errors='strict')
+        except UnicodeEncodeError:
+            return None
+        if len(path_bytes) > 4095 or '\x00' in path:
+            return None
+        return {'pid': pid, 'ppid': ppid, 'pgid': pgid,
+                'birth_sec': birth_sec, 'birth_usec': birth_usec, 'path': path}
+
+    def remember_rejected(self, child, parent, again, chain,
+                          child_parent_mismatch, child_group_mismatch, parent_identity_mismatch):
+        # First128 TOTAL rejected calls, including duplicates; NO dedupe/key
+        # ledger. Further ordinary combined rejection gaps remain unchanged.
+        if self.rejected_count >= 128:
+            if not self.rejected_budget_exhausted:
+                self.rejected_budget_exhausted = True
+                self.run.note('rejected-process-observation-budget-exhausted', limit=128)
+            return
+        self.rejected_count += 1
+        child_copy = self.copy_rejected_identity(child)
+        parent_copy = self.copy_rejected_identity(parent)
+        again_copy = self.copy_rejected_identity(again)
+        chain_copy = None
+        if type(chain) is list and len(chain) <= 16:
+            chain_copy = [self.copy_rejected_identity(value) for value in chain]
+        predicates = (child_parent_mismatch, child_group_mismatch, parent_identity_mismatch)
+        if (child_copy is None or parent_copy is None or again_copy is None or
+                chain_copy is None or any(value is None for value in chain_copy) or
+                any(type(value) is not bool for value in predicates)):
+            # Explicit private schema limitation, not a silent lost event and
+            # NEVER admission. The SAME caller rejection still follows.
+            self.run.note('rejected-process-observation-schema-unavailable',
+                          receipt_monotonic=time.monotonic(), receipt_wall_ns=time.time_ns())
+            return
+        self.run.note('rejected-process-observation', child=child_copy,
+                      original_parent=parent_copy, reread_parent=again_copy,
+                      previously_observed_chain=chain_copy,
+                      child_parent_mismatch=child_parent_mismatch,
+                      child_group_mismatch=child_group_mismatch,
+                      parent_identity_mismatch=parent_identity_mismatch,
+                      receipt_monotonic=time.monotonic(), receipt_wall_ns=time.time_ns())
 
     def scan(self):
         # Bounded live discovery, not complete fork census. A vanished process
@@ -571,7 +636,12 @@ class ProcessObservation:
                 try:
                     child = self.read(pid)
                     again = self.read(parent['pid'])
-                    if child['ppid'] != parent['pid'] or child['pgid'] != self.root_identity['pgid'] or self.identity(again) != self.identity(parent):
+                    child_parent_mismatch = child['ppid'] != parent['pid']
+                    child_group_mismatch = child['pgid'] != self.root_identity['pgid']
+                    parent_identity_mismatch = self.identity(again) != self.identity(parent)
+                    if child_parent_mismatch or child_group_mismatch or parent_identity_mismatch:
+                        self.remember_rejected(child, parent, again, chain,
+                                               child_parent_mismatch, child_group_mismatch, parent_identity_mismatch)
                         raise Incomplete('child-chain-unstable-or-escaped')
                     ancestry = chain + [parent]
                     self.observe(child, ancestry)
