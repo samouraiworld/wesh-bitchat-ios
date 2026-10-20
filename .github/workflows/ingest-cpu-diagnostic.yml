@@ -1,0 +1,40 @@
+name: Ingest CPU evidence (collection only, incomplete)
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'chore/ingest-cpu-diagnostic'
+    runs-on: macos-latest
+    # Includes the unchanged coverage prelude, first serial rebuild, bounded
+    # recording and separate cleanup/encryption time. This is no floor gate.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Collect once; leave diagnostic incomplete pending private review
+        env:
+          DIAGNOSTIC_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/diagnose-ingest-cpu.py
+      - name: Upload ciphertext and neutral manifest only
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-cpu-diagnostic-encrypted
+          path: |
+            .diagnostic-upload/ingest-cpu.cms
+            .diagnostic-upload/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
