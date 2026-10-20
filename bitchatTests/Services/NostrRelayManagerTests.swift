@@ -887,21 +887,61 @@ final class NostrRelayManagerTests: XCTestCase {
         let event = try makeSignedEvent(content: "valid-after-invalid")
         let invalidEvent = invalidSignatureCopy(of: event)
         var receivedIDs: [String] = []
+        var invalidPhaseEOSEObserved = false
 
         context.manager.subscribe(
             filter: makeFilter(),
             id: "events",
-            relayUrls: [firstRelayURL, secondRelayURL]
-        ) { event in
-            receivedIDs.append(event.id)
-        }
+            relayUrls: [firstRelayURL, secondRelayURL],
+            handler: { event in
+                receivedIDs.append(event.id)
+            },
+            onEOSE: { invalidPhaseEOSEObserved = true }
+        )
         let subscriptionsSent = await waitUntil {
             context.sessionFactory.latestConnection(for: firstRelayURL)?.sentStrings.count == 1 &&
             context.sessionFactory.latestConnection(for: secondRelayURL)?.sentStrings.count == 1
         }
         XCTAssertTrue(subscriptionsSent)
 
+        // Bind both actual targets before using EOSE as a per-stream processing barrier.
+        guard subscriptionsSent,
+              !invalidPhaseEOSEObserved,
+              context.sessionFactory.requestedURLs.count == 2,
+              Set(context.sessionFactory.requestedURLs) == Set([firstRelayURL, secondRelayURL]),
+              context.sessionFactory.allConnections.count == 2,
+              Set(context.manager.relays.map(\.url)) == Set([firstRelayURL, secondRelayURL]),
+              context.manager.relays.allSatisfy(\.isConnected),
+              context.torWaiter.awaitCallCount == 0,
+              context.scheduler.scheduled.count == 1,
+              context.scheduler.scheduled.first?.delay == TransportConfig.nostrSubscriptionEOSEFallbackSeconds,
+              let firstConnection = context.sessionFactory.latestConnection(for: firstRelayURL),
+              let secondConnection = context.sessionFactory.latestConnection(for: secondRelayURL),
+              firstConnection !== secondConnection,
+              firstConnection.cancelCallCount == 0, secondConnection.cancelCallCount == 0 else {
+            XCTFail("Exact two-relay processing-barrier prerequisites were not established")
+            return
+        }
         try context.sessionFactory.latestConnection(for: firstRelayURL)?.emitEventMessage(subscriptionID: "events", event: invalidEvent)
+        // Each real relay consumer handles its prior EVENT before this EOSE. The private
+        // scheduler only stores fallback closures; this method never runs them.
+        try firstConnection.emitEOSE(subscriptionID: "events")
+        try secondConnection.emitEOSE(subscriptionID: "events")
+        let invalidPhaseProcessed = await waitUntil { invalidPhaseEOSEObserved }
+        XCTAssertTrue(invalidPhaseProcessed)
+        guard invalidPhaseProcessed,
+              context.sessionFactory.requestedURLs.count == 2,
+              context.sessionFactory.allConnections.count == 2,
+              context.sessionFactory.latestConnection(for: firstRelayURL) === firstConnection,
+              context.sessionFactory.latestConnection(for: secondRelayURL) === secondConnection,
+              context.manager.relays.allSatisfy(\.isConnected),
+              firstConnection.cancelCallCount == 0, secondConnection.cancelCallCount == 0,
+              context.torWaiter.awaitCallCount == 0,
+              context.scheduler.scheduled.count == 1 else {
+            XCTFail("EOSE was not observed from the unchanged two-relay processing phase")
+            return
+        }
+        XCTAssertTrue(receivedIDs.isEmpty, "Invalid input must not be delivered before the genuine copy is injected")
         try context.sessionFactory.latestConnection(for: secondRelayURL)?.emitEventMessage(subscriptionID: "events", event: event)
 
         // Wait on the DELIVERY-side state (second main hop, after off-main
@@ -935,21 +975,61 @@ final class NostrRelayManagerTests: XCTestCase {
         )
         let tampered = invalidSignatureCopy(of: giftWrap)
         var receivedIDs: [String] = []
+        var invalidPhaseEOSEObserved = false
 
         context.manager.subscribe(
             filter: makeFilter(),
             id: "gift-wraps",
-            relayUrls: [firstRelayURL, secondRelayURL]
-        ) { event in
-            receivedIDs.append(event.id)
-        }
+            relayUrls: [firstRelayURL, secondRelayURL],
+            handler: { event in
+                receivedIDs.append(event.id)
+            },
+            onEOSE: { invalidPhaseEOSEObserved = true }
+        )
         let subscriptionsSent = await waitUntil {
             context.sessionFactory.latestConnection(for: firstRelayURL)?.sentStrings.count == 1 &&
             context.sessionFactory.latestConnection(for: secondRelayURL)?.sentStrings.count == 1
         }
         XCTAssertTrue(subscriptionsSent)
 
+        // Bind both actual targets before using EOSE as a per-stream processing barrier.
+        guard subscriptionsSent,
+              !invalidPhaseEOSEObserved,
+              context.sessionFactory.requestedURLs.count == 2,
+              Set(context.sessionFactory.requestedURLs) == Set([firstRelayURL, secondRelayURL]),
+              context.sessionFactory.allConnections.count == 2,
+              Set(context.manager.relays.map(\.url)) == Set([firstRelayURL, secondRelayURL]),
+              context.manager.relays.allSatisfy(\.isConnected),
+              context.torWaiter.awaitCallCount == 0,
+              context.scheduler.scheduled.count == 1,
+              context.scheduler.scheduled.first?.delay == TransportConfig.nostrSubscriptionEOSEFallbackSeconds,
+              let firstConnection = context.sessionFactory.latestConnection(for: firstRelayURL),
+              let secondConnection = context.sessionFactory.latestConnection(for: secondRelayURL),
+              firstConnection !== secondConnection,
+              firstConnection.cancelCallCount == 0, secondConnection.cancelCallCount == 0 else {
+            XCTFail("Exact two-relay processing-barrier prerequisites were not established")
+            return
+        }
         try context.sessionFactory.latestConnection(for: firstRelayURL)?.emitEventMessage(subscriptionID: "gift-wraps", event: tampered)
+        // Each real relay consumer handles its prior EVENT before this EOSE. The private
+        // scheduler only stores fallback closures; this method never runs them.
+        try firstConnection.emitEOSE(subscriptionID: "gift-wraps")
+        try secondConnection.emitEOSE(subscriptionID: "gift-wraps")
+        let invalidPhaseProcessed = await waitUntil { invalidPhaseEOSEObserved }
+        XCTAssertTrue(invalidPhaseProcessed)
+        guard invalidPhaseProcessed,
+              context.sessionFactory.requestedURLs.count == 2,
+              context.sessionFactory.allConnections.count == 2,
+              context.sessionFactory.latestConnection(for: firstRelayURL) === firstConnection,
+              context.sessionFactory.latestConnection(for: secondRelayURL) === secondConnection,
+              context.manager.relays.allSatisfy(\.isConnected),
+              firstConnection.cancelCallCount == 0, secondConnection.cancelCallCount == 0,
+              context.torWaiter.awaitCallCount == 0,
+              context.scheduler.scheduled.count == 1 else {
+            XCTFail("EOSE was not observed from the unchanged two-relay processing phase")
+            return
+        }
+        XCTAssertTrue(receivedIDs.isEmpty, "Invalid input must not be delivered before the genuine copy is injected")
         try context.sessionFactory.latestConnection(for: secondRelayURL)?.emitEventMessage(subscriptionID: "gift-wraps", event: giftWrap)
 
         // Wait on the DELIVERY-side state (second main hop, after off-main

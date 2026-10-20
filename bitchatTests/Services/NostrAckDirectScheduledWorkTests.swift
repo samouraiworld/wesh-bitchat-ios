@@ -245,8 +245,8 @@ private final class AckScheduler: @unchecked Sendable {
     func useOuterTail(_ gate: AckGate) { state.update { $0.outerTail = gate } }
     func submit(_ delay: TimeInterval, _ item: DispatchWorkItem) {
         let itemID = ObjectIdentifier(item)
-        item.notify(queue: completions) { [state] () -> Void in
-            state.update { snapshot -> Void in _ = snapshot.finished.insert(itemID) }
+        item.notify(queue: completions) { [state] in
+            state.update { snapshot in _ = snapshot.finished.insert(itemID) }
         }
         let mode = state.update { s -> (Bool, AckGate?) in
             s.items.append(item); s.delays.append(delay)
@@ -259,8 +259,8 @@ private final class AckScheduler: @unchecked Sendable {
         else if let tail = mode.1 {
             let outer = DispatchWorkItem { [self] in performOnce(item); tail.hold() }
             let outerID = ObjectIdentifier(outer)
-            outer.notify(queue: completions) { [state] () -> Void in
-                state.update { snapshot -> Void in _ = snapshot.outerFinished.insert(outerID) }
+            outer.notify(queue: completions) { [state] in
+                state.update { snapshot in _ = snapshot.outerFinished.insert(outerID) }
             }
             state.update { $0.outerItems.append(outer) }
             DispatchQueue.global(qos: .utility).async(execute: outer)
