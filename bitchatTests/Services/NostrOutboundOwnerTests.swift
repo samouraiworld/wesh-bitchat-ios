@@ -74,7 +74,24 @@ struct NostrOutboundOwnerTests {
             let ticket = try taskTicket(f.owner, kind: .favoriteNotification)
             f.dispatchOnWorker(ticket) {}
             // This observer sets completion only AFTER awaiting the actual handle.value.
-            try await eventually { f.createdCount == 1 && f.ledger.finishedCount == 1 }
+            var lastCompletion: (created: Int, finished: Int?, result: Bool)?
+            try await eventually(observation: {
+                guard let last = lastCompletion else {
+                    return "; site=OWNER_CREATOR_OBSERVER last=UNOBSERVED"
+                }
+                let finished = last.finished.map { String($0) } ?? "UNOBSERVED"
+                return "; site=OWNER_CREATOR_OBSERVER last=COMPLETE created=\(last.created) finished=\(finished) result=\(last.result)"
+            }) {
+                let created = f.createdCount
+                if created == 1 {
+                    let finished = f.ledger.finishedCount
+                    let result = finished == 1
+                    lastCompletion = (created, finished, result)
+                    return result
+                }
+                lastCompletion = (created, nil, false)
+                return false
+            }
             let before = try taskRow(f.owner, ticket)
             #expect(before.body == .returned)
             #expect(before.registration == .reservedAwaitingHandle)
@@ -189,7 +206,14 @@ struct NostrOutboundOwnerTests {
             let earlier = f.owner.taskBatchSnapshot()
             #expect(earlier.taskIDs == [parent.id])
             f.body.open()
-            try await eventually { child.read() != nil }
+            var lastChildPublished: Bool?
+            try await eventually(observation: {
+                readinessObservation("OWNER_CHILD_PUBLISHED", result: lastChildPublished)
+            }) {
+                let result = child.read() != nil
+                lastChildPublished = result
+                return result
+            }
             let ticket = try #require(child.read())
             let firstProof = try await f.join(earlier).joined()
             expectJoined(firstProof, batch: earlier, owner: f.owner)
@@ -660,12 +684,18 @@ private func requireFixture(_ condition: Bool, _ message: String) throws {
     if !condition { throw FixtureError(message) }
 }
 
+private func readinessObservation(_ site: StaticString, result: Bool?) -> String {
+    guard let result else { return "; site=\(site) last=UNOBSERVED" }
+    return "; site=\(site) last=COMPLETE result=\(result)"
+}
+
 private func eventually(fileID: StaticString = #fileID, line: UInt = #line,
+                        observation: () -> String = { "" },
                         _ condition: () -> Bool) async throws {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(5))
     while !condition() {
-        if clock.now >= deadline { throw FixtureError("owned completion/readiness guard expired at \(fileID):\(line)") }
+        if clock.now >= deadline { throw FixtureError("owned completion/readiness guard expired at \(fileID):\(line)\(observation())") }
         // Cancellation cannot skip the owned-fixture release/reap protocol. This is a readiness guard.
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(1))

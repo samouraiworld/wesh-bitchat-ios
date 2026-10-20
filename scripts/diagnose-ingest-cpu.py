@@ -74,6 +74,10 @@ PUBLIC_DISPOSITIONS = frozenset(('PUBLISHED_INCOMPLETE', 'NOT_PUBLISHED',
 PUBLIC_FAILURES = frozenset(('NONE', 'UNSUPPORTED_HOST', 'SOURCE_BINDING', 'TOOL_SUPPORT',
                             'READINESS', 'PROCESS_RETURN', 'PROCESS_LIMIT', 'RAW_LIMIT',
                             'RAW_SYMLINK',
+                            'RAW_LIMIT_LARGEST_TRACE', 'RAW_LIMIT_LARGEST_EXPORT',
+                            'RAW_LIMIT_LARGEST_LOG', 'RAW_LIMIT_LARGEST_IMAGE',
+                            'RAW_LIMIT_LARGEST_MANIFEST', 'RAW_LIMIT_LARGEST_OTHER',
+                            'RAW_LIMIT_LARGEST_MIXED',
                             'SERIAL_CONTRACT', 'EXPORT_SCHEMA', 'SYMBOL_MATERIAL',
                             'SEALING', 'PUBLICATION_BINDING', 'CLEANUP_UNKNOWN',
                             'INTERRUPTED', 'UNKNOWN'))
@@ -88,6 +92,13 @@ PUBLIC_FAILURE_CONSTANTS = {
     'serial-failed': 'PROCESS_RETURN', 'recorder-incomplete': 'PROCESS_RETURN',
     'process-budget': 'PROCESS_LIMIT', 'capture-budget': 'PROCESS_LIMIT',
     'raw-budget': 'RAW_LIMIT', 'raw-symlink': 'RAW_SYMLINK',
+    'raw-budget-largest-trace': 'RAW_LIMIT_LARGEST_TRACE',
+    'raw-budget-largest-export': 'RAW_LIMIT_LARGEST_EXPORT',
+    'raw-budget-largest-log': 'RAW_LIMIT_LARGEST_LOG',
+    'raw-budget-largest-image': 'RAW_LIMIT_LARGEST_IMAGE',
+    'raw-budget-largest-manifest': 'RAW_LIMIT_LARGEST_MANIFEST',
+    'raw-budget-largest-other': 'RAW_LIMIT_LARGEST_OTHER',
+    'raw-budget-largest-mixed': 'RAW_LIMIT_LARGEST_MIXED',
     'serial-case-inventory': 'SERIAL_CONTRACT', 'metric-inventory': 'SERIAL_CONTRACT',
     'unsupported-or-ambiguous-sample-schema': 'EXPORT_SCHEMA',
     'unsupported-toc': 'EXPORT_SCHEMA', 'duplicate-or-empty-XML-ID': 'EXPORT_SCHEMA',
@@ -196,6 +207,7 @@ class Run:
         self.manifest_identity = None
         self.case_count = 0
         self.sequence = 0
+        self.raw_largest = None
         self.binpath = None
         self.epoch = time.monotonic()
 
@@ -240,19 +252,60 @@ class Run:
 
     def size(self):
         # Symlinks never expand collection outside the owned directory.
+        # Observation never replaces this scan's authoritative scalar total.
+        self.raw_largest = None
+        observed = None
+        try:
+            observed = [0, 0, 0, 0, 0, 0]  # trace, export, log, image, manifest, other
+        except Exception:
+            pass  # Optional RAM accounting cannot change the original scan.
         total = 0
         for p in self.root.rglob('*'):
             if p.is_symlink():
                 raise Incomplete('raw-symlink')
             if p.is_file():
-                total += p.stat().st_size
+                amount = p.stat().st_size
+                total += amount
+                if observed is not None:
+                    try:
+                        parts = p.relative_to(self.root).parts  # Lexical only; no filesystem query.
+                        if parts[:2] == ('raw', 'first-serial.trace'):
+                            group = 0
+                        elif (len(parts) == 2 and parts[0] == 'raw' and
+                              re.fullmatch(r'[0-9]{2,}-(?:trace-toc|cpu-rows)\.stdout', parts[1])):
+                            group = 1
+                        elif parts == ('raw', 'built-test-image'):
+                            group = 3
+                        elif parts == ('raw', 'private-manifest.json'):
+                            group = 4
+                        elif (len(parts) == 2 and parts[0] == 'raw' and
+                              parts[1].endswith(('.log', '.stdout'))):
+                            group = 2
+                        else:
+                            group = 5
+                        observed[group] += amount
+                    except Exception:
+                        observed = None  # Failed/unsupported accounting => generic RAW_LIMIT.
+        if observed is not None:
+            try:
+                largest = max(observed)
+                if largest > 0:
+                    group = observed.index(largest) if observed.count(largest) == 1 else 6
+                    self.raw_largest = (
+                        'raw-budget-largest-trace', 'raw-budget-largest-export',
+                        'raw-budget-largest-log', 'raw-budget-largest-image',
+                        'raw-budget-largest-manifest', 'raw-budget-largest-other',
+                        'raw-budget-largest-mixed'
+                    )[group]
+            except Exception:
+                self.raw_largest = None
         return total
 
     def guard(self):
         if STOP:
             raise Incomplete('interrupted')
         if self.size() > RAW_LIMIT:
-            raise Incomplete('raw-budget')
+            raise Incomplete(self.raw_largest if self.raw_largest is not None else 'raw-budget')
 
     def spawn(self, args, name, env=None, stdin=None, stdout=None, scratch=False):
         if self.pending_process is not None:
@@ -620,7 +673,11 @@ class Run:
             raise Incomplete('head-binding')
         changes = self.command(['git', 'diff', '--name-status', BASE, actual], 'source-diff')
         rows = [line.split('\t') for line in changes.splitlines()]
-        if len(rows) != 3 or any(row[0] != 'A' for row in rows) or {row[1] for row in rows} != ADDITIONS:
+        expected = {('A', path) for path in ADDITIONS} | {
+            ('M', 'bitchatTests/Services/NostrOutboundOwnerTests.swift'),
+            ('M', 'bitchatTests/Services/PanicAsyncEraseActionTests.swift')
+        }
+        if len(rows) != 5 or {tuple(row) for row in rows} != expected:
             raise Incomplete('source-scope')
         if self.command(['git', 'status', '--porcelain', '--untracked-files=no'], 'tracked-clean').strip():
             raise Incomplete('dirty-source')

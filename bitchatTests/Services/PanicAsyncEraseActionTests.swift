@@ -154,10 +154,11 @@ final class PanicSpineFixture {
     func worker(_ operation: @escaping @Sendable () -> Void) throws {
         workers.append(try PanicSpineWorker(body: operation))
     }
-    func waitUntil(_ predicate: @MainActor () async -> Bool) async throws {
+    func waitUntil(observation: @MainActor () -> String = { "" },
+                   _ predicate: @MainActor () async -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while !(await predicate()) {
-            guard ContinuousClock.now < deadline else { throw PanicSpineFailure.messages(["five-second readiness guard exceeded"]) }
+            guard ContinuousClock.now < deadline else { throw PanicSpineFailure.messages(["five-second readiness guard exceeded" + observation()]) }
             await Task.yield()
         }
     }
@@ -180,6 +181,11 @@ final class PanicSpineFixture {
         failures.append(contentsOf: tasks.errors())
         if let first = failures.first { throw PanicSpineCleanupFailure(primary: first, secondary: Array(failures.dropFirst())) }
     }
+}
+
+private func panicReadinessObservation(_ site: StaticString, result: Bool?) -> String {
+    guard let result else { return "; site=\(site) last=UNOBSERVED" }
+    return "; site=\(site) last=COMPLETE result=\(result)"
 }
 
 @MainActor
@@ -207,7 +213,14 @@ struct PanicAsyncEraseActionTests {
                 throw PanicSpineFailure.messages(["original Task was not admitted"])
             }
             _ = owner.dispatch(ticket) {}
-            try await f.waitUntil { await held.hasEntered() }
+            var lastOriginalTailEntered: Bool?
+            try await f.waitUntil(observation: {
+                panicReadinessObservation("PANIC_ORIGINAL_TAIL_ENTERED", result: lastOriginalTailEntered)
+            }) {
+                let result = await held.hasEntered()
+                lastOriginalTailEntered = result
+                return result
+            }
             try #require(owner.provenanceSnapshot().tasks.first?.body == .returned)
             let binding = owner.captureOutboundPanicBinding()
             var close: NostrOutboundOwner.RootCloseOutcome?
@@ -232,7 +245,24 @@ struct PanicAsyncEraseActionTests {
             }
             guard case .closed? = close else { throw PanicSpineFailure.messages(["synchronous original close missing"]) }
             let beginWasSynchronous = beginTaskCount == 1 && f.tasks.snapshot().count == 2
-            try await f.waitUntil { !reports.isEmpty || f.tasks.installationCount() > 0 }
+            var lastJoinReadiness: (reported: Bool, installs: Int?, result: Bool)?
+            try await f.waitUntil(observation: {
+                guard let last = lastJoinReadiness else {
+                    return "; site=PANIC_ORIGINAL_JOIN_READINESS last=UNOBSERVED"
+                }
+                let installs = last.installs.map { String($0) } ?? "UNOBSERVED"
+                return "; site=PANIC_ORIGINAL_JOIN_READINESS last=COMPLETE reported=\(last.reported) installs=\(installs) result=\(last.result)"
+            }) {
+                let reported = !reports.isEmpty
+                if reported {
+                    lastJoinReadiness = (true, nil, true)
+                    return true
+                }
+                let installs = f.tasks.installationCount()
+                let result = installs > 0
+                lastJoinReadiness = (false, installs, result)
+                return result
+            }
             try #require(entered)
             let reportsWhileHeld = reports
             let continuationWhileHeld = continuationCount
@@ -286,7 +316,14 @@ struct PanicAsyncEraseActionTests {
                 return true
             }, begin: { pending = true })
             _ = command.submit { reports.append($0) }
-            try await f.waitUntil { await held.hasEntered() }
+            var lastCancelledTailEntered: Bool?
+            try await f.waitUntil(observation: {
+                panicReadinessObservation("PANIC_CANCEL_TAIL_ENTERED", result: lastCancelledTailEntered)
+            }) {
+                let result = await held.hasEntered()
+                lastCancelledTailEntered = result
+                return result
+            }
             let handle = try #require(f.tasks.snapshot().last?.handle)
             handle.cancel()
             let beforeRelease = (pending, finishCount, reports)
@@ -303,7 +340,14 @@ struct PanicAsyncEraseActionTests {
             _ = early.submit { earlyReports.append($0) }
             let earlyHandle = try #require(f.tasks.snapshot().last?.handle)
             earlyHandle.cancel() // Same MainActor turn: cancel before its Task body can start.
-            try await f.waitUntil { !early.isRunning }
+            var lastEarlyFinished: Bool?
+            try await f.waitUntil(observation: {
+                panicReadinessObservation("PANIC_EARLY_COMMAND_FINISHED", result: lastEarlyFinished)
+            }) {
+                let result = !early.isRunning
+                lastEarlyFinished = result
+                return result
+            }
             let earlyObserved = (earlyPending, earlyCleanupCount, earlyFinishCount, earlyReports)
             return {
                 #expect(beforeRelease.0 && beforeRelease.1 == 0 && beforeRelease.2.isEmpty)
@@ -331,7 +375,14 @@ struct PanicAsyncEraseActionTests {
             commandReference = command
             let first = command.submit { _ in reports += 1 }
             let immediateBeginCount = begins
-            try await f.waitUntil { await held.hasEntered() }
+            var lastPendingTailEntered: Bool?
+            try await f.waitUntil(observation: {
+                panicReadinessObservation("PANIC_BUSY_TAIL_ENTERED", result: lastPendingTailEntered)
+            }) {
+                let result = await held.hasEntered()
+                lastPendingTailEntered = result
+                return result
+            }
             let second = command.submit { _ in reports += 100 }
             let beforeRelease = (begins, reports)
             return {
