@@ -126,6 +126,16 @@ class PublicDisposition:
     def enter(self, phase):
         self.phase = phase if type(phase) is str and phase in PUBLIC_PHASES else 'UNKNOWN'
 
+    def observe_profile_failure(self, error):
+        # Optional first-failure metadata only; cleanup authority is unchanged.
+        category = 'UNKNOWN'
+        if (type(error) is Incomplete and len(error.args) == 1 and
+                type(error.args[0]) is str):
+            category = PUBLIC_FAILURE_CONSTANTS.get(error.args[0], 'UNKNOWN')
+        if self.blocking_phase is None:
+            self.blocking_phase = self.phase
+            self.failure = category
+
     def blocked(self, error):
         # Match ONLY exact known Incomplete literals. Never stringify an error,
         # classify arbitrary subclasses or expose errno/type/path/message data.
@@ -1358,6 +1368,10 @@ def main():
             run.profile()
             complete = False  # Actual trace/schema/child proof needs private review.
         except BaseException as e:
+            try:
+                public.observe_profile_failure(e)
+            except BaseException:
+                pass  # Optional observation cannot skip original error handling.
             # Detailed reasons only in ciphertext, never public exception text.
             run.errors.append(type(e).__name__ + ':' + str(e))
         finally:
