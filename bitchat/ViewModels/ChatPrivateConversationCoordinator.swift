@@ -780,6 +780,9 @@ final class ChatPrivateConversationCoordinator {
     }
 
     func migratePrivateChatsIfNeeded(for peerID: PeerID, senderNickname: String) {
+        if peerID.noiseKey?.count == 32, !context.privateMessages(for: peerID).isEmpty {
+            return
+        }
         let currentFingerprint = context.getFingerprint(for: peerID)
 
         if context.privateMessages(for: peerID).isEmpty {
