@@ -68,6 +68,8 @@ def digest(owner, path):
 
 # Final public output is a fixed scalar vocabulary, never exception text.
 PUBLIC_PHASES = frozenset(('INITIALIZE', 'SOURCE', 'PRELUDE', 'RECORD', 'EXPORT',
+                          'RECORD_METADATA', 'RECORD_READY_WAIT',
+                          'RECORD_SERIAL_STAGE', 'RECORD_FINALIZE_STAGE',
                           'SEAL', 'CLEANUP', 'PUBLISH', 'FINAL', 'UNKNOWN'))
 PUBLIC_DISPOSITIONS = frozenset(('PUBLISHED_INCOMPLETE', 'NOT_PUBLISHED',
                                 'WITHHELD_CLEANUP_UNKNOWN', 'UNKNOWN'))
@@ -731,6 +733,10 @@ class Run:
                       '-ignore-filename-regex=(Tests|\\.build|checkouts|Mocks|_PreviewHelpers)'], 'coverage-summary')
 
     def profile(self):
+        try:
+            self.public.enter('RECORD_METADATA')
+        except BaseException:
+            pass
         record_help = self.command(['xcrun', 'xctrace', 'help', 'record'], 'record-help')
         self.export_help = self.command(['xcrun', 'xctrace', 'help', 'export'], 'export-help')
         self.command(['man', '-P', 'cat', 'xctrace'], 'installed-manual')
@@ -751,7 +757,15 @@ class Run:
                                       '--all-processes', '--time-limit', '420s', '--output', str(trace),
                                       '--no-prompt', '--notify-tracing-started', name], 'recorder')
         trace_start = time.monotonic()
+        try:
+            self.public.enter('RECORD_READY_WAIT')
+        except BaseException:
+            pass
         self.notifier.wait(self, self.recorder, seconds=30)
+        try:
+            self.public.enter('RECORD_SERIAL_STAGE')
+        except BaseException:
+            pass
         env = dict(os.environ, BITCHAT_PERF_LOG=str(self.raw / 'perf-output.log'))
         # FIRST and ONLY serial command, including coverage→noncoverage build.
         self.serial, serial_log = self.spawn(['swift', 'test', '--quiet', '--filter', 'PerformanceBaselineTests'],
@@ -782,6 +796,10 @@ class Run:
         if self.serial.returncode != 0:
             raise Incomplete('serial-failed')
         self.note('serial-return', returncode=self.serial.returncode)
+        try:
+            self.public.enter('RECORD_FINALIZE_STAGE')
+        except BaseException:
+            pass
         self.note('recorder-natural-finalization', absolute_deadline=trace_start - self.epoch + TRACE_SECONDS + TRACE_FINALIZE_SECONDS)
         self.wait(self.recorder, TRACE_SECONDS + TRACE_FINALIZE_SECONDS, started_at=trace_start)
         if self.errors or self.recorder.returncode != 0:
