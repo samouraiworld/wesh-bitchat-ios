@@ -1175,11 +1175,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         peerIdentityCoordinator.endPrivateChat()
     }
 
-    @MainActor
-    @objc func handlePeerStatusUpdate(_: Notification) {
-        peerIdentityCoordinator.handlePeerStatusUpdate()
-    }
-
     @objc func handleFavoriteStatusChanged(_ notification: Notification) {
         peerIdentityCoordinator.handleFavoriteStatusChanged(notification)
     }
