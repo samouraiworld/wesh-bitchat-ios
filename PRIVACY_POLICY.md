@@ -1,6 +1,6 @@
 # Wesh Privacy Policy — UNPUBLISHED V1 candidate draft
 
-*Requires technical and device qualification before publication. Last updated: October 2026.* Wesh is a fork of BitChat. Reference pages: https://wesh.samourai.app/en/privacy; the French version, https://wesh.samourai.app/confidentialite, is the reference.
+*Requires technical and device qualification before publication. Last updated: 21 October 2026.* Wesh is a fork of BitChat. Reference pages: https://wesh.samourai.app/en/privacy; the French version, https://wesh.samourai.app/confidentialite, is the reference.
 
 ## 1. Who we are
 Wesh is a free, open source, non-profit app published by **Samouraï Coop**, SARL SCOP, 149 avenue du Maine, 75014 Paris, France.
@@ -59,8 +59,11 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 
 ## 8. Emergency erase
 - **Réglages → Tout effacer** (Settings → Erase everything), held for three seconds.
+- The **Tout effacer** shortcut (from the app icon on Android, from Shortcuts on iPhone) opens the same screen. It never erases by itself.
 - It erases from this phone: identity and keys, nickname, contacts, conversations, pending messages, drafts, meeting note, settings and notifications<!-- INTERNET:START -->, as well as the Internet key and Tor's files; Internet mode is turned off<!-- INTERNET:END -->.
-- After erasure is confirmed, Wesh resumes with a new identity, peer ID and keys. If erasure cannot be confirmed, access stays closed and the app offers a retry.
+- Wesh then returns to the welcome screen and starts again with a new identity, peer ID and keys.
+- **iPhone:** if Wesh cannot confirm that everything was erased, it says that some data may remain on the phone. It still returns to the welcome screen, but Bluetooth<!-- INTERNET:START --> and Internet<!-- INTERNET:END --> stay off until an erasure is confirmed. Wesh erases again at its next launch, before connecting; you can also retry from the notice on the home screen.
+- **Android:** Wesh deletes its own files and keys, then restarts. If it cannot confirm this, it asks Android to clear all of the app's data: the app closes and shows the welcome screen at its next launch. An erase interrupted before the end is finished at the next launch, before anything starts.
 - It does not erase what others have received or recorded (local-room messages, Bluetooth announcements<!-- INTERNET:START -->, copies on Nostr relays<!-- INTERNET:END -->), nor iPhone backups already made (§4).
 - Uninstalling the app also deletes its data. On iPhone, keys left in the Keychain are erased at the next install.
 
