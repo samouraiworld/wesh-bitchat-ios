@@ -472,12 +472,17 @@ final class MessageRouter {
         return true
     }
 
-    /// Remembers an Internet publication for pacing; entries past the TTL are forgotten, so
-    /// the map stays bounded by the outbox.
+    /// Remembers an Internet publication for pacing. Only messages still in the outbox are
+    /// kept, so the map never outlives them (and an erase clears it with the outbox).
     private func recordInternetSend(_ messageID: String) {
-        let current = now()
-        lastInternetSendAt = lastInternetSendAt.filter { current.timeIntervalSince($0.value) <= Self.messageTTLSeconds }
-        lastInternetSendAt[messageID] = current
+        forgetInternetSendsOutsideOutbox()
+        lastInternetSendAt[messageID] = now()
+    }
+
+    private func forgetInternetSendsOutsideOutbox() {
+        guard !lastInternetSendAt.isEmpty else { return }
+        let queued = Set(outbox.values.flatMap { $0.map(\.messageID) })
+        lastInternetSendAt = lastInternetSendAt.filter { queued.contains($0.key) }
     }
 
     @discardableResult
@@ -540,6 +545,7 @@ final class MessageRouter {
     func wipeOutbox() -> Bool {
         outbox.removeAll()
         secureTransmissions.removeAll()
+        lastInternetSendAt.removeAll()
         return outboxStore?.wipe() ?? true
     }
 
@@ -779,6 +785,7 @@ final class MessageRouter {
         if outboxChanged {
             persistOutbox()
         }
+        forgetInternetSendsOutsideOutbox()
     }
 
     func flushAllOutbox() {

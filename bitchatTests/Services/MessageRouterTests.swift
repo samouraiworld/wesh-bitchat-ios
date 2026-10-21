@@ -729,6 +729,31 @@ struct MessageRouterTests {
         #expect(internet.sentPrivateMessages.count == 11)
     }
 
+    /// An erase leaves no pacing state behind: a message queued after the wipe goes out on the
+    /// next flush instead of being held back by a timestamp from before it.
+    @Test @MainActor
+    func wipeOutbox_forgetsInternetResendPacing() async {
+        let peerID = PeerID(str: "00000000000000af")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start
+        let router = MessageRouter(transports: [internet], now: { clock })
+
+        router.sendPrivate("Before", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        #expect(router.wipeOutbox())
+
+        internet.reachablePeers.remove(peerID)
+        clock = start.addingTimeInterval(60)
+        router.sendPrivate("After", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        internet.reachablePeers.insert(peerID)
+        clock = start.addingTimeInterval(120)
+        router.flushOutbox(for: peerID)
+
+        #expect(internet.sentPrivateMessages.count == 2)
+    }
+
     @Test @MainActor
     func authenticationRetry_capsActualSecureTransmissions() async {
         let peerID = PeerID(str: "00000000000000ad")
