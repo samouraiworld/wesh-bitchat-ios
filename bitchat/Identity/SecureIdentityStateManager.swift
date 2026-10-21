@@ -123,7 +123,6 @@ protocol SecureIdentityStateManagerProtocol {
     // MARK: Geohash (Nostr) Blocking
     func isNostrBlocked(pubkeyHexLowercased: String) -> Bool
     func setNostrBlocked(_ pubkeyHexLowercased: String, isBlocked: Bool)
-    func getBlockedNostrPubkeys() -> Set<String>
     
     // MARK: Ephemeral Session Management
     func registerEphemeralSession(peerID: PeerID, handshakeState: HandshakeState)
@@ -587,9 +586,6 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
         }
     }
     
-    func getBlockedNostrPubkeys() -> Set<String> {
-        queue.sync { cache.blockedNostrPubkeys }
-    }
     
     // MARK: - Ephemeral Session Management
     

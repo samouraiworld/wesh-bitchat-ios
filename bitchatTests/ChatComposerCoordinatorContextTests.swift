@@ -53,7 +53,6 @@ private final class MockChatComposerContext: ChatComposerContext {
     var meshNickname = "me"
     var meshNicknamesByPeerID: [PeerID: String] = [:]
     var blockedMeshNicknames: Set<String> = []
-    var blockedNostrPubkeys: Set<String> = []
 
     func meshPeerNicknames() -> [PeerID: String] { meshNicknamesByPeerID }
 
@@ -61,22 +60,8 @@ private final class MockChatComposerContext: ChatComposerContext {
         blockedMeshNicknames.contains(nickname)
     }
 
-    func isNostrBlocked(pubkeyHexLowercased: String) -> Bool {
-        blockedNostrPubkeys.contains(pubkeyHexLowercased.lowercased())
-    }
-
     // Geohash identity
-    var geoNicknames: [String: String] = [:]
-    static let dummyIdentity = NostrIdentity(
-        privateKey: Data(repeating: 0x11, count: 32),
-        publicKey: Data(repeating: 0x22, count: 32),
-        npub: "npub1mock",
-        createdAt: Date(timeIntervalSince1970: 0)
-    )
 
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        Self.dummyIdentity
-    }
 }
 
 // MARK: - Coordinator Tests Against Mock Context
@@ -119,15 +104,9 @@ struct ChatComposerCoordinatorContextTests {
         let context = MockChatComposerContext()
         let coordinator = ChatComposerCoordinator(context: context)
         context.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruydq"))
-        context.geoNicknames = [
-            "aaaabbbbccccdddd": "carol",
-            // Own token (nickname#last-4-of-pubkey) must be removed; the dummy
-            // identity's public key hex ends in "2222".
-            "ffffeeeeddddcccc2222": "me"
-        ]
 
         coordinator.updateAutocomplete(for: "@ca", cursorPosition: 3)
-        #expect(context.queriedPeerCandidates == [["carol#dddd"]])
+        #expect(context.queriedPeerCandidates == [[]])
     }
 
     @Test @MainActor
@@ -148,14 +127,9 @@ struct ChatComposerCoordinatorContextTests {
         let geoContext = MockChatComposerContext()
         let geoCoordinator = ChatComposerCoordinator(context: geoContext)
         geoContext.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruydq"))
-        geoContext.geoNicknames = [
-            "aaaabbbbccccdddd": "carol",
-            "bbbbccccddddeeee": "blocked"
-        ]
-        geoContext.blockedNostrPubkeys = ["bbbbccccddddeeee"]
 
         geoCoordinator.updateAutocomplete(for: "@", cursorPosition: 1)
-        #expect(geoContext.queriedPeerCandidates == [["carol#dddd"]])
+        #expect(geoContext.queriedPeerCandidates == [[]])
     }
 
     @Test @MainActor

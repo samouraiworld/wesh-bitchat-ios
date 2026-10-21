@@ -13,8 +13,6 @@ struct BLEPeerInfo: Equatable {
     /// Distinguishes an old client that omitted the capabilities TLV from a
     /// modern client that explicitly advertised a set without a given bit.
     var capabilitiesWereExplicitlyAdvertised: Bool = false
-    /// Rendezvous cell from the peer's announce when it advertises `.bridge`.
-    var bridgeGeohash: String?
 }
 
 struct BLEPeerAnnounceUpdate: Equatable {
@@ -121,20 +119,6 @@ struct BLEPeerRegistry {
         peers[peerID.toShort()]?.capabilitiesWereExplicitlyAdvertised == true
     }
 
-    /// Peers whose last verified announce advertised the given capability.
-    func peers(advertising capability: PeerCapabilities) -> [PeerID] {
-        peers.values.filter { $0.capabilities.contains(capability) }.map(\.peerID)
-    }
-
-    /// A rendezvous cell advertised by any bridge-capable peer, if one is
-    /// known — lets location-less devices join the island's rendezvous.
-    func advertisedBridgeGeohash() -> String? {
-        peers.values
-            .filter { $0.capabilities.contains(.bridge) }
-            .compactMap(\.bridgeGeohash)
-            .first
-    }
-
     func displayNicknames(selfNickname: String) -> [PeerID: String] {
         let connected = peers.filter { $0.value.isConnected }
         let tuples = connected.map { ($0.key, $0.value.nickname, true) }
@@ -204,8 +188,7 @@ struct BLEPeerRegistry {
         signingPublicKey: Data?,
         isConnected: Bool,
         now: Date,
-        capabilities: PeerCapabilities? = nil,
-        bridgeGeohash: String? = nil
+        capabilities: PeerCapabilities? = nil
     ) -> BLEPeerAnnounceUpdate? {
         let existing = peers[peerID]
 
@@ -231,8 +214,7 @@ struct BLEPeerRegistry {
             isVerifiedNickname: true,
             lastSeen: now,
             capabilities: capabilities ?? [],
-            capabilitiesWereExplicitlyAdvertised: capabilities != nil,
-            bridgeGeohash: bridgeGeohash
+            capabilitiesWereExplicitlyAdvertised: capabilities != nil
         )
 
         return update

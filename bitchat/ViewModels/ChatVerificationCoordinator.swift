@@ -250,7 +250,7 @@ final class ChatVerificationCoordinator {
     /// names my key, not the code on screen, so trust still comes only from my own scan.
     func scannedMyCode(noiseKey: Data, since: Date) -> Bool {
         guard noiseKey.count == 32, let challengeAt = scannedMyCodeAt[noiseKey.sha256Fingerprint()] else { return false }
-        return challengeAt >= since && now().timeIntervalSince(challengeAt) <= Self.scannedMyCodeLifetime
+        return challengeAt >= since && (0...Self.scannedMyCodeLifetime).contains(now().timeIntervalSince(challengeAt))
     }
 
     /// No older than one displayed code: a QR is accepted for five minutes.

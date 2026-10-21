@@ -10,6 +10,22 @@ struct BLEReceivedPacketContext: Equatable {
 }
 
 struct BLEReceivePipeline {
+    /// Keep the wire numbers reserved, but refuse the retired feature before
+    /// ingress accounting, reassembly, source routing, sync or radio writes.
+    static func isRetiredBoardPacket(_ packet: BitchatPacket) -> Bool {
+        if packet.type == MessageType.boardPost.rawValue { return true }
+        return packet.type == MessageType.fragment.rawValue && packet.payload.count >= 13
+            && packet.payload[12] == MessageType.boardPost.rawValue
+    }
+
+    /// Keep the wire number reserved, but refuse carriers before attribution,
+    /// reassembly, routing, gossip retention or outbound radio work.
+    static func isRetiredCarrierPacket(_ packet: BitchatPacket) -> Bool {
+        if packet.type == MessageType.nostrCarrier.rawValue { return true }
+        return packet.type == MessageType.fragment.rawValue && packet.payload.count >= 13
+            && packet.payload[12] == MessageType.nostrCarrier.rawValue
+    }
+
     static func context(for packet: BitchatPacket, localPeerID: PeerID) -> BLEReceivedPacketContext {
         let senderID = PeerID(hexData: packet.senderID)
         // Include a payload digest so that distinct packets sharing the same
@@ -43,7 +59,10 @@ struct BLEReceivePipeline {
         degree: Int,
         highDegreeThreshold: Int
     ) -> RelayDecision {
-        RelayController.decide(
+        guard !isRetiredBoardPacket(packet), !isRetiredCarrierPacket(packet) else {
+            return RelayDecision(shouldRelay: false, newTTL: packet.ttl, delayMs: 0)
+        }
+        return RelayController.decide(
             ttl: packet.ttl,
             senderIsSelf: senderID == localPeerID,
             recipientIsSelf: PeerID(hexData: packet.recipientID) == localPeerID,
@@ -54,22 +73,15 @@ struct BLEReceivePipeline {
             // Ping/pong diagnostics ride it too: probes need the same
             // deterministic multi-hop relay as DMs (always relay, jitter,
             // no TTL cap) so RTT and hop counts reflect the real path.
-            // Directed nostrCarrier uplinks (mesh-only peer -> gateway) need
-            // the same multi-hop treatment to reach a non-adjacent gateway.
             isDirectedEncrypted: (packet.type == MessageType.noiseEncrypted.rawValue
                 || packet.type == MessageType.courierEnvelope.rawValue
                 || packet.type == MessageType.ping.rawValue
-                || packet.type == MessageType.pong.rawValue
-                || packet.type == MessageType.nostrCarrier.rawValue) && packet.recipientID != nil,
+                || packet.type == MessageType.pong.rawValue) && packet.recipientID != nil,
             isFragment: packet.type == MessageType.fragment.rawValue,
             isDirectedFragment: packet.type == MessageType.fragment.rawValue && packet.recipientID != nil,
             isHandshake: packet.type == MessageType.noiseHandshake.rawValue,
             isAnnounce: packet.type == MessageType.announce.rawValue,
             isRequestSync: packet.type == MessageType.requestSync.rawValue,
-            // Board posts relay like broadcast messages; urgent ones get the
-            // announce-class TTL headroom so alerts travel the extra hop.
-            isUrgentBoardPost: packet.type == MessageType.boardPost.rawValue
-                && BoardWire.urgentFlag(in: packet.payload),
             degree: degree,
             highDegreeThreshold: highDegreeThreshold
         )

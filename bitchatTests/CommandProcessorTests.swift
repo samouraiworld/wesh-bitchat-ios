@@ -93,32 +93,6 @@ struct CommandProcessorTests {
     }
 
     @MainActor
-    @Test func whoInGeohashListsVisibleParticipantsExcludingSelf() async throws {
-        let bridge = NostrIdentityBridge(keychain: MockKeychain())
-        let identityManager = MockIdentityManager(MockKeychain())
-        let context = MockCommandContextProvider(idBridge: bridge)
-        let geohash = "u4pruy"
-        let selfPubkey = try bridge.deriveIdentity(forGeohash: geohash).publicKeyHex.lowercased()
-        context.visibleGeoParticipants = [
-            CommandGeoParticipant(id: selfPubkey, displayName: "me"),
-            CommandGeoParticipant(id: String(repeating: "b", count: 64), displayName: "bob")
-        ]
-        let processor = CommandProcessor(contextProvider: context, meshService: MockTransport(), identityManager: identityManager)
-        let channel = ChannelID.location(GeohashChannel(level: .city, geohash: geohash))
-
-        let result = await withSelectedChannel(channel, context: context) {
-            processor.process("/who")
-        }
-
-        switch result {
-        case .success(let message):
-            #expect(message == "online: bob")
-        default:
-            Issue.record("Expected success result")
-        }
-    }
-
-    @MainActor
     @Test func clearInPrivateChatRemovesOnlySelectedConversation() async {
         let identityManager = MockIdentityManager(MockKeychain())
         let context = MockCommandContextProvider()
@@ -222,9 +196,6 @@ struct CommandProcessorTests {
         transport.peerNicknames[peerID] = "bob"
         transport.peerFingerprints[peerID] = "fp-bob"
         context.blockedUsers = ["fp-bob"]
-        context.visibleGeoParticipants = [
-            CommandGeoParticipant(id: String(repeating: "c", count: 64), displayName: "carol")
-        ]
         identityManager.setNostrBlocked(String(repeating: "c", count: 64), isBlocked: true)
         let processor = CommandProcessor(contextProvider: context, meshService: transport, identityManager: identityManager)
 
@@ -234,7 +205,7 @@ struct CommandProcessorTests {
 
         switch result {
         case .success(let message):
-            #expect(message == "blocked peers: bob | geohash blocks: carol")
+            #expect(message == "blocked peers: bob")
         default:
             Issue.record("Expected success result")
         }
@@ -273,36 +244,6 @@ struct CommandProcessorTests {
             Issue.record("Expected success result")
         }
         #expect(!identityManager.isBlocked(fingerprint: "fp-bob"))
-    }
-
-    @MainActor
-    @Test func blockAndUnblockGeohashPeerUseNostrBlockList() async {
-        let identityManager = MockIdentityManager(MockKeychain())
-        let context = MockCommandContextProvider()
-        context.displayNameToNostrPubkey["carol"] = String(repeating: "d", count: 64)
-        let processor = CommandProcessor(contextProvider: context, meshService: MockTransport(), identityManager: identityManager)
-
-        let blockResult = await withSelectedChannel(.mesh, context: context) {
-            processor.process("/block carol")
-        }
-        switch blockResult {
-        case .success(let message):
-            #expect(message == "blocked carol in geohash chats")
-        default:
-            Issue.record("Expected success result")
-        }
-        #expect(identityManager.isNostrBlocked(pubkeyHexLowercased: String(repeating: "d", count: 64)))
-
-        let unblockResult = await withSelectedChannel(.mesh, context: context) {
-            processor.process("/unblock @carol")
-        }
-        switch unblockResult {
-        case .success(let message):
-            #expect(message == "unblocked carol in geohash chats")
-        default:
-            Issue.record("Expected success result")
-        }
-        #expect(!identityManager.isNostrBlocked(pubkeyHexLowercased: String(repeating: "d", count: 64)))
     }
 
     /// /fav must go through toggleFavorite (which persists by the real noise
@@ -545,34 +486,10 @@ struct CommandProcessorTests {
         context: MockCommandContextProvider? = nil,
         perform work: @escaping () throws -> T
     ) async rethrows -> T {
-        let originalChannel = LocationChannelManager.shared.selectedChannel
-        let originalContextChannel = context?.activeChannel
-        await setSelectedChannel(channel, context: context)
-        do {
-            let result = try work()
-            await setSelectedChannel(originalChannel, context: context, explicitChannel: originalContextChannel)
-            return result
-        } catch {
-            await setSelectedChannel(originalChannel, context: context, explicitChannel: originalContextChannel)
-            throw error
-        }
-    }
-
-    @MainActor
-    private func setSelectedChannel(
-        _ channel: ChannelID,
-        context: MockCommandContextProvider? = nil,
-        explicitChannel: ChannelID? = nil
-    ) async {
-        context?.activeChannel = explicitChannel ?? channel
-        LocationChannelManager.shared.select(channel)
-        for _ in 0..<40 {
-            if LocationChannelManager.shared.selectedChannel == channel {
-                return
-            }
-            await Task.yield()
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
+        let original = context?.activeChannel
+        context?.activeChannel = channel
+        defer { if let original { context?.activeChannel = original } }
+        return try work()
     }
 
     private func makeMessage(sender: String, content: String) -> BitchatMessage {
@@ -592,11 +509,8 @@ private final class MockCommandContextProvider: CommandContextProvider {
     var selectedPrivateChatPeer: PeerID?
     var blockedUsers: Set<String> = []
     var privateChats: [PeerID: [BitchatMessage]] = [:]
-    let idBridge: NostrIdentityBridge
 
     var nicknameToPeerID: [String: PeerID] = [:]
-    var visibleGeoParticipants: [CommandGeoParticipant] = []
-    var displayNameToNostrPubkey: [String: String] = [:]
 
     private(set) var startedPrivateChats: [PeerID] = []
     private(set) var sentPrivateMessages: [(content: String, peerID: PeerID)] = []
@@ -609,21 +523,12 @@ private final class MockCommandContextProvider: CommandContextProvider {
     private(set) var toggledFavorites: [PeerID] = []
     private(set) var favoriteNotifications: [(peerID: PeerID, isFavorite: Bool)] = []
 
-    init(nickname: String = "tester", idBridge: NostrIdentityBridge = NostrIdentityBridge(keychain: MockKeychain())) {
+    init(nickname: String = "tester") {
         self.nickname = nickname
-        self.idBridge = idBridge
     }
 
     func getPeerIDForNickname(_ nickname: String) -> PeerID? {
         nicknameToPeerID[nickname]
-    }
-
-    func getVisibleGeoParticipants() -> [CommandGeoParticipant] {
-        visibleGeoParticipants
-    }
-
-    func nostrPubkeyForDisplayName(_ displayName: String) -> String? {
-        displayNameToNostrPubkey[displayName]
     }
 
     func startPrivateChat(with peerID: PeerID) {

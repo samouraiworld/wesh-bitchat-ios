@@ -8,3 +8,8 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+# Build-time macro dylibs must remain loadable on macOS 27 with Rust 1.96.
+# Shipping libraries keep the stripped release profile above.
+[profile.release.build-override]
+strip = "none"

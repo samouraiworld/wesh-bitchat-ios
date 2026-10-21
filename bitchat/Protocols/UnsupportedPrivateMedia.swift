@@ -7,10 +7,10 @@ import Foundation
 ///
 /// The line takes the ID a BitChat sender derives for the same file from
 /// fields already on the wire (sender, recipient and an entropy-bearing file
-/// name), so the sender's retries collapse into that one line and a read
-/// receipt names a message the sender knows. Files without such a name
-/// (Android, older iOS) get an ID derived from their bytes, which still
-/// collapses a byte-identical resend.
+/// name), so the sender's retries collapse into that one line. No delivery
+/// or read receipt is ever sent for it: the file was never received. Files
+/// without such a name (Android, older iOS) get an ID derived from their
+/// bytes, which still collapses a byte-identical resend.
 enum UnsupportedPrivateMedia {
     private static let domain = Data("bitchat-private-media-message-v1".utf8)
     private static let payloadDomain = Data("wesh-unsupported-private-media-v1".utf8)

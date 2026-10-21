@@ -2,11 +2,9 @@
 // ChatNostrCoordinatorContextTests.swift
 // bitchatTests
 //
-// Exercises the `ChatNostrCoordinator` facade and its components
-// (`NostrInboundPipeline`, `GeohashSubscriptionManager`, `GeoPresenceTracker`)
-// against a mock `ChatNostrContext` — proving the stack works without a
-// `ChatViewModel`, following the `ChatDeliveryCoordinatorContextTests` /
-// `ChatPrivateConversationCoordinatorContextTests` exemplars.
+// Exercises the account mailbox and encrypted inbound pipeline through
+// `ChatNostrCoordinator` with an injected `ChatNostrContext`, independently
+// of `ChatViewModel` and live relay or platform services.
 //
 
 import Testing
@@ -21,222 +19,57 @@ import BitFoundation
 /// testable without a `ChatViewModel`.
 @MainActor
 private final class MockChatNostrContext: ChatNostrContext {
-    // Channel & subscription state
     var activeChannel: ChannelID = .mesh
-    var currentGeohash: String?
-    var geoSubscriptionID: String?
-    var geoDmSubscriptionID: String?
-    var geoSamplingSubs: [String: String] = [:]
-    var lastGeoNotificationAt: [String: Date] = [:]
-    var nostrRelayManager: NostrRelayManager? { nil }
-
-    func setGeoChatSubscriptionID(_ id: String?) { geoSubscriptionID = id }
-    func setGeoDmSubscriptionID(_ id: String?) { geoDmSubscriptionID = id }
-    func addGeoSamplingSub(_ subID: String, forGeohash geohash: String) { geoSamplingSubs[subID] = geohash }
-    func removeGeoSamplingSub(_ subID: String) { geoSamplingSubs.removeValue(forKey: subID) }
-
-    func clearGeoSamplingSubs() -> [String] {
-        defer { geoSamplingSubs.removeAll() }
-        return Array(geoSamplingSubs.keys)
-    }
-
-    // Public timeline & pipeline
-    var messages: [BitchatMessage] = []
-    private(set) var pipelineFlushCount = 0
-    private(set) var refreshedChannels: [ChannelID?] = []
-    private(set) var publicSystemMessages: [String] = []
-    var pendingGeohashSystemMessages: [String] = []
-    private(set) var appendedGeohashMessages: [(message: BitchatMessage, geohash: String)] = []
-
-    func flushPublicMessagePipeline() { pipelineFlushCount += 1 }
-    func refreshVisibleMessages(from channel: ChannelID?) { refreshedChannels.append(channel) }
-    func addPublicSystemMessage(_ content: String) { publicSystemMessages.append(content) }
-
-    func drainPendingGeohashSystemMessages() -> [String] {
-        defer { pendingGeohashSystemMessages.removeAll() }
-        return pendingGeohashSystemMessages
-    }
-
-    func appendGeohashMessageIfAbsent(_ message: BitchatMessage, toGeohash geohash: String) -> Bool {
-        guard !appendedGeohashMessages.contains(where: { $0.message.id == message.id && $0.geohash == geohash }) else {
-            return false
-        }
-        appendedGeohashMessages.append((message, geohash))
-        return true
-    }
-
-    // Inbound public messages
-    private(set) var handledPublicMessages: [BitchatMessage] = []
-    private(set) var mentionCheckedMessageIDs: [String] = []
-    private(set) var hapticMessageIDs: [String] = []
-
-    func handlePublicMessage(_ message: BitchatMessage, powBits: Int) { handledPublicMessages.append(message) }
-    func checkForMentions(_ message: BitchatMessage) { mentionCheckedMessageIDs.append(message.id) }
-    func sendHapticFeedback(for message: BitchatMessage) { hapticMessageIDs.append(message.id) }
-    func parseMentions(from content: String) -> [String] { [] }
-
-    // Inbound private (geohash DM) payloads
     var selectedPrivateChatPeer: PeerID?
+    var nostrIdentity: NostrIdentity?
     var nostrKeyMapping: [PeerID: String] = [:]
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID) { nostrKeyMapping[peerID] = pubkey }
-    private(set) var handledPrivateMessages: [(payload: NoisePayload, senderPubkey: String, convKey: PeerID, timestamp: Date)] = []
-    private(set) var handledDelivered: [(senderPubkey: String, convKey: PeerID)] = []
-    private(set) var handledReadReceipts: [(senderPubkey: String, convKey: PeerID)] = []
-    private(set) var startedPrivateChats: [PeerID] = []
+    var accountSubscriptions: [(filter: NostrFilter, id: String)] = []
+    var accountHandlers: [(NostrEvent) -> Void] = []
+    var handledPrivateMessages: [(payload: NoisePayload, senderPubkey: String, convKey: PeerID, timestamp: Date)] = []
+    var handledDelivered: [(senderPubkey: String, convKey: PeerID)] = []
+    var handledReadReceipts: [(senderPubkey: String, convKey: PeerID)] = []
+    var nostrDeliveryAcks: [(messageID: String, recipientHex: String)] = []
+    var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
+    var recordedNostrEventIDs: [String] = []
+    private var processedEventIDs: Set<String> = []
+    var admitsSender: (PeerID) -> Bool = { _ in true }
+    var qrResolver: ((String) -> Data?)?
+    var resolvesNostrSendersFromQRContacts: Bool { qrResolver != nil }
 
-    func handlePrivateMessage(
-        _ payload: NoisePayload,
-        senderPubkey: String,
-        convKey: PeerID,
-        id: NostrIdentity,
-        messageTimestamp: Date
-    ) {
+    func currentNostrIdentity() -> NostrIdentity? { nostrIdentity }
+    func subscribeAccountMailbox(filter: NostrFilter, id: String, handler: @escaping (NostrEvent) -> Void) {
+        accountSubscriptions.append((filter, id))
+        accountHandlers.append(handler)
+    }
+    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID) { nostrKeyMapping[peerID] = pubkey }
+    func handlePrivateMessage(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID,
+                              id: NostrIdentity, messageTimestamp: Date) {
         handledPrivateMessages.append((payload, senderPubkey, convKey, messageTimestamp))
     }
-
     func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
         handledDelivered.append((senderPubkey, convKey))
     }
-
     func handleReadReceipt(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
         handledReadReceipts.append((senderPubkey, convKey))
     }
-
-    func startPrivateChat(with peerID: PeerID) { startedPrivateChats.append(peerID) }
-
-    // Nostr identity & blocking
-    var geohashIdentities: [String: NostrIdentity] = [:]
-    var nostrIdentity: NostrIdentity?
-    var blockedNostrPubkeys: Set<String> = []
-    var admitsSender: (PeerID) -> Bool = { _ in true }
     func admitsPrivateSender(_ peerID: PeerID) -> Bool { admitsSender(peerID) }
-    var qrResolver: ((String) -> Data?)?
-    var resolvesNostrSendersFromQRContacts: Bool { qrResolver != nil }
     func qrContactNoiseKey(forNostrPubkey pubkey: String) -> Data? { qrResolver?(pubkey) }
-    var displayNamesByPubkey: [String: String] = [:]
-
-    private struct NoIdentity: Error {}
-
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity {
-        guard let identity = geohashIdentities[geohash] else { throw NoIdentity() }
-        return identity
-    }
-
-    func currentNostrIdentity() -> NostrIdentity? { nostrIdentity }
-
-    func isNostrBlocked(pubkeyHexLowercased: String) -> Bool {
-        blockedNostrPubkeys.contains(pubkeyHexLowercased.lowercased())
-    }
-
-    func displayNameForNostrPubkey(_ pubkeyHex: String) -> String {
-        displayNamesByPubkey[pubkeyHex] ?? "anon"
-    }
-
-    // Event dedup
-    private(set) var recordedNostrEventIDs: [String] = []
-    private var processedNostrEventIDs: Set<String> = []
-    private(set) var clearProcessedNostrEventsCount = 0
-
-    func hasProcessedNostrEvent(_ eventID: String) -> Bool { processedNostrEventIDs.contains(eventID) }
-
+    func hasProcessedNostrEvent(_ eventID: String) -> Bool { processedEventIDs.contains(eventID) }
     func recordProcessedNostrEvent(_ eventID: String) {
-        processedNostrEventIDs.insert(eventID)
+        processedEventIDs.insert(eventID)
         recordedNostrEventIDs.append(eventID)
     }
-
-    func clearProcessedNostrEvents() {
-        processedNostrEventIDs.removeAll()
-        clearProcessedNostrEventsCount += 1
+    func allFavoriteRelationships() -> [FavoritesPersistenceService.FavoriteRelationship] { [] }
+    func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? { nil }
+    func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {}
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrDeliveryAcks.append((messageID, recipientHex))
     }
-
-    // Geo participants & presence
-    var geoNicknames: [String: String] = [:]
-    private(set) var teleportedKeys: Set<String> = []
-    var teleportedGeoCount: Int { teleportedKeys.count }
-    private(set) var refreshTimerStartCount = 0
-    private(set) var refreshTimerStopCount = 0
-    private(set) var activeParticipantGeohashes: [String?] = []
-    private(set) var recordedParticipants: [String] = []
-    private(set) var recordedSampledParticipants: [(pubkeyHex: String, geohash: String)] = []
-    private(set) var clearTeleportedGeoCount = 0
-    private(set) var clearGeoNicknamesCount = 0
-    var visiblePeople: [GeoPerson] = []
-
-    func startGeoParticipantRefreshTimer() { refreshTimerStartCount += 1 }
-    func stopGeoParticipantRefreshTimer() { refreshTimerStopCount += 1 }
-    func setActiveParticipantGeohash(_ geohash: String?) { activeParticipantGeohashes.append(geohash) }
-    func recordGeoParticipant(pubkeyHex: String) { recordedParticipants.append(pubkeyHex) }
-
-    func recordGeoParticipant(pubkeyHex: String, geohash: String) {
-        recordedSampledParticipants.append((pubkeyHex, geohash))
-    }
-
-    func geoParticipantCount(for geohash: String) -> Int {
-        recordedSampledParticipants.filter { $0.geohash == geohash }.count
-    }
-
-    func setGeoNickname(_ nickname: String, forPubkey pubkeyHex: String) { geoNicknames[pubkeyHex.lowercased()] = nickname }
-    func markGeoTeleported(_ pubkeyHexLowercased: String) { teleportedKeys.insert(pubkeyHexLowercased) }
-    func clearGeoTeleported(_ pubkeyHexLowercased: String) { teleportedKeys.remove(pubkeyHexLowercased) }
-
-    func clearTeleportedGeo() {
-        teleportedKeys.removeAll()
-        clearTeleportedGeoCount += 1
-    }
-
-    func clearGeoNicknames() {
-        geoNicknames.removeAll()
-        clearGeoNicknamesCount += 1
-    }
-
-    func visibleGeohashPeople() -> [GeoPerson] { visiblePeople }
-
-    // Location channels
-    var isTeleported = false
-    var regionalGeohashes: Set<String> = []
-
-    func isGeohashOutsideRegionalChannels(_ geohash: String) -> Bool {
-        !regionalGeohashes.isEmpty && !regionalGeohashes.contains(geohash)
-    }
-
-    // Routing & acknowledgements
-    private(set) var routedFavoriteNotifications: [(peerID: PeerID, isFavorite: Bool)] = []
-    private(set) var geoDeliveryAcks: [(messageID: String, recipientHex: String)] = []
-    private(set) var geoReadReceipts: [(messageID: String, recipientHex: String)] = []
-
-    func routeFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
-        routedFavoriteNotifications.append((peerID, isFavorite))
-    }
-
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoDeliveryAcks.append((messageID, recipientHex))
-    }
-
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoReadReceipts.append((messageID, recipientHex))
-    }
-
-    // Favorites & notifications
-    var favoriteRelationshipsByNoiseKey: [Data: FavoritesPersistenceService.FavoriteRelationship] = [:]
-    private(set) var geohashActivityNotifications: [(geohash: String, bodyPreview: String)] = []
-
-    func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? {
-        favoriteRelationshipsByNoiseKey[noiseKey]
-    }
-
-    func allFavoriteRelationships() -> [FavoritesPersistenceService.FavoriteRelationship] {
-        Array(favoriteRelationshipsByNoiseKey.values)
-    }
-
-    func notifyGeohashActivity(geohash: String, bodyPreview: String) {
-        geohashActivityNotifications.append((geohash, bodyPreview))
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrReadReceipts.append((messageID, recipientHex))
     }
 }
 
-// MARK: - Helpers
-
-/// Let the inner `Task { @MainActor in ... }` hops the coordinator schedules
-/// run to completion.
 @MainActor
 private func drainMainQueue() async {
     for _ in 0..<5 {
@@ -246,177 +79,122 @@ private func drainMainQueue() async {
 
 // MARK: - Coordinator Tests Against Mock Context
 
-/// Exercises `ChatNostrCoordinator` against `MockChatNostrContext` with no
-/// `ChatViewModel`. Scoped to the inbound event pipeline (dedup, presence,
-/// public-message ingest), gift-wrap DM ingest, key mapping, channel-switch
-/// teardown, embedded ack flows, and — now that favorites and notifications
-/// are injected through the context — the favorite-notification ingest and
-/// the sampled-geohash notification cooldown. Flows that hit live singletons
-/// (`NostrRelayManager.shared` subscriptions, `TorManager`) remain covered by
-/// the full view-model tests.
+/// Covers account subscription ownership, encrypted private messages and
+/// acknowledgements, QR-bound sender admission, deduplication, and read-ACK
+/// decisions with synthetic identities and injected context effects.
 struct ChatNostrCoordinatorContextTests {
 
     @Test @MainActor
-    func handleNostrEvent_ingestsPublicMessageOnceAndDeduplicates() async throws {
+    func accountMailboxStillRequiresTheQRContactBoundToTheSenderForEveryPayload() async throws {
         let context = MockChatNostrContext()
         let coordinator = ChatNostrCoordinator(context: context)
-
-        let sender = try NostrIdentity.generate()
-        let event = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "hello geohash",
-            geohash: "u4pruyd",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-        context.displayNamesByPubkey[event.pubkey] = "alice#1234"
-
-        coordinator.inbound.handleNostrEvent(event)
-        await drainMainQueue()
-
-        // Dedup recorded exactly once, presence and key mapping updated.
-        #expect(context.recordedNostrEventIDs == [event.id])
-        #expect(context.geoNicknames[event.pubkey.lowercased()] == "alice")
-        #expect(context.recordedParticipants == [event.pubkey])
-        #expect(context.nostrKeyMapping[PeerID(nostr: event.pubkey)] == event.pubkey)
-        #expect(context.nostrKeyMapping[PeerID(nostr_: event.pubkey)] == event.pubkey)
-
-        // The message reached the public ingest path with the resolved name.
-        #expect(context.handledPublicMessages.map(\.id) == [event.id])
-        #expect(context.handledPublicMessages.first?.sender == "alice#1234")
-        #expect(context.handledPublicMessages.first?.content == "hello geohash")
-        #expect(context.mentionCheckedMessageIDs == [event.id])
-        #expect(context.hapticMessageIDs == [event.id])
-
-        // A replay of the same event is dropped before any processing.
-        coordinator.inbound.handleNostrEvent(event)
-        await drainMainQueue()
-        #expect(context.recordedNostrEventIDs == [event.id])
-        #expect(context.handledPublicMessages.count == 1)
-        #expect(context.recordedParticipants.count == 1)
-    }
-
-    @Test @MainActor
-    func handleNostrEvent_marksTeleportedPeerWithoutIngestingEmptyContent() async throws {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-
-        let sender = try NostrIdentity.generate()
-        let event = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "",
-            geohash: "u4pruyd",
-            senderIdentity: sender,
-            teleported: true
-        )
-
-        coordinator.inbound.handleNostrEvent(event)
-        await drainMainQueue()
-
-        // Teleport detection fires even though the empty message is dropped.
-        #expect(context.teleportedKeys == [event.pubkey.lowercased()])
-        #expect(context.recordedParticipants == [event.pubkey])
-        #expect(context.handledPublicMessages.isEmpty)
-    }
-
-    @Test @MainActor
-    func handleNostrEvent_skipsBlockedSender() async throws {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-
-        let sender = try NostrIdentity.generate()
-        let event = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "spam",
-            geohash: "u4pruyd",
-            senderIdentity: sender
-        )
-        context.blockedNostrPubkeys.insert(event.pubkey.lowercased())
-
-        coordinator.inbound.handleNostrEvent(event)
-        await drainMainQueue()
-
-        // The event is still recorded for dedup but nothing else happens.
-        #expect(context.recordedNostrEventIDs == [event.id])
-        #expect(context.recordedParticipants.isEmpty)
-        #expect(context.handledPublicMessages.isEmpty)
-    }
-
-    @Test @MainActor
-    func handleGiftWrap_routesEmbeddedPrivateMessageAndDeduplicates() async throws {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-
         let recipient = try NostrIdentity.generate()
-        let sender = try NostrIdentity.generate()
-        let embedded = try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(
-            content: "psst",
-            messageID: "gm-1"
-        ))
-        let giftWrap = try NostrProtocol.createPrivateMessage(
-            content: embedded,
-            recipientPubkey: recipient.publicKeyHex,
-            senderIdentity: sender
-        )
-
-        coordinator.inbound.handleGiftWrap(giftWrap, id: recipient)
-
-        // The NIP-17 unwrap runs off the main actor; wait for the hop back.
-        let convKey = PeerID(nostr_: sender.publicKeyHex)
-        let routed = await TestHelpers.waitUntil({ context.handledPrivateMessages.count == 1 }, timeout: TestConstants.settleTimeout)
-        #expect(routed)
-        #expect(context.recordedNostrEventIDs == [giftWrap.id])
-        #expect(context.nostrKeyMapping[convKey] == sender.publicKeyHex)
-        #expect(context.handledPrivateMessages.first?.senderPubkey == sender.publicKeyHex)
-        #expect(context.handledPrivateMessages.first?.convKey == convKey)
-
-        // The embedded Noise payload survives the round trip intact.
-        let payload = try #require(context.handledPrivateMessages.first?.payload)
-        #expect(payload.type == .privateMessage)
-        let pm = try #require(PrivateMessagePacket.decode(from: payload.data))
-        #expect(pm.messageID == "gm-1")
-        #expect(pm.content == "psst")
-
-        // The same gift wrap is dropped on replay.
-        coordinator.inbound.handleGiftWrap(giftWrap, id: recipient)
-        await drainMainQueue()
-        #expect(context.recordedNostrEventIDs == [giftWrap.id])
-        #expect(context.handledPrivateMessages.count == 1)
-    }
-
-    @Test @MainActor
-    func handleGiftWrap_panicWipeAfterSpawnDropsDecryptedResult() async throws {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-
-        let recipient = try NostrIdentity.generate()
-        let sender = try NostrIdentity.generate()
-        let embedded = try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(
-            content: "pre-wipe secret",
-            messageID: "gm-wipe-1"
-        ))
-        let giftWrap = try NostrProtocol.createPrivateMessage(
-            content: embedded,
-            recipientPubkey: recipient.publicKeyHex,
-            senderIdentity: sender
-        )
-
-        // Spawn the detached decrypt (it strongly captures the pre-wipe
-        // identity), then panic-wipe in the SAME main-actor turn — guaranteed
-        // to land before the task's first main-actor hop.
-        coordinator.inbound.handleGiftWrap(giftWrap, id: recipient)
-        coordinator.inbound.invalidateInFlightDecrypts()
-
-        // Give the detached task ample time to have delivered if the wipe
-        // guard were broken.
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        await drainMainQueue()
-
+        let trusted = try NostrIdentity.generate()
+        let stranger = try NostrIdentity.generate()
+        let key = Data(repeating: 0xA1, count: 32)
+        context.nostrIdentity = recipient
+        context.qrResolver = { $0 == trusted.publicKeyHex ? key : nil }
+        context.admitsSender = { $0.noiseKey == key }
+        let contents = [
+            try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: "Synthetic QR-only message", messageID: "qr-only-pm")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .delivered, messageID: "qr-only-delivered")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .readReceipt, messageID: "qr-only-read"))
+        ]
+        for content in contents {
+            await coordinator.inbound.processNostrMessage(try NostrProtocol.createPrivateMessage(
+                content: content, recipientPubkey: recipient.publicKeyHex, senderIdentity: stranger))
+        }
         #expect(context.handledPrivateMessages.isEmpty)
-        #expect(context.recordedNostrEventIDs.isEmpty)
+        #expect(context.handledDelivered.isEmpty)
+        #expect(context.handledReadReceipts.isEmpty)
+        #expect(context.nostrKeyMapping.isEmpty)
 
-        // The pipeline itself stays usable: a gift wrap spawned AFTER the
-        // wipe (new generation) still decrypts and delivers.
-        coordinator.inbound.handleGiftWrap(giftWrap, id: recipient)
-        let delivered = await TestHelpers.waitUntil({ context.handledPrivateMessages.count == 1 }, timeout: TestConstants.settleTimeout)
-        #expect(delivered)
+        for content in contents {
+            await coordinator.inbound.processNostrMessage(try NostrProtocol.createPrivateMessage(
+                content: content, recipientPubkey: recipient.publicKeyHex, senderIdentity: trusted))
+        }
+        #expect(context.handledPrivateMessages.map(\.convKey) == [PeerID(hexData: key)])
+        #expect(context.handledDelivered.map(\.convKey) == [PeerID(hexData: key)])
+        #expect(context.handledReadReceipts.map(\.convKey) == [PeerID(hexData: key)])
+    }
+
+    @Test @MainActor
+    func accountMailboxRequiresIdentityAndKeepsTheGiftWrapFilter() throws {
+        let context = MockChatNostrContext()
+        let coordinator = ChatNostrCoordinator(context: context)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        #expect(context.accountSubscriptions.isEmpty)
+
+        let identity = try NostrIdentity.generate()
+        context.nostrIdentity = identity
+        let earliest = Int(Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds).timeIntervalSince1970)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        let latest = Int(Date().addingTimeInterval(-TransportConfig.nostrDMSubscribeLookbackSeconds).timeIntervalSince1970)
+        #expect(context.accountSubscriptions.count == 1)
+        let subscription = try #require(context.accountSubscriptions.first)
+        #expect(subscription.id == "chat-messages")
+        #expect(subscription.filter.kinds == [1059])
+        let since = try #require(subscription.filter.since)
+        #expect((earliest...latest).contains(since))
+        let encoded = try JSONEncoder().encode(subscription.filter)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["#p"] as? [String] == [identity.publicKeyHex])
+    }
+
+    @Test @MainActor
+    func accountMailboxCallbackPreservesPrivateMessagesAndBothAcknowledgements() async throws {
+        let context = MockChatNostrContext()
+        context.nostrIdentity = try NostrIdentity.generate()
+        let recipient = try #require(context.nostrIdentity)
+        let sender = try NostrIdentity.generate()
+        let coordinator = ChatNostrCoordinator(context: context)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+        let handler = try #require(context.accountHandlers.first)
+        let contents = [
+            try #require(NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: "Synthetic inbox message", messageID: "mailbox-pm")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .delivered, messageID: "mailbox-delivered")),
+            try #require(NostrEmbeddedBitChat.encodeAckForNostrNoRecipient(type: .readReceipt, messageID: "mailbox-read"))
+        ]
+        for content in contents {
+            handler(try NostrProtocol.createPrivateMessage(
+                content: content, recipientPubkey: recipient.publicKeyHex, senderIdentity: sender
+            ))
+        }
+        let routed = await TestHelpers.waitUntil({
+            context.handledPrivateMessages.count == 1 && context.handledDelivered.count == 1 &&
+                context.handledReadReceipts.count == 1
+        }, timeout: TestConstants.settleTimeout)
+        #expect(routed)
+        #expect(context.activeChannel == .mesh)
+        #expect(context.handledPrivateMessages.first?.senderPubkey == sender.publicKeyHex)
+        #expect(context.handledDelivered.first?.senderPubkey == sender.publicKeyHex)
+        #expect(context.handledReadReceipts.first?.senderPubkey == sender.publicKeyHex)
+        let payload = try #require(context.handledPrivateMessages.first?.payload)
+        let message = try #require(PrivateMessagePacket.decode(from: payload.data))
+        #expect(message.messageID == "mailbox-pm")
+        #expect(message.content == "Synthetic inbox message")
+    }
+
+    @Test @MainActor
+    func accountMailboxDoesNotRetainItsContext() throws {
+        var context: MockChatNostrContext? = MockChatNostrContext()
+        weak var weakContext = context
+        let coordinator = ChatNostrCoordinator(context: try #require(context))
+        context = nil
+        #expect(weakContext == nil)
+        coordinator.accountMailbox.setupNostrMessageHandling()
+    }
+
+    @Test @MainActor
+    func aRetainedRelayHandlerDoesNotKeepTheAccountMailboxAlive() throws {
+        let context = MockChatNostrContext()
+        context.nostrIdentity = try NostrIdentity.generate()
+        var coordinator: ChatNostrCoordinator? = ChatNostrCoordinator(context: context)
+        weak var mailbox = coordinator?.accountMailbox
+        coordinator?.accountMailbox.setupNostrMessageHandling()
+        #expect(context.accountHandlers.count == 1)
+        coordinator = nil
+        #expect(mailbox == nil)
     }
 
     // NOTE: Inbound Schnorr signature verification (and the forged-copy
@@ -427,7 +205,7 @@ struct ChatNostrCoordinatorContextTests {
     // The inbound pipeline only ever sees verified events.
 
     @Test @MainActor
-    func directMessagesFromANonAdmittedSenderReachNoHandlerOnEitherPath() async throws {
+    func accountMessagesFromANonAdmittedSenderReachNoHandler() async throws {
         let context = MockChatNostrContext()
         let coordinator = ChatNostrCoordinator(context: context)
         let recipient = try NostrIdentity.generate()
@@ -444,7 +222,6 @@ struct ChatNostrCoordinatorContextTests {
         ]
         for content in contents {
             await coordinator.inbound.processNostrMessage(try wrap(content))
-            coordinator.inbound.handleGiftWrap(try wrap(content), id: recipient)
         }
         try? await Task.sleep(nanoseconds: 200_000_000)
         await drainMainQueue()
@@ -518,33 +295,6 @@ struct ChatNostrCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func switchLocationChannel_toMesh_tearsDownGeohashState() async {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-        context.activeChannel = .mesh
-        context.currentGeohash = "u4pruyd"
-        context.geoNicknames = ["abcd": "alice"]
-
-        coordinator.subscriptions.switchLocationChannel(to: .mesh)
-
-        #expect(context.pipelineFlushCount == 1)
-        #expect(context.activeChannel == .mesh)
-        #expect(context.clearProcessedNostrEventsCount == 1)
-        #expect(context.refreshedChannels == [.mesh])
-        #expect(context.refreshTimerStopCount == 1)
-        #expect(context.clearTeleportedGeoCount == 1)
-        // Cleared once in the mesh branch, once in the shared teardown.
-        #expect(context.activeParticipantGeohashes == [nil, nil])
-        #expect(context.currentGeohash == nil)
-        #expect(context.geoSubscriptionID == nil)
-        #expect(context.geoDmSubscriptionID == nil)
-        #expect(context.clearGeoNicknamesCount == 1)
-        #expect(context.geoNicknames.isEmpty)
-        // Mesh never starts a geohash subscription or refresh timer.
-        #expect(context.refreshTimerStartCount == 0)
-    }
-
-    @Test @MainActor
     func sendDeliveryAckViaNostrEmbedded_sendsReadReceiptOnlyWhenViewingUnread() async throws {
         let context = MockChatNostrContext()
         let coordinator = ChatNostrCoordinator(context: context)
@@ -565,191 +315,20 @@ struct ChatNostrCoordinatorContextTests {
 
         // Not viewing the chat: delivery ack only.
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: false, senderPubkey: senderPubkey, key: nil)
-        #expect(context.geoDeliveryAcks.map(\.messageID) == ["mid-1"])
-        #expect(context.geoDeliveryAcks.first?.recipientHex == senderPubkey)
-        #expect(context.geoReadReceipts.isEmpty)
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["mid-1"])
+        #expect(context.nostrDeliveryAcks.first?.recipientHex == senderPubkey)
+        #expect(context.nostrReadReceipts.isEmpty)
 
         // Viewing the chat: delivery ack plus read receipt.
         context.selectedPrivateChatPeer = convKey
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: false, senderPubkey: senderPubkey, key: Data([0x01]))
-        #expect(context.geoDeliveryAcks.count == 2)
-        #expect(context.geoReadReceipts.map(\.messageID) == ["mid-1"])
+        #expect(context.nostrDeliveryAcks.count == 2)
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["mid-1"])
 
         // Already read: no further read receipt.
         coordinator.sendDeliveryAckViaNostrEmbedded(message, wasReadBefore: true, senderPubkey: senderPubkey, key: nil)
-        #expect(context.geoDeliveryAcks.count == 3)
-        #expect(context.geoReadReceipts.count == 1)
-    }
-
-    @Test @MainActor
-    func geohashDMKeyMappingHelpers_resolveAndStartChats() async {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-        let hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-        let convKey = PeerID(nostr_: hex)
-        context.displayNamesByPubkey[hex] = "bob#eeff"
-
-        coordinator.startGeohashDM(withPubkeyHex: hex)
-        #expect(context.nostrKeyMapping[convKey] == hex)
-        #expect(context.startedPrivateChats == [convKey])
-
-        #expect(coordinator.fullNostrHex(forSenderPeerID: convKey) == hex)
-        #expect(coordinator.geohashDisplayName(for: convKey) == "bob#eeff")
-
-        // Unmapped conversation keys fall back to the bare peer ID.
-        let unknown = PeerID(nostr_: "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100")
-        #expect(coordinator.geohashDisplayName(for: unknown) == unknown.bare)
-
-        // Display-name lookup prefers visible people, then nicknames.
-        context.visiblePeople = [GeoPerson(id: "aa11", displayName: "carol#aa11", lastSeen: Date())]
-        context.geoNicknames = ["bb22": "dave"]
-        #expect(coordinator.nostrPubkeyForDisplayName("carol#aa11") == "aa11")
-        #expect(coordinator.nostrPubkeyForDisplayName("dave") == "bb22")
-        #expect(coordinator.nostrPubkeyForDisplayName("nobody") == nil)
-    }
-}
-
-// MARK: - GeoPresenceTracker Tests
-
-/// Focused tests for seams the coordinator split made independently
-/// testable: the sampling-event LRU dedup and the per-geohash notification
-/// cooldown. The cooldown tests stop short of the live notification center by
-/// pre-seeding the timeline append as a duplicate.
-struct GeoPresenceTrackerTests {
-
-    @Test @MainActor
-    func samplingEventDedup_evictsOldestBeyondLRUCap() {
-        let context = MockChatNostrContext()
-        let tracker = GeoPresenceTracker(context: context)
-        let cap = TransportConfig.geoSamplingEventLRUCap
-
-        // Empty IDs are never deduplicated.
-        #expect(tracker.shouldProcessGeoSamplingEvent(""))
-        #expect(tracker.shouldProcessGeoSamplingEvent(""))
-
-        // First sight passes; a replay is rejected.
-        #expect(tracker.shouldProcessGeoSamplingEvent("ev-0"))
-        #expect(!tracker.shouldProcessGeoSamplingEvent("ev-0"))
-
-        // Fill one past the cap: the oldest entry is evicted and accepted
-        // again, while a still-resident entry stays deduplicated.
-        for i in 1...cap {
-            #expect(tracker.shouldProcessGeoSamplingEvent("ev-\(i)"))
-        }
-        #expect(tracker.shouldProcessGeoSamplingEvent("ev-0"))
-        #expect(!tracker.shouldProcessGeoSamplingEvent("ev-\(cap)"))
-
-        // Clearing resets the dedup entirely.
-        tracker.clearGeoSamplingEventDedup()
-        #expect(tracker.shouldProcessGeoSamplingEvent("ev-\(cap)"))
-    }
-
-    @Test @MainActor
-    func notificationCooldown_skipsWithinWindow() async throws {
-        let context = MockChatNostrContext()
-        let tracker = GeoPresenceTracker(context: context)
-        let sender = try NostrIdentity.generate()
-        let event = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "sampled activity",
-            geohash: "9q8yy",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-
-        // Within the cooldown window nothing is appended or re-stamped.
-        let recent = Date()
-        context.lastGeoNotificationAt["9q8yy"] = recent
-        tracker.cooldownPerGeohash("9q8yy", content: "sampled activity", event: event)
-        await drainMainQueue()
-        #expect(context.appendedGeohashMessages.isEmpty)
-        #expect(context.lastGeoNotificationAt["9q8yy"] == recent)
-    }
-
-    @Test @MainActor
-    func notificationCooldown_stampsGeohashOnceWindowElapses() async throws {
-        let context = MockChatNostrContext()
-        let tracker = GeoPresenceTracker(context: context)
-        let sender = try NostrIdentity.generate()
-        let event = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "sampled activity",
-            geohash: "9q8yy",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-
-        // Pre-seed the same event ID so the timeline append reports a
-        // duplicate and the flow never reaches the live notification center.
-        let placeholder = BitchatMessage(
-            id: event.id,
-            sender: "seed",
-            content: "seed",
-            timestamp: Date(),
-            isRelay: false
-        )
-        #expect(context.appendGeohashMessageIfAbsent(placeholder, toGeohash: "9q8yy"))
-
-        // Cooldown elapsed: the geohash is re-stamped and the append is
-        // attempted (and rejected as a duplicate, so no notification either).
-        let stale = Date().addingTimeInterval(-TransportConfig.uiGeoNotifyCooldownSeconds - 1)
-        context.lastGeoNotificationAt["9q8yy"] = stale
-        tracker.cooldownPerGeohash("9q8yy", content: "sampled activity", event: event)
-        await drainMainQueue()
-
-        let stamped = try #require(context.lastGeoNotificationAt["9q8yy"])
-        #expect(stamped > stale)
-        #expect(context.appendedGeohashMessages.count == 1)
-    }
-
-    @Test @MainActor
-    func geoPresence_sampledActivityNotificationRespectsPerGeohashCooldown() async throws {
-        let context = MockChatNostrContext()
-        let coordinator = ChatNostrCoordinator(context: context)
-        let sender = try NostrIdentity.generate()
-        context.geoNicknames[sender.publicKeyHex.lowercased()] = "alice"
-
-        let first = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "hello geohash",
-            geohash: "u4pruyd",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-        coordinator.presence.cooldownPerGeohash("u4pruyd", content: "hello geohash", event: first)
-        await drainMainQueue()
-
-        // Sampled message recorded in the store and notification posted.
-        #expect(context.appendedGeohashMessages.map(\.message.id) == [first.id])
-        #expect(context.appendedGeohashMessages.first?.message.sender == "alice#" + String(first.pubkey.suffix(4)))
-        #expect(context.geohashActivityNotifications.count == 1)
-        #expect(context.geohashActivityNotifications.first?.geohash == "u4pruyd")
-        #expect(context.geohashActivityNotifications.first?.bodyPreview == "hello geohash")
-        #expect(context.lastGeoNotificationAt["u4pruyd"] != nil)
-
-        // A second sampled event inside the cooldown window is fully suppressed.
-        let second = try NostrProtocol.createEphemeralGeohashEvent(
-            content: "again",
-            geohash: "u4pruyd",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-        coordinator.presence.cooldownPerGeohash("u4pruyd", content: "again", event: second)
-        await drainMainQueue()
-        #expect(context.geohashActivityNotifications.count == 1)
-        #expect(context.appendedGeohashMessages.count == 1)
-
-        // Long previews are truncated to the snippet cap with an ellipsis.
-        let longContent = String(repeating: "x", count: TransportConfig.uiGeoNotifySnippetMaxLen + 20)
-        let third = try NostrProtocol.createEphemeralGeohashEvent(
-            content: longContent,
-            geohash: "9q8yyk",
-            senderIdentity: sender,
-            nickname: "alice"
-        )
-        coordinator.presence.cooldownPerGeohash("9q8yyk", content: longContent, event: third)
-        await drainMainQueue()
-        #expect(
-            context.geohashActivityNotifications.last?.bodyPreview
-                == String(repeating: "x", count: TransportConfig.uiGeoNotifySnippetMaxLen) + "…"
-        )
+        #expect(context.nostrDeliveryAcks.count == 3)
+        #expect(context.nostrReadReceipts.count == 1)
     }
 
 }

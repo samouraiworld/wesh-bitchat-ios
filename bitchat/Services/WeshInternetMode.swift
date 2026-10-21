@@ -191,7 +191,6 @@ final class WeshInternetMode: ObservableObject {
     private convenience init() {
         self.init(defaults: .standard, dependencies: Dependencies(
             forceTor: {
-                NetworkActivationService.shared.setUserTorEnabled(true)
                 return NetworkActivationService.shared.userTorEnabled && TorManager.shared.torEnforced
             },
             ensureNostrIdentity: { (try? NostrIdentityBridge().getCurrentNostrIdentity()) != nil },

@@ -31,6 +31,7 @@ final class PublicMessagePipeline {
 
     private var buffer: [(message: BitchatMessage, conversationID: ConversationID)] = []
     private var timer: Timer?
+    private let trace: (@Sendable (String) -> Void)?
     private let baseFlushInterval: TimeInterval
     private var dynamicFlushInterval: TimeInterval
     private var recentBatchSizes: [Int] = []
@@ -40,15 +41,27 @@ final class PublicMessagePipeline {
     init(
         baseFlushInterval: TimeInterval = TransportConfig.basePublicFlushInterval,
         maxRecentBatchSamples: Int = 10,
-        dedupWindow: TimeInterval = 1.0
+        dedupWindow: TimeInterval = 1.0,
+        trace: (@Sendable (String) -> Void)? = nil
     ) {
         self.baseFlushInterval = baseFlushInterval
         self.dynamicFlushInterval = baseFlushInterval
         self.maxRecentBatchSamples = maxRecentBatchSamples
         self.dedupWindow = dedupWindow
+        if let trace {
+            self.trace = { stage in
+                let mode = RunLoop.current.currentMode
+                let modeClass = mode == nil ? "none" :
+                    (mode == RunLoop.Mode.default ? "default" : (mode == RunLoop.Mode.common ? "common" : "other"))
+                trace("\(stage) mainThread=\(Thread.isMainThread) mode=\(modeClass)")
+            }
+        } else {
+            self.trace = nil
+        }
     }
 
     deinit {
+        trace?("deinit")
         timer?.invalidate()
     }
 
@@ -66,13 +79,10 @@ final class PublicMessagePipeline {
     func removeMessage(withID messageID: String) {
         buffer.removeAll { $0.message.id == messageID }
         if buffer.isEmpty {
+            trace?("remove.invalidate")
             timer?.invalidate()
             timer = nil
         }
-    }
-
-    func containsMessage(withID messageID: String) -> Bool {
-        buffer.contains { $0.message.id == messageID }
     }
 
     func flushIfNeeded() {
@@ -82,23 +92,35 @@ final class PublicMessagePipeline {
 
 private extension PublicMessagePipeline {
     func scheduleFlush() {
+        let trace = self.trace
+        trace?("schedule.request")
         guard timer == nil else { return }
+        trace?("schedule.create")
         timer = Timer.scheduledTimer(withTimeInterval: dynamicFlushInterval, repeats: false) { [weak self] _ in
-            guard let self else { return }
+            trace?("timer.callback")
+            guard let self else { trace?("timer.ownerAbsent"); return }
+            trace?("timer.ownerPresent")
             Task { @MainActor in
+                trace?("task.enter")
                 self.flushBuffer()
             }
+            trace?("task.submissionReturned")
         }
+        trace?("schedule.returned")
     }
 
     func flushBuffer() {
+        trace?("flush.enter count=\(buffer.count)")
         timer?.invalidate()
         timer = nil
-        guard !buffer.isEmpty else { return }
+        trace?("flush.timerReset")
+        guard !buffer.isEmpty else { trace?("flush.empty"); return }
         guard let delegate = delegate else {
+            trace?("flush.delegateMissing")
             buffer.removeAll(keepingCapacity: false)
             return
         }
+        trace?("flush.delegatePresent")
 
         delegate.pipelineSetBatchingState(self, isBatching: true)
 
@@ -124,6 +146,7 @@ private extension PublicMessagePipeline {
         buffer.removeAll(keepingCapacity: true)
         guard !pending.isEmpty else {
             delegate.pipelineSetBatchingState(self, isBatching: false)
+            trace?("flush.noPending")
             return
         }
 
@@ -141,6 +164,7 @@ private extension PublicMessagePipeline {
         }
 
         delegate.pipelineSetBatchingState(self, isBatching: false)
+        trace?("flush.completed count=\(pending.count)")
 
         if !buffer.isEmpty {
             scheduleFlush()

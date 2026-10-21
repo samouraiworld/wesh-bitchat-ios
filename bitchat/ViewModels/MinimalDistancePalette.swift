@@ -189,15 +189,4 @@ extension MinimalDistancePalette.Config {
         ringBrightnessDeltaDark: TransportConfig.uiPeerPaletteRingBrightnessDeltaDark
     )
 
-    static let nostr = MinimalDistancePalette.Config(
-        slotCount: TransportConfig.uiPeerPaletteSlots,
-        avoidCenterHue: 30.0 / 360.0,
-        avoidHueDelta: TransportConfig.uiColorHueAvoidanceDelta,
-        saturationLight: 0.70,
-        saturationDark: 0.80,
-        baseBrightnessLight: 0.45,
-        baseBrightnessDark: 0.75,
-        ringBrightnessDeltaLight: TransportConfig.uiPeerPaletteRingBrightnessDeltaLight,
-        ringBrightnessDeltaDark: TransportConfig.uiPeerPaletteRingBrightnessDeltaDark
-    )
 }

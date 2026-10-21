@@ -4,6 +4,24 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define SOCKS5_REP_SUCCESS 0
+
+#define SOCKS5_REP_FAILURE 1
+
+#define SOCKS5_REP_CONN_REFUSED 5
+
+/**
+ * Concurrent connections past their handshake. More are refused, so no local app can
+ * exhaust our file descriptors.
+ */
+#define MAX_CONNECTIONS 64
+
+/**
+ * Concurrent connections still in their handshake. Kept apart and small, so sockets that
+ * never send a request cannot take the places of working ones.
+ */
+#define MAX_HANDSHAKES 16
+
 /**
  * Start Arti with a SOCKS5 proxy.
  *
@@ -13,12 +31,14 @@
  *
  * # Returns
  * * 0 on success
- * * -1 if already running
+ * * -1 if a session is active, stopping, or native quiescence is already unconfirmed
  * * -2 if data_dir is invalid
  * * -3 if runtime initialization failed
  * * -4 if bootstrap failed
+ * * -5 if native teardown became unconfirmed while admitting this start; restart the process before starting again
  */
-int arti_start(const char *data_dir, uint16_t socks_port);
+int arti_start(const char *data_dir,
+               uint16_t socks_port);
 
 /**
  * Stop Arti gracefully.
@@ -26,6 +46,7 @@ int arti_start(const char *data_dir, uint16_t socks_port);
  * # Returns
  * * 0 on success
  * * -1 if not running
+ * * -5 if native quiescence could not be confirmed; the failure remains latched until process restart
  */
 int arti_stop(void);
 
@@ -33,8 +54,8 @@ int arti_stop(void);
  * Check if Arti is currently running.
  *
  * # Returns
- * * 1 if running
- * * 0 if not running
+ * * 1 if active or native quiescence is unconfirmed (including a latched teardown failure)
+ * * 0 only when native work is confirmed stopped
  */
 int arti_is_running(void);
 

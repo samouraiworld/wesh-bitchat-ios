@@ -9,6 +9,7 @@
 import BitLogger
 import BitFoundation
 import Foundation
+import LocalAuthentication
 import Security
 
 enum KeychainInstallLifecycleAction: Equatable {
@@ -190,6 +191,93 @@ final class KeychainManager: KeychainManagerProtocol {
             }
         }
         return completed
+    }
+
+    /// Retires only historical group-key accounts in the selected service.
+    /// Both operations are required so the checked path can use metadata-only
+    /// fixtures without constructing a manager or accessing the Keychain.
+    static func retireLegacyGroupKeys(
+        primaryService: String,
+        copyAttributes: ([String: Any]) -> (OSStatus, Any?),
+        deleteItem: ([String: Any]) -> OSStatus
+    ) -> Bool {
+        guard !primaryService.isEmpty else { return false }
+        let inventoryQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: primaryService,
+            kSecAttrSynchronizable as String: false,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true
+        ]
+        func inventory() -> [[String: Any]]? {
+            let (status, result) = copyAttributes(inventoryQuery)
+            if status == errSecItemNotFound { return [] }
+            guard status == errSecSuccess, let records = result as? [[String: Any]] else { return nil }
+            var candidates: [[String: Any]] = []
+            for record in records {
+                guard let service = record[kSecAttrService as String] as? String, !service.isEmpty,
+                      let account = record[kSecAttrAccount as String] as? String,
+                      !record.keys.contains(kSecValueData as String),
+                      !record.keys.contains(kSecValueRef as String),
+                      !record.keys.contains(kSecValuePersistentRef as String) else { return nil }
+                if let itemClass = record[kSecClass as String] {
+                    guard itemClass as? String == kSecClassGenericPassword as String else { return nil }
+                }
+                if let synchronizable = record[kSecAttrSynchronizable as String] {
+                    guard synchronizable as? Bool == false else { return nil }
+                }
+                var accessGroup: String?
+                if let group = record[kSecAttrAccessGroup as String] {
+                    guard let value = group as? String, !value.isEmpty else { return nil }
+                    accessGroup = value
+                }
+                let prefix = "identity_groupKey-"
+                guard service == primaryService, account.hasPrefix(prefix) else { continue }
+                let suffix = account.dropFirst(prefix.count).utf8
+                guard suffix.count == 32, suffix.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+                    continue
+                }
+                var query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: primaryService,
+                    kSecAttrAccount as String: account,
+                    kSecAttrSynchronizable as String: false
+                ]
+                if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+                candidates.append(query)
+            }
+            return candidates
+        }
+        // Validate the complete metadata inventory before authorizing any deletion.
+        guard let candidates = inventory() else { return false }
+        guard !candidates.isEmpty else { return true }
+        var completed = true
+        for query in candidates {
+            let status = deleteItem(query)
+            if status != errSecSuccess && status != errSecItemNotFound { completed = false }
+        }
+        // Read back independently even after a refused deletion; submission is not absence.
+        let remaining = inventory()
+        return completed && (remaining?.isEmpty == true)
+    }
+
+    /// The ordinary-startup adapter never permits interactive authentication.
+    /// Test hosts must use the required injected operations above instead.
+    static func retireLegacyGroupKeysFromCurrentService() -> Bool {
+        guard !TestEnvironment.isRunningTests else { return false }
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return retireLegacyGroupKeys(primaryService: BitchatApp.bundleID, copyAttributes: { query in
+            var scoped = query
+            scoped[kSecUseAuthenticationContext as String] = context
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(scoped as CFDictionary, &result)
+            return (status, result)
+        }, deleteItem: { query in
+            var scoped = query
+            scoped[kSecUseAuthenticationContext as String] = context
+            return SecItemDelete(scoped as CFDictionary)
+        })
     }
 
     /// The app currently has an application-group entitlement, not a

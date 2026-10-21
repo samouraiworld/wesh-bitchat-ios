@@ -57,8 +57,8 @@ struct NotificationBlockingTests {
         #expect(manager.isBlocked(fingerprint: testFingerprint) == false)
     }
 
-    @Test("getBlockedNostrPubkeys returns all blocked pubkeys")
-    func getBlockedNostrPubkeys_returnsAllBlocked() {
+    @Test("Known Nostr pubkeys are blocked independently")
+    func knownNostrPubkeysAreBlockedIndependently() {
         let keychain = MockKeychain()
         let manager = MockIdentityManager(keychain)
 
@@ -70,12 +70,10 @@ struct NotificationBlockingTests {
         manager.setNostrBlocked(pubkey2, isBlocked: true)
         manager.setNostrBlocked(pubkey3, isBlocked: true)
 
-        let blocked = manager.getBlockedNostrPubkeys()
-
-        #expect(blocked.count == 3)
-        #expect(blocked.contains(pubkey1))
-        #expect(blocked.contains(pubkey2))
-        #expect(blocked.contains(pubkey3))
+        #expect(manager.isNostrBlocked(pubkeyHexLowercased: pubkey1))
+        #expect(manager.isNostrBlocked(pubkeyHexLowercased: pubkey2))
+        #expect(manager.isNostrBlocked(pubkeyHexLowercased: pubkey3))
+        #expect(!manager.isNostrBlocked(pubkeyHexLowercased: "not-blocked"))
     }
 
     // MARK: - Message Blocking Tests

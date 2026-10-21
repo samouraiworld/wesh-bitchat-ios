@@ -2,4 +2,3 @@
 "NSBluetoothAlwaysUsageDescription" = "Wesh utilise le Bluetooth pour le salon public et les messages privés chiffrés après vérification de l’identité. Les participants peuvent conserver et relayer les messages publics.";
 "NSBluetoothPeripheralUsageDescription" = "Wesh utilise le Bluetooth pour connecter les téléphones à proximité et échanger dans le salon public ou en privé après vérification.";
 "NSCameraUsageDescription" = "Wesh utilise la caméra pour scanner en personne le QR d’identité affiché en direct par votre contact.";
-"NSLocationWhenInUseUsageDescription" = "Wesh n’utilise votre position que si vous activez une fonction de localisation facultative. Cette version ne la demande pas.";

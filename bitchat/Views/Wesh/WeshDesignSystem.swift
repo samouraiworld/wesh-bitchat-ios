@@ -11,8 +11,11 @@ import AppKit
 enum WeshAppearance: String, CaseIterable, Identifiable {
     case night, day
     var id: String { rawValue }
-    var title: String { self == .night ? "Nuit" : "Jour" }
-    var subtitle: String { self == .night ? "Asphalte, noir réel pour l’OLED" : "Papier d’affiche, pour le plein soleil" }
+    var title: String { title(bundle: PaveCopy.bundle, locale: .current) }
+    func title(bundle: Bundle, locale: Locale) -> String {
+        PaveCopy.text(self == .night ? "pave.theme.nuit" : "pave.theme.jour", bundle: bundle, locale: locale)
+    }
+    var subtitle: String { self == .night ? PaveCopy.text("pave.wesh.appearance.nightSubtitle") : PaveCopy.text("pave.wesh.appearance.daySubtitle") }
     var paveTheme: PaveThemeID { self == .night ? .nuit : .jour }
 }
 

@@ -11,7 +11,7 @@ struct BLEFragmentHandlerTests {
 
         var trackedPackets: [BitchatPacket] = []
         var appendedHeaders: [BLEFragmentHeader] = []
-        var ingressChecks: [(packet: BitchatPacket, innerSender: PeerID)] = []
+        var ingressChecks: [(packet: BitchatPacket, validationPeerID: PeerID)] = []
         var reinjectedPackets: [(packet: BitchatPacket, from: PeerID)] = []
     }
 
@@ -28,8 +28,8 @@ struct BLEFragmentHandlerTests {
                 recorder.appendedHeaders.append(header)
                 return recorder.appendResult?(header) ?? .stored(header: header, started: true)
             },
-            isAcceptedIngressPayload: { packet, innerSender in
-                recorder.ingressChecks.append((packet, innerSender))
+            isAcceptedIngressPayload: { packet, validationPeerID in
+                recorder.ingressChecks.append((packet, validationPeerID))
                 return recorder.accepted
             },
             processReassembledPacket: { packet, from in
@@ -130,12 +130,12 @@ struct BLEFragmentHandlerTests {
             .complete(header: header, reassembledData: reassembled, started: false)
         }
         let handler = makeHandler(recorder: recorder)
-        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2)
 
         handler.handle(packet, from: remotePeerID)
 
         #expect(recorder.ingressChecks.count == 1)
-        #expect(recorder.ingressChecks.first?.innerSender == innerSender)
+        #expect(recorder.ingressChecks.first?.validationPeerID == innerSender)
         #expect(recorder.reinjectedPackets.count == 1)
         let reinjected = recorder.reinjectedPackets.first
         #expect(reinjected?.from == remotePeerID)
@@ -164,12 +164,39 @@ struct BLEFragmentHandlerTests {
             .complete(header: header, reassembledData: reassembled, started: false)
         }
         let handler = makeHandler(recorder: recorder)
-        let packet = makeFragmentPacket(sender: remotePeerID, index: 1, total: 2)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2)
 
         handler.handle(packet, from: remotePeerID)
 
         #expect(recorder.ingressChecks.count == 1)
         #expect(recorder.reinjectedPackets.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func reassembledRSRRechecksTheIngressRespondersWindow(accepted: Bool) throws {
+        let author = PeerID(str: "99AABBCCDDEEFF00")
+        let inner = BitchatPacket(
+            type: MessageType.message.rawValue,
+            senderID: try #require(Data(hexString: author.id)), recipientID: nil,
+            timestamp: 900_000, payload: Data("synthetic replay".utf8),
+            signature: nil, ttl: 0, isRSR: true
+        )
+        let bytes = try #require(inner.toBinaryData(padding: false))
+        let recorder = Recorder()
+        recorder.accepted = accepted
+        recorder.appendResult = { header in
+            .complete(header: header, reassembledData: bytes, started: false)
+        }
+        var fragment = makeFragmentPacket(sender: author, index: 1, total: 2,
+                                          recipientID: Data(hexString: localPeerID.id))
+        fragment.isRSR = true
+
+        makeHandler(recorder: recorder).handle(fragment, from: remotePeerID)
+
+        // The response window may have expired since fragment ingress. It
+        // must be checked again against the link responder, never the author.
+        #expect(recorder.ingressChecks.first?.validationPeerID == remotePeerID)
+        #expect(recorder.reinjectedPackets.count == (accepted ? 1 : 0))
     }
 
     @Test
@@ -231,7 +258,7 @@ struct BLEFragmentHandlerTests {
         // A file-transfer claim buys a framed-file-sized assembly; the
         // packet it produced must be a file transfer.
         let packet = makeFragmentPacket(
-            sender: remotePeerID,
+            sender: PeerID(hexData: innerPacket.senderID),
             index: 1,
             total: 2,
             originalType: MessageType.fileTransfer.rawValue
@@ -241,6 +268,127 @@ struct BLEFragmentHandlerTests {
 
         #expect(recorder.ingressChecks.isEmpty)
         #expect(recorder.reinjectedPackets.isEmpty)
+    }
+
+    @Test
+    func reassembledPacketAddressedElsewhereThanItsFragmentsIsDropped() throws {
+        // Relay and retired-type decisions are taken on the fragments, so the
+        // inner packet must carry the same recipient. The only accepted
+        // difference (a broadcast inside fragments for us) is tested below.
+        let cases: [(inner: Data?, fragments: Data?)] = [
+            (Data(hexString: "8899aabbccddeeff"), nil),
+            (Data(hexString: "8899aabbccddeeff"), Data(hexString: localPeerID.id)),
+            (Data(hexString: localPeerID.id), Data(hexString: "8899aabbccddeeff")),
+            (nil, Data(hexString: "8899aabbccddeeff"))
+        ]
+        for (innerRecipient, fragmentRecipient) in cases {
+            let innerPacket = BitchatPacket(
+                type: MessageType.message.rawValue,
+                senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+                recipientID: innerRecipient,
+                timestamp: 900_000,
+                payload: Data("hello".utf8),
+                signature: nil,
+                ttl: 5
+            )
+            let reassembled = try #require(innerPacket.toBinaryData())
+            let recorder = Recorder()
+            recorder.appendResult = { header in
+                .complete(header: header, reassembledData: reassembled, started: false)
+            }
+            let handler = makeHandler(recorder: recorder)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: fragmentRecipient)
+
+            handler.handle(packet, from: remotePeerID)
+
+            #expect(recorder.ingressChecks.isEmpty)
+            #expect(recorder.reinjectedPackets.isEmpty)
+        }
+    }
+
+    @Test
+    func syncResponseFragmentedForUsCarryingABroadcastIsReinjected() throws {
+        // iOS (BitChat iOS too) addresses the fragments of a sync response to
+        // the requester while the inner packet stays a broadcast: a long
+        // public message, a prekey bundle. It must still be delivered.
+        let me = try #require(Data(hexString: localPeerID.id))
+        for innerRecipient in [nil, Data(repeating: 0xFF, count: 8)] as [Data?] {
+            let innerPacket = BitchatPacket(
+                type: MessageType.message.rawValue,
+                senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+                recipientID: innerRecipient,
+                timestamp: 900_000,
+                payload: Data("hello".utf8),
+                signature: nil,
+                ttl: 5
+            )
+            let reassembled = try #require(innerPacket.toBinaryData())
+            let recorder = Recorder()
+            recorder.appendResult = { header in
+                .complete(header: header, reassembledData: reassembled, started: false)
+            }
+            let handler = makeHandler(recorder: recorder)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: me)
+
+            handler.handle(packet, from: remotePeerID)
+
+            #expect(recorder.reinjectedPackets.count == 1)
+            #expect(recorder.reinjectedPackets.first?.packet.ttl == 0)
+        }
+    }
+
+    @Test
+    func reassembledDirectedPacketWithMatchingRecipientIsReinjected() throws {
+        let me = try #require(Data(hexString: localPeerID.id))
+        let innerPacket = BitchatPacket(
+            type: MessageType.message.rawValue,
+            senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+            recipientID: me,
+            timestamp: 900_000,
+            payload: Data("hello".utf8),
+            signature: nil,
+            ttl: 5
+        )
+        let reassembled = try #require(innerPacket.toBinaryData())
+        let recorder = Recorder()
+        recorder.appendResult = { header in
+            .complete(header: header, reassembledData: reassembled, started: false)
+        }
+        let handler = makeHandler(recorder: recorder)
+        let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, recipientID: me)
+
+        handler.handle(packet, from: remotePeerID)
+
+        #expect(recorder.reinjectedPackets.count == 1)
+    }
+
+    @Test
+    func reassembledPacketOfARetiredTypeIsNeverReinjected() throws {
+        // Dispatch already refuses these fragments; the reassembly check is
+        // the second line if one slips through.
+        for type in [MessageType.groupMessage, .voiceFrame, .fileTransfer] {
+            let innerPacket = BitchatPacket(
+                type: type.rawValue,
+                senderID: Data(hexString: "99AABBCCDDEEFF00") ?? Data(),
+                recipientID: nil,
+                timestamp: 900_000,
+                payload: Data(repeating: 0x42, count: 32),
+                signature: nil,
+                ttl: 5
+            )
+            let reassembled = try #require(innerPacket.toBinaryData())
+            let recorder = Recorder()
+            recorder.appendResult = { header in
+                .complete(header: header, reassembledData: reassembled, started: false)
+            }
+            let handler = makeHandler(recorder: recorder)
+            let packet = makeFragmentPacket(sender: PeerID(hexData: innerPacket.senderID), index: 1, total: 2, originalType: type.rawValue)
+
+            handler.handle(packet, from: remotePeerID)
+
+            #expect(recorder.ingressChecks.isEmpty)
+            #expect(recorder.reinjectedPackets.isEmpty)
+        }
     }
 
     @Test

@@ -16,11 +16,6 @@ enum CommandResult {
     case handled  // Command handled, no message needed
 }
 
-/// Simple struct for geo participant info used by CommandProcessor
-struct CommandGeoParticipant {
-    let id: String        // pubkey hex (lowercased)
-    let displayName: String
-}
 
 /// The conversation a command was typed into, captured when the command is
 /// issued so deferred output (e.g. an async /ping result, which can arrive
@@ -42,12 +37,9 @@ protocol CommandContextProvider: AnyObject {
     var activeChannel: ChannelID { get }
     var selectedPrivateChatPeer: PeerID? { get }
     var blockedUsers: Set<String> { get }
-    var idBridge: NostrIdentityBridge { get }
 
     // MARK: - Peer Lookup
     func getPeerIDForNickname(_ nickname: String) -> PeerID?
-    func getVisibleGeoParticipants() -> [CommandGeoParticipant]
-    func nostrPubkeyForDisplayName(_ displayName: String) -> String?
 
     // MARK: - Chat Actions
     func startPrivateChat(with peerID: PeerID)
@@ -137,8 +129,6 @@ final class CommandProcessor {
             return handleTrace(args)
         case "/pay":
             return handlePay(args)
-        case "/drop":
-            return handleDrop(args)
         case "/help":
             return .success(message: Self.helpText)
         default:
@@ -150,37 +140,7 @@ final class CommandProcessor {
     /// suggestion panel hides once arguments are typed, and typos used to
     /// dead-end in a bare "unknown command" — this is the way out.
     static var helpText: String {
-        String(localized: "command.help.text", defaultValue: "commands:\n/msg @name [message] — start a private chat\n/who — list who's here\n/clear — clear this chat\n/hug @name — send a hug\n/slap @name — slap with a large trout\n/block @name · /unblock @name\n/fav @name · /unfav @name — favorites (mesh only)\n/ping @name — measure round-trip time (mesh only)\n/trace @name — estimated mesh path (mesh only)\n/pay <token> — send a cashu ecash token in this chat\n/drop <message> — pin a note to this place for 24h (needs location)\n/help — this list", comment: "The /help reference list; command syntax stays verbatim, only the descriptions after each dash are translated")
-    }
-
-    /// /drop <text> — a dead drop: pins a note to the current building-level
-    /// geohash with a 24h NIP-40 expiry. Anyone who passes through here and
-    /// looks at notices (or hits the empty-timeline "notes left here" hint)
-    /// reads it.
-    private func handleDrop(_ args: String) -> CommandResult {
-        guard LocationNotesSettings.enabled else {
-            return .error(message: String(localized: "command.drop.notes_off", defaultValue: "location notes are off — enable them in the info screen", comment: "Error when /drop is used while location notes are disabled"))
-        }
-        guard let content = args.trimmedOrNilIfEmpty else {
-            return .error(message: String(localized: "command.drop.usage", defaultValue: "usage: /drop <message>", comment: "Usage hint for /drop"))
-        }
-        let location = LocationChannelManager.shared
-        guard location.permissionState == .authorized else {
-            return .error(message: String(localized: "command.drop.needs_location", defaultValue: "leaving a note needs location — enable it in the info screen", comment: "Error when /drop is used without location permission"))
-        }
-        guard let geohash = location.availableChannels.first(where: { $0.level == .building })?.geohash else {
-            location.refreshChannels()
-            return .error(message: String(localized: "command.drop.finding_place", defaultValue: "still finding this place — try again in a moment", comment: "Error when /drop runs before a location fix arrives"))
-        }
-        guard let nickname = contextProvider?.nickname,
-              LocationNotesManager.postDrop(content: content, nickname: nickname, geohash: geohash) else {
-            return .error(message: String(localized: "command.drop.no_relays", defaultValue: "no geo relays reachable — note not left", comment: "Error when /drop finds no reachable geo relays"))
-        }
-        // Leaving a note is an explicit notes act: it unlocks the passive
-        // nearby-notes counter (tap-to-reveal) so the sender sees their own
-        // drop counted on the timeline.
-        NearbyNotesCounter.shared.reveal()
-        return .success(message: String(localized: "command.drop.left", defaultValue: "📍 note left here — it fades in 24h", comment: "Confirmation after /drop pins a note"))
+        String(localized: "command.help.text", defaultValue: "commands:\n/msg @name [message] — start a private chat\n/who — list who's here\n/clear — clear this chat\n/hug @name — send a hug\n/slap @name — slap with a large trout\n/block @name · /unblock @name\n/fav @name · /unfav @name — favorites (mesh only)\n/ping @name — measure round-trip time (mesh only)\n/trace @name — estimated mesh path (mesh only)\n/pay <token> — send a cashu ecash token in this chat\n/help — this list", comment: "The /help reference list; command syntax stays verbatim, only the descriptions after each dash are translated")
     }
 
     // MARK: - Command Handlers
@@ -211,17 +171,8 @@ final class CommandProcessor {
     private func handleWho() -> CommandResult {
         // Show geohash participants when in a geohash channel; otherwise mesh peers
         switch contextProvider?.activeChannel ?? .mesh {
-        case .location(let ch):
-            // Geohash context: show visible geohash participants (exclude self)
-            guard let vm = contextProvider else { return .success(message: String(localized: "command.who.nobody", defaultValue: "nobody around", comment: "Reply to /who when no context is available")) }
-            let myHex = (try? vm.idBridge.deriveIdentity(forGeohash: ch.geohash))?.publicKeyHex.lowercased()
-            let people = vm.getVisibleGeoParticipants().filter { person in
-                if let me = myHex { return person.id.lowercased() != me }
-                return true
-            }
-            let names = people.map { $0.displayName }
-            if names.isEmpty { return .success(message: String(localized: "command.who.none_online", defaultValue: "no one else is online right now", comment: "Reply to /who when nobody else is online")) }
-            return .success(message: String(format: String(localized: "command.who.online", defaultValue: "online: %@", comment: "Reply to /who; placeholder is the list of names"), locale: .current, names.sorted().joined(separator: ", ")))
+        case .location:
+            return .success(message: String(localized: "command.who.none_online"))
         case .mesh:
             // Mesh context: show connected peer nicknames
             guard let peers = meshService?.getPeerNicknames(), !peers.isEmpty else {
@@ -300,25 +251,8 @@ final class CommandProcessor {
                 }
             }
 
-            // Geohash blocked names (prefer visible display names; fallback to #suffix)
-            let geoBlocked = Array(identityManager.getBlockedNostrPubkeys())
-            var geoNames: [String] = []
-            if let vm = contextProvider {
-                let visible = vm.getVisibleGeoParticipants()
-                let visibleIndex = Dictionary(uniqueKeysWithValues: visible.map { ($0.id.lowercased(), $0.displayName) })
-                for pk in geoBlocked {
-                    if let name = visibleIndex[pk.lowercased()] {
-                        geoNames.append(name)
-                    } else {
-                        let suffix = String(pk.suffix(4))
-                        geoNames.append("anon#\(suffix)")
-                    }
-                }
-            }
-
             let meshList = blockedNicknames.isEmpty ? "none" : blockedNicknames.sorted().joined(separator: ", ")
-            let geoList = geoNames.isEmpty ? "none" : geoNames.sorted().joined(separator: ", ")
-            return .success(message: String(format: String(localized: "command.block.list", defaultValue: "blocked peers: %1$@ | geohash blocks: %2$@", comment: "Reply to /block with no argument; placeholders are the mesh and geohash block lists"), locale: .current, meshList, geoList))
+            return .success(message: String(format: String(localized: "command.block.list", defaultValue: "blocked peers: %@", comment: "Reply to /block with no argument; placeholders are the mesh and geohash block lists"), locale: .current, meshList))
         }
         
         let nickname = targetName.hasPrefix("@") ? String(targetName.dropFirst()) : targetName
@@ -350,15 +284,6 @@ final class CommandProcessor {
             meshArchive?.purgeArchivedPublicMessages(from: peerID)
             return .success(message: String(format: String(localized: "command.block.done", defaultValue: "blocked %@. you will no longer see their messages", comment: "Confirmation after blocking a mesh peer"), locale: .current, nickname))
         }
-        // Mesh lookup failed; try geohash (Nostr) participant by display name
-        if let pub = contextProvider?.nostrPubkeyForDisplayName(nickname) {
-            if identityManager.isNostrBlocked(pubkeyHexLowercased: pub) {
-                return .success(message: String(format: String(localized: "command.block.already", defaultValue: "%@ is already blocked", comment: "Reply when /block targets an already-blocked nickname"), locale: .current, nickname))
-            }
-            identityManager.setNostrBlocked(pub, isBlocked: true)
-            return .success(message: String(format: String(localized: "command.block.done_geo", defaultValue: "blocked %@ in geohash chats", comment: "Confirmation after blocking a geohash participant"), locale: .current, nickname))
-        }
-        
         return .error(message: String(format: String(localized: "command.block.failed", defaultValue: "cannot block %@: not found or unable to verify identity", comment: "Error when /block can't resolve or verify the target"), locale: .current, nickname))
     }
     
@@ -377,14 +302,6 @@ final class CommandProcessor {
             }
             identityManager.setBlocked(fingerprint, isBlocked: false)
             return .success(message: String(format: String(localized: "command.unblock.done", defaultValue: "unblocked %@", comment: "Confirmation after unblocking a mesh peer"), locale: .current, nickname))
-        }
-        // Try geohash unblock
-        if let pub = contextProvider?.nostrPubkeyForDisplayName(nickname) {
-            if !identityManager.isNostrBlocked(pubkeyHexLowercased: pub) {
-                return .success(message: String(format: String(localized: "command.unblock.not_blocked", defaultValue: "%@ is not blocked", comment: "Reply when /unblock targets a nickname that isn't blocked"), locale: .current, nickname))
-            }
-            identityManager.setNostrBlocked(pub, isBlocked: false)
-            return .success(message: String(format: String(localized: "command.unblock.done_geo", defaultValue: "unblocked %@ in geohash chats", comment: "Confirmation after unblocking a geohash participant"), locale: .current, nickname))
         }
         return .error(message: String(format: String(localized: "command.unblock.failed", defaultValue: "cannot unblock %@: not found", comment: "Error when /unblock can't resolve the target"), locale: .current, nickname))
     }

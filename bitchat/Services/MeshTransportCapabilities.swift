@@ -72,36 +72,3 @@ protocol MeshPublicArchiving: AnyObject {
     /// Erases the whole carried public-message archive, on disk included.
     func purgeAllArchivedPublicMessages()
 }
-
-/// Internet-gateway and geohash-bridge wiring surface (BLE mesh today).
-/// Everything the gateway/bridge/courier services need from the mesh
-/// transport, so their bootstrap wiring never touches the concrete class.
-protocol MeshBridgingTransport: AnyObject {
-    // Runtime-advertised capability bits
-    func setLocalCapability(_ capability: PeerCapabilities, enabled: Bool)
-    func setLocalBridgeGeohash(_ cell: String?)
-    func advertisedBridgeGeohash() -> String?
-
-    // Peers currently advertising bridging roles
-    func reachableGatewayPeers() -> [PeerID]
-    func reachableBridgePeers() -> [PeerID]
-
-    // Gateway carrier packets (mesh <-> Nostr uplink/downlink)
-    @discardableResult
-    func sendNostrCarrier(_ payload: Data, to gatewayPeer: PeerID) -> Bool
-    func broadcastNostrCarrier(_ payload: Data)
-    /// Sink for received carrier packets (set once by app wiring; called on
-    /// the main actor after transport-level checks).
-    var onNostrCarrierPacket: (@MainActor (_ payload: Data, _ from: PeerID, _ directedToUs: Bool) -> Void)? { get set }
-
-    // Bridge courier drops (sealed envelopes carried across the bridge)
-    func sealBridgeCourierEnvelope(_ content: String, messageID: String, recipientNoiseKey: Data) -> CourierEnvelope?
-    @discardableResult
-    func openBridgedCourierEnvelope(_ envelope: CourierEnvelope) -> Bool
-    @discardableResult
-    func deliverBridgedEnvelope(_ envelope: CourierEnvelope, to peerID: PeerID) -> Bool
-    func myNoiseStaticPublicKey() -> Data
-    func verifiedPeersWithNoiseKeys() -> [(peerID: PeerID, noiseKey: Data)]
-    /// Fired (off-main) when a signature-verified announce is processed.
-    var onVerifiedPeerAnnounce: ((_ peerID: PeerID) -> Void)? { get set }
-}

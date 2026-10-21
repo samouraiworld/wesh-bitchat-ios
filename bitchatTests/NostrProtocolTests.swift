@@ -453,19 +453,6 @@ struct NostrProtocolTests {
         #expect(!signed.isValidSignature())
     }
 
-    @Test func geohashNotesSingleFilter_encodesExpectedTagShape() throws {
-        let since = Date(timeIntervalSince1970: 1_234_567)
-        let filter = NostrFilter.geohashNotes("u4pruyd", since: since, limit: 42)
-        let data = try JSONEncoder().encode(filter)
-        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-
-        #expect(object["kinds"] as? [Int] == [1])
-        #expect(object["#g"] as? [String] == ["u4pruyd"])
-        #expect(object["since"] as? Int == 1_234_567)
-        #expect(object["limit"] as? Int == 42)
-    }
-
-
     @Test func inboundNostrEventRejectsTooManyTags() throws {
         var eventDict = Self.validInboundEventDict()
         eventDict["tags"] = Array(

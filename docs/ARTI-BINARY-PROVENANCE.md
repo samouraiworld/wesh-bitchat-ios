@@ -22,7 +22,7 @@ The crate declares `rust-version = "1.90"` and uses `arti-client` / `tor-rtcompa
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`
 
-It builds release static libraries with size-oriented flags (`opt-level=z`, fat LTO, one codegen unit, `panic=abort`, stripped symbols), normalizes static-archive metadata with `xcrun libtool -static -D`, then packages them with `xcodebuild -create-xcframework`.
+It builds release static libraries with size-oriented flags (`opt-level=z`, fat LTO, one codegen unit, `panic=abort`, stripped symbols). Packaging copies each Cargo archive into a fresh staging directory, strips and normalizes only that copy with `xcrun libtool -static -D`, then uses `xcodebuild -create-xcframework`. Cargo outputs remain unchanged; strip failures stop the recipe.
 
 ## Regenerating The Artifact
 
@@ -41,7 +41,7 @@ version other than `1.96.0`; it likewise requires cbindgen `0.29.4`. Set
 `RUST_TOOLCHAIN`, `RUSTC_VERSION`, or `CBINDGEN_VERSION` explicitly only when
 intentionally updating the binary provenance and hashes below.
 
-Tools can also be isolated in an ignored task directory by setting `RUSTUP_HOME` and `CARGO_HOME`, and adding the pinned cbindgen binary to `PATH`. No global toolchain-default change is required. The script fixes its Cargo target directory to the local `target/` used for packaging; `BUILD_JOBS` overrides the default of one job.
+Tools can also be isolated in an ignored task directory by setting `RUSTUP_HOME` and `CARGO_HOME`, and adding the pinned cbindgen binary to `PATH`. No global toolchain-default change is required. The script fixes its Cargo target directory to the local `target/` used for packaging; `BUILD_JOBS` overrides the default of one job. On a constrained build volume, set `KEEP_BUILD_CACHE=0`: after each successful target, only its regenerable intermediate directories are deleted. The final archive and shared host build cache remain available.
 
 After rebuilding, verify that:
 
@@ -65,7 +65,43 @@ Build version 27A266a
 
 The earlier July audit found Rust 1.86.0 unable to build this graph because `typed-index-collections@3.4.0` requires Rust 1.90.0 or newer. The refreshed selected graph still declares a maximum dependency MSRV of 1.90.0; the validated rebuild uses the pinned 1.96.0 toolchain.
 
-The build uses `--locked`, one Cargo job by default, and neutral source-path maps for both Rust and C. It normalizes static-archive metadata and writes a stable xcframework `Info.plist`. All five architectures were compiled. A separate repeat of archive normalization and universal packaging produced the same library hashes; this is not a second clean compilation or an independent cross-host reproduction. The generated C header is byte-identical to the previous candidate, all seven expected FFI symbols are present, and the libraries and metadata passed the reviewed private-path-prefix scan.
+The 18 October refresh uses `--locked`, one Cargo job, the same shipping release flags and neutral Rust/C source-path maps. It compiled all five targets and packaged their iOS device, universal simulator and universal macOS libraries. The preceding partial attempt stopped after three targets when macOS rejected a build-time macro; that incomplete attempt is not a validated artifact.
+
+Rust 1.96 can emit a stripped build-time macro dylib with a misaligned LINKEDIT string pool on macOS 27 ([upstream issue](https://github.com/rust-lang/rust/issues/157750)). A metadata-only probe reproduced that loader error. The workspace now sets `profile.release.build-override.strip = "none"`; shipping static libraries retain `strip = "symbols"` and the existing target flags. The constrained-volume recipe also preserves the shared host macro cache instead of relying on this Cargo version's incorrectly scoped target cleanup.
+
+The initial recipe stripped its Cargo outputs in place. Packaging now strips fresh staging copies and leaves all five raw Cargo archives unchanged. Repeating that corrected stage exposed four unused TOC string-alignment bytes in one simulator slice. The final recipe validates archive/member/symbol-reference extents and zeros only the unreferenced 0–7-byte TOC alignment tail. Object payloads, referenced symbols, relocations, archive headers and fat offsets remain unchanged. Ten synthetic preservation/corruption contracts pass.
+
+The preceding domain-only parser refresh compiled all five targets before adding the padding-only normalization step. Two packaging passes over those retained raw inputs were identical. That result is local packaging stability, not independent cross-host or clean-host reproducibility.
+
+This lifecycle refresh recompiles all five targets with the complete reviewed recipe, including padding normalization. Each native session now owns its runtime, client, listener, bootstrap task and accepted handlers. Stop closes admission, requests cancellation, joins owned work and drops the complete runtime before reporting success. A missed teardown deadline or unconfirmed cleanup remains latched until process restart; it cannot publish Ready or admit a new session. Generation checks fence stale status and cleanup. Swift also owns and cancels readiness/liveness tasks, and each connection probe serializes transport startup, cancellation and continuation completion.
+
+The generated header documents the conservative shutdown status while retaining all seven C function declarations. The locked dependency graph and shipping release flags are unchanged. Source-path tests pass four bootstrap cases, two handler-ownership cases, thirteen controller cases and thirteen SOCKS cases. The Swift ownership regressions were reproduced before the fix; the preceding lifecycle library passed 20 Swift package cases and 30 targeted application cases. Full exact-head CI remains required for the updated library.
+
+An initial 200 ms acknowledgment budget proved insufficient for active cleanup while correctly retaining the closed failure latch. The native wait is now bounded at two seconds, with immediate admission closure and the same full-runtime destruction barrier. A genuine timeout still latches permanently. The precise operation responsible for the measured cleanup tail was not identified. Swift's separate stop poll starts after the native call; this change does not establish a total failed-call duration below five seconds.
+
+All five targets were freshly compiled with this final source and recipe. Architecture, seven-function FFI, generated-header and private-path checks pass. Repeating complete packaging over the immutable compiled inputs produces the same seven hashes; all five raw archives and eleven reviewed source inputs remain unchanged. This is local packaging stability, not independent clean-host reproducibility.
+
+A child linked to the final arm64 macOS library passed bootstrap-stop, double-start and four start/stop races, plus cold and warm active shutdown using the same private Tor state. All nine observed stops acknowledged only with stopped status, zero progress and a refused listener. Both accepted handshake sockets closed; active acknowledgments measured approximately 291 ms cold and 235 ms warm, followed by 1.5-second no-late-readiness checks. Every child was reaped before its temporary state was removed. These are bounded native lifecycle observations, not independent packet-quiescence measurements or iOS-device qualification.
+
+Exact-head CI, integrated OFF/panic behavior, packet captures, physical-device gates and unresolved native dependency review remain required. No public-release verdict follows from these local checks.
+
+## Audited Source And Recipe Hashes
+
+These hashes bind the reviewed source and recipe to this build record. CI compares the complete tracked Arti crate, lockfile and recipe set; changing a source without refreshing this record fails the gate. This consistency check complements binary review and does not independently prove a compilation.
+
+```text
+da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5  localPackages/Arti/Cargo.lock
+9a79b3f9717e29b705bc42e7b889d2fad8d537e141a0df7151e0fee3eacdae3b  localPackages/Arti/Cargo.toml
+77099504353b19d9e20f08685a004fda52a20f69d0c2f7068cc5f709d5fb5793  localPackages/Arti/arti-bitchat/Cargo.toml
+f96c53d5c449a37739dcb8c2f513fbff2aa7b5ea1c0b9d4963108aa25696be0b  localPackages/Arti/arti-bitchat/cbindgen.toml
+dfd4262666f5555b85c93f88a256f11ed16fdc119a3367c93bfb916416711df4  localPackages/Arti/arti-bitchat/src/connections.rs
+9a7afba1ce0baf6724d85c4c0fe71c86e48d0515d527f11abdf9e945c34e0269  localPackages/Arti/arti-bitchat/src/controller.rs
+181e21a6979cad390ac08db1f3e23e9c4efbcaa7aff9ae98f57a5d14e564733f  localPackages/Arti/arti-bitchat/src/lib.rs
+f70f1f32efcac8cc8ec8e272686a5d1877c8e3bfd4f93eeee0e72e14a15bb912  localPackages/Arti/arti-bitchat/src/lifecycle.rs
+83791b96824df0a640b562d287d49323fd1c786e91565b8b6e501fde4dfb36df  localPackages/Arti/arti-bitchat/src/socks.rs
+a7eeae2a6c7d9afd2a288a2f8c106e50e3d6a66e6f28eb12eacb1e4d349c59e3  localPackages/Arti/build-ios.sh
+6e440299177e019d88825ec0a78a36664a6a764e67f0ae130e120f88bc60d3f1  localPackages/Arti/normalize-archive.py
+```
 
 ## Current Artifact Hashes
 
@@ -81,12 +117,12 @@ Current hashes:
 
 ```text
 cac99db408280bbef15cae8ce64c8ccdbf2e8863c205168d59f83fe8ab680f94  localPackages/Arti/Frameworks/arti.xcframework/Info.plist
-551655904834748c9dc36034fdbc9465e7533aef1e4a6514b4fcc75875b93058  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/Headers/arti.h
-84caa16c0316f75a4e861db8e949ec1d2c1aa3ba2eeb282ded73580744da9e38  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
-551655904834748c9dc36034fdbc9465e7533aef1e4a6514b4fcc75875b93058  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/Headers/arti.h
-a0579f3eabf14075f4bc503d5717d9b44854009cc1df2a391cbddff4a8eea24a  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
-551655904834748c9dc36034fdbc9465e7533aef1e4a6514b4fcc75875b93058  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/Headers/arti.h
-275933c4431524ed6ca0ad812fbaccb066f07966d6ad7812292477aea7f5bd68  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
+f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/Headers/arti.h
+87ce69ba0ee859fe1805526f6f527910ec6fc9c5dd79cbbc89be1f6d575bc22c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
+f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/Headers/arti.h
+ffa5b69077fb880090716f1418642e8d9e9d2333fd15c0b6ca3038508fab10a0  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
+f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/Headers/arti.h
+fc1fd320070a45dd5341bbb45f4978a1fcb2fc1af6095d299846d7bb5fcfb483  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
 ```
 
 ## Review Checklist

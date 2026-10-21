@@ -45,6 +45,16 @@ enum NoiseSessionRestoreReason: Equatable, Sendable {
     case pendingConvergence
 }
 
+/// Submits the manager's exact ordinary-initiator work item on its own queue.
+/// Other Noise deadlines retain their independent scheduling and bounds.
+struct NoiseInitiatorDeadlineScheduler {
+    let schedule: (TimeInterval, DispatchQueue, DispatchWorkItem) -> Void
+
+    static let liveDispatch = NoiseInitiatorDeadlineScheduler { delay, queue, work in
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+}
+
 final class NoiseSessionManager {
     private var sessions: [PeerID: NoiseSession] = [:]
     /// Opaque identity for each exact entry in `sessions`. The generation is
@@ -82,6 +92,7 @@ final class NoiseSessionManager {
     private let sessionFactory: (PeerID, NoiseRole) -> NoiseSession
     private let localPeerID: PeerID
     private let ordinaryHandshakeTimeout: TimeInterval
+    private let initiatorDeadlineScheduler: NoiseInitiatorDeadlineScheduler
     private let ordinaryResponderHandshakeTimeout: TimeInterval
     private let recentInitiatorCompletionGracePeriod: TimeInterval
     private let ordinaryReconnectRollbackCooldown: TimeInterval
@@ -98,6 +109,7 @@ final class NoiseSessionManager {
         keychain: KeychainManagerProtocol,
         ordinaryHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryHandshakeTimeout,
+        initiatorDeadlineScheduler: NoiseInitiatorDeadlineScheduler = .liveDispatch,
         ordinaryResponderHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
         recentInitiatorCompletionGracePeriod: TimeInterval =
@@ -107,6 +119,7 @@ final class NoiseSessionManager {
     ) {
         self.localPeerID = PeerID(publicKey: localStaticKey.publicKey.rawRepresentation)
         self.ordinaryHandshakeTimeout = ordinaryHandshakeTimeout
+        self.initiatorDeadlineScheduler = initiatorDeadlineScheduler
         self.ordinaryResponderHandshakeTimeout = ordinaryResponderHandshakeTimeout
         self.recentInitiatorCompletionGracePeriod =
             recentInitiatorCompletionGracePeriod
@@ -128,6 +141,7 @@ final class NoiseSessionManager {
         keychain _: KeychainManagerProtocol,
         ordinaryHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryHandshakeTimeout,
+        initiatorDeadlineScheduler: NoiseInitiatorDeadlineScheduler = .liveDispatch,
         ordinaryResponderHandshakeTimeout: TimeInterval =
             NoiseSecurityConstants.ordinaryResponderHandshakeTimeout,
         recentInitiatorCompletionGracePeriod: TimeInterval =
@@ -138,6 +152,7 @@ final class NoiseSessionManager {
     ) {
         self.localPeerID = PeerID(publicKey: localStaticKey.publicKey.rawRepresentation)
         self.ordinaryHandshakeTimeout = ordinaryHandshakeTimeout
+        self.initiatorDeadlineScheduler = initiatorDeadlineScheduler
         self.ordinaryResponderHandshakeTimeout = ordinaryResponderHandshakeTimeout
         self.recentInitiatorCompletionGracePeriod =
             recentInitiatorCompletionGracePeriod
@@ -872,9 +887,10 @@ final class NoiseSessionManager {
             }
         }
         ordinaryInitiatorTimeouts[peerID] = timeout
-        managerQueue.asyncAfter(
-            deadline: .now() + ordinaryHandshakeTimeout,
-            execute: timeout
+        initiatorDeadlineScheduler.schedule(
+            ordinaryHandshakeTimeout,
+            managerQueue,
+            timeout
         )
     }
 

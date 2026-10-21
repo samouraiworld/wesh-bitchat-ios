@@ -21,11 +21,10 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     // Conversation state
     var privateChats: [PeerID: [BitchatMessage]] = [:]
     var sentReadReceipts: Set<String> = []
-    var sentGeoDeliveryAcks: Set<String> = []
+    var sentNostrDeliveryAcks: Set<String> = []
     var unreadPrivateMessages: Set<PeerID> = []
     var selectedPrivateChatPeer: PeerID?
     var nickname = "me"
-    var activeChannel: ChannelID = .mesh
     var nostrKeyMapping: [PeerID: String] = [:]
     private(set) var notifyUIChangedCount = 0
 
@@ -35,8 +34,8 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     }
 
     @discardableResult
-    func markGeoDeliveryAckSent(_ messageID: String) -> Bool {
-        sentGeoDeliveryAcks.insert(messageID).inserted
+    func markNostrDeliveryAckSent(_ messageID: String) -> Bool {
+        sentNostrDeliveryAcks.insert(messageID).inserted
     }
 
     func handOffSelectedPrivateChat(from oldPeerIDs: [PeerID], to newPeerID: PeerID) {
@@ -169,16 +168,14 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         displayNamesByPubkey[pubkeyHex] ?? "anon"
     }
 
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity { Self.dummyIdentity }
     func currentNostrIdentity() -> NostrIdentity? { Self.dummyIdentity }
 
     // Routing & acknowledgements
     private(set) var routedPrivateMessages: [(content: String, peerID: PeerID, messageID: String)] = []
     private(set) var routedReadReceipts: [(messageID: String, peerID: PeerID)] = []
     private(set) var meshReadReceipts: [(messageID: String, peerID: PeerID)] = []
-    private(set) var geoPrivateMessages: [(content: String, recipientHex: String, messageID: String)] = []
-    private(set) var geoDeliveryAcks: [(messageID: String, recipientHex: String)] = []
-    private(set) var geoReadReceipts: [(messageID: String, recipientHex: String)] = []
+    private(set) var nostrDeliveryAcks: [(messageID: String, recipientHex: String)] = []
+    private(set) var nostrReadReceipts: [(messageID: String, recipientHex: String)] = []
     var queuedMessageIDsByPeerID: [PeerID: Set<String>] = [:]
     private(set) var deliveryAckAttempts: [(messageID: String, peerIDs: [PeerID])] = []
     private(set) var deliveredMessageIDs: [String] = []
@@ -213,16 +210,12 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         meshReadReceipts.append((receipt.originalMessageID, peerID))
     }
 
-    func sendGeohashPrivateMessage(_ content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        geoPrivateMessages.append((content, recipientHex, messageID))
+    func sendNostrIdentityDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrDeliveryAcks.append((messageID, recipientHex))
     }
 
-    func sendGeohashDeliveryAck(for messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoDeliveryAcks.append((messageID, recipientHex))
-    }
-
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
-        geoReadReceipts.append((messageID, recipientHex))
+    func sendNostrIdentityReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity) {
+        nostrReadReceipts.append((messageID, recipientHex))
     }
 
     // Favorites & notifications
@@ -265,6 +258,39 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         npub: "npub1mock",
         createdAt: Date(timeIntervalSince1970: 0)
     )
+}
+
+/// Real private-send routing against an injected context, with no live VM,
+/// keychain, location owner, relay manager or device state.
+@MainActor
+struct GeographicPrivateTransportRetirementTests {
+    @Test
+    func genericPrivateSendRefusesLegacyGeographicRecipientWithoutDerivingEchoingOrRerouting() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let recipientHex = String(repeating: "ab", count: 32)
+        let legacyPeer = PeerID(nostr_: recipientHex)
+        context.nostrKeyMapping[legacyPeer] = recipientHex
+
+        coordinator.sendPrivateMessage("Synthetic retired geographic private message", to: legacyPeer)
+
+        #expect(context.privateChats.isEmpty)
+        #expect(context.routedPrivateMessages.isEmpty, "Retired content must not fall back to an account or mesh recipient")
+    }
+
+    @Test
+    func genericPrivateSendKeepsTheFullNoiseKeyAccountRecipientAndRetainedRoute() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let accountPeer = PeerID(hexData: Data(repeating: 0xA1, count: 32))
+        context.nicknamesByPeerID[accountPeer] = "Synthetic account contact"
+
+        coordinator.sendPrivateMessage("Synthetic ordinary account message", to: accountPeer)
+
+        #expect(context.routedPrivateMessages.map(\.peerID) == [accountPeer])
+        #expect(context.routedPrivateMessages.map(\.content) == ["Synthetic ordinary account message"])
+        #expect(context.privateChats[accountPeer]?.map(\.content) == ["Synthetic ordinary account message"])
+    }
 }
 
 // MARK: - Helpers
@@ -494,9 +520,9 @@ struct ChatPrivateConversationCoordinatorContextTests {
             messageTimestamp: oldTimestamp
         )
 
-        #expect(context.geoDeliveryAcks.map(\.messageID) == ["geo-1"])
-        #expect(context.geoDeliveryAcks.first?.recipientHex == senderPubkey)
-        #expect(context.sentGeoDeliveryAcks == ["geo-1"])
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["geo-1"])
+        #expect(context.nostrDeliveryAcks.first?.recipientHex == senderPubkey)
+        #expect(context.sentNostrDeliveryAcks == ["geo-1"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["geo-1"])
         #expect(context.privateChats[convKey]?.first?.sender == "bob#5678")
         #expect(context.unreadPrivateMessages.isEmpty)
@@ -510,7 +536,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
             id: MockChatPrivateConversationContext.dummyIdentity,
             messageTimestamp: oldTimestamp
         )
-        #expect(context.geoDeliveryAcks.count == 1)
+        #expect(context.nostrDeliveryAcks.count == 1)
         #expect(context.privateChats[convKey]?.count == 1)
     }
 
@@ -536,9 +562,9 @@ struct ChatPrivateConversationCoordinatorContextTests {
 
         // Nothing goes back to a blocked sender, not even a DELIVERED ack
         // that would confirm this identity is online.
-        #expect(context.geoDeliveryAcks.isEmpty)
-        #expect(context.geoReadReceipts.isEmpty)
-        #expect(context.sentGeoDeliveryAcks.isEmpty)
+        #expect(context.nostrDeliveryAcks.isEmpty)
+        #expect(context.nostrReadReceipts.isEmpty)
+        #expect(context.sentNostrDeliveryAcks.isEmpty)
         #expect(context.privateChats[convKey] == nil)
         #expect(context.privateMessageNotifications.isEmpty)
 
@@ -552,8 +578,8 @@ struct ChatPrivateConversationCoordinatorContextTests {
             id: MockChatPrivateConversationContext.dummyIdentity,
             messageTimestamp: Date()
         )
-        #expect(context.geoDeliveryAcks.map(\.messageID) == ["geo-blocked"])
-        #expect(context.geoReadReceipts.map(\.messageID) == ["geo-blocked"])
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["geo-blocked"])
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["geo-blocked"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["geo-blocked"])
     }
 
@@ -611,7 +637,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
         #expect(context.privateChats[stablePeerID]?.last?.senderPeerID == stablePeerID)
         #expect(context.migratedChats.contains(where: { $0.from == shortPeerID && $0.to == stablePeerID }))
         #expect(context.selectedPrivateChatPeer == stablePeerID)
-        #expect(context.geoReadReceipts.map(\.messageID) == ["account-live-1"])
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["account-live-1"])
         #expect(context.unreadPrivateMessages.isEmpty)
         #expect(context.notifyUIChangedCount == 1)
     }
@@ -687,7 +713,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
         #expect(context.privateChats[shortPeerID]?.first?.senderPeerID == shortPeerID)
         #expect(context.privateChats[shortPeerID]?.last?.senderPeerID == shortPeerID)
         #expect(context.selectedPrivateChatPeer == shortPeerID)
-        #expect(context.geoReadReceipts.map(\.messageID) == ["connected-live-1"])
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["connected-live-1"])
     }
 
     @Test @MainActor
@@ -771,7 +797,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
             key: nil,
             senderPubkey: "feedface00112233"
         )
-        #expect(context.geoReadReceipts.map(\.messageID) == ["read-1"])
+        #expect(context.nostrReadReceipts.map(\.messageID) == ["read-1"])
         #expect(context.sentReadReceipts == ["read-1"])
     }
 
@@ -1052,9 +1078,9 @@ struct ChatPrivateConversationCoordinatorContextTests {
                                              id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
         }
 
-        #expect(context.geoDeliveryAcks.isEmpty)
-        #expect(context.geoReadReceipts.isEmpty)
-        #expect(context.sentGeoDeliveryAcks.isEmpty)
+        #expect(context.nostrDeliveryAcks.isEmpty)
+        #expect(context.nostrReadReceipts.isEmpty)
+        #expect(context.sentNostrDeliveryAcks.isEmpty)
         #expect(context.privateChats.isEmpty)
         #expect(context.privateMessageNotifications.isEmpty)
         #expect(context.peerFavoritedUsUpdates.isEmpty)
@@ -1065,7 +1091,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
                                    data: PrivateMessagePacket(messageID: "nostr-1", content: "Salut ?").encode()!)
         coordinator.handlePrivateMessage(payload, senderPubkey: senderPubkey, convKey: convKey,
                                          id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
-        #expect(context.geoDeliveryAcks.map(\.messageID) == ["nostr-1"])
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["nostr-1"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["nostr-1"])
     }
 }

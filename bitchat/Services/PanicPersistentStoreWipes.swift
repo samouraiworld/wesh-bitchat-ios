@@ -15,6 +15,18 @@ enum PanicFileRemoval {
         } catch { return isMissing(error) }
     }
 
+    static func removeLegacyGroups(at applicationSupportURL: URL, fileManager: FileManager = .default) -> Bool {
+        remove(applicationSupportURL.appendingPathComponent("groups", isDirectory: true),
+               required: true, fileManager: fileManager)
+    }
+
+    static func removeLegacyMedia(fileStore: PanicRecoveryFileStore) -> Bool {
+        do {
+            try fileStore.removeLegacyMedia()
+            return true
+        } catch { return false }
+    }
+
     private static func isMissing(_ error: Error) -> Bool {
         let value = error as NSError
         return (value.domain == NSCocoaErrorDomain
@@ -28,18 +40,37 @@ enum PanicFileRemoval {
 @MainActor
 struct PanicPersistentStoreWipes {
     var courier: @MainActor () -> Bool = { CourierStore.shared.wipe() }
-    var bridge: @MainActor () -> Bool = { BridgeCourierService.shared.wipe() }
+    var bridge: @MainActor () -> Bool = { RetiredBridgeDropStore.shared.wipe() }
     var publicArchive: @MainActor () -> Bool = { GossipMessageArchive.wipeDefault() }
     var prekeys: @MainActor () -> Bool = { PrekeyBundleStore.shared.wipe() }
-    var board: @MainActor () -> Bool = { BoardStore.shared.wipe() }
+    var board: @MainActor () -> Bool = { RetiredBoardStore.shared.wipe() }
+    var geography: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return RetiredGeographyStore.shared.wipe()
+    }
+    var sightings: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return RetiredSightingsStore(defaults: .standard).wipe()
+    }
     /// Group rosters stored by builds that still accepted BitChat groups.
     var legacyGroups: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }
         guard let base = try? FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
         ) else { return false }
-        return PanicFileRemoval.remove(base.appendingPathComponent("groups", isDirectory: true), required: true)
+        return PanicFileRemoval.removeLegacyGroups(at: base)
     }
+    /// Ordinary retirement deletes only the legacy tree, never a panic marker or drafts.
+    var legacyMedia: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return PanicFileRemoval.removeLegacyMedia(fileStore: PanicRecoveryFileStore())
+    }
+    /// Secrets left by builds that still accepted BitChat groups.
+    var legacyGroupKeys: @MainActor () -> Bool = {
+        if TestEnvironment.isRunningTests { return true }
+        return KeychainManager.retireLegacyGroupKeysFromCurrentService()
+    }
+    /// Handoffs left by earlier share extensions; never parsed or imported.
     var sharedContent: @MainActor () -> Bool = {
         if TestEnvironment.isRunningTests { return true }
         guard let defaults = UserDefaults(suiteName: BitchatApp.groupID) else { return false }
@@ -72,6 +103,12 @@ struct PanicRecoveryOperations {
     /// Deletes the media an older build may have stored, and the drafts.
     let wipeMedia: (PanicRecoveryIntent) throws -> Void
     let complete: () throws -> Void
+
+    func completeIfConfirmed(existingStoreResults: [Bool], legacySightingsConfirmed: Bool) throws -> Bool {
+        guard existingStoreResults.allSatisfy({ $0 }), legacySightingsConfirmed else { return false }
+        try complete()
+        return true
+    }
 
     static func ephemeral(
         wipeMedia: @escaping () throws -> Void = {}
@@ -239,7 +276,7 @@ struct PanicRecoveryFileStore {
 
     /// Deletes the legacy media tree. Throws unless it is confirmed gone.
     func removeLegacyMedia() throws {
-        let directory = try rootDirectory()
+        let directory = try removalRootDirectory()
             .appendingPathComponent(Self.legacyMediaDirectoryName, isDirectory: true)
         guard PanicFileRemoval.remove(directory, required: true, fileManager: fileManager) else {
             throw PanicRecoveryError.legacyMediaNotRemoved
@@ -270,6 +307,15 @@ struct PanicRecoveryFileStore {
         where fileManager.fileExists(atPath: markerURL.path) {
             try fileManager.removeItem(at: markerURL)
         }
+    }
+
+    /// Resolves the configured removal path without creating the root or a panic marker.
+    private func removalRootDirectory() throws -> URL {
+        if let baseDirectory { return baseDirectory }
+        guard let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw PanicRecoveryError.legacyMediaNotRemoved
+        }
+        return directory
     }
 
     private func rootDirectory() throws -> URL {

@@ -265,7 +265,7 @@ struct NostrTransportTests {
 
     @Test("Geohash private message registers pending gift wrap")
     @MainActor
-    func sendPrivateMessageGeohashRegistersPendingGiftWrap() async throws {
+    func sendPrivateMessageForNostrIdentityRegistersPendingGiftWrap() async throws {
         let keychain = MockKeychain()
         let idBridge = NostrIdentityBridge(keychain: keychain)
         let sender = try NostrIdentity.generate()
@@ -285,7 +285,7 @@ struct NostrTransportTests {
         )
         transport.senderPeerID = PeerID(str: "0123456789abcdef")
 
-        transport.sendPrivateMessageGeohash(
+        transport.sendPrivateMessageForNostrIdentity(
             content: "geo hello",
             toRecipientHex: recipient.publicKeyHex,
             from: sender,
@@ -306,7 +306,7 @@ struct NostrTransportTests {
 
     @Test("Geohash envelopes never carry the mesh peer ID")
     @MainActor
-    func geohashEnvelopesNeverCarryMeshPeerID() async throws {
+    func explicitIdentityEnvelopesNeverCarryMeshPeerID() async throws {
         let keychain = MockKeychain()
         let idBridge = NostrIdentityBridge(keychain: keychain)
         let sender = try NostrIdentity.generate()
@@ -331,14 +331,14 @@ struct NostrTransportTests {
         let meshIDBytes = try #require(meshPeerID.routingData)
         transport.senderPeerID = meshPeerID
 
-        transport.sendPrivateMessageGeohash(
+        transport.sendPrivateMessageForNostrIdentity(
             content: "geo hello",
             toRecipientHex: recipient.publicKeyHex,
             from: sender,
             messageID: "geo-pm"
         )
-        transport.sendDeliveryAckGeohash(for: "geo-delivered", toRecipientHex: recipient.publicKeyHex, from: sender)
-        transport.sendReadReceiptGeohash("geo-read", toRecipientHex: recipient.publicKeyHex, from: sender)
+        transport.sendDeliveryAckForNostrIdentity(for: "geo-delivered", toRecipientHex: recipient.publicKeyHex, from: sender)
+        transport.sendReadReceiptForNostrIdentity("geo-read", toRecipientHex: recipient.publicKeyHex, from: sender)
 
         // The PM goes out directly; the two acks share the pacer, so the
         // second leaves only once the queued throttle action runs.
@@ -600,7 +600,9 @@ struct NostrTransportTests {
         weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
         weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
     ) -> NostrTransport.Dependencies {
-        NostrTransport.Dependencies(
+        let owner = NostrOutboundOwner(taskCreator: NostrOutboundOwner.mainActorTaskCreator, waiterInstaller: NostrOutboundOwner.inlineWaiterInstaller)
+        return NostrTransport.Dependencies(
+            outboundOwner: owner,
             notificationCenter: notificationCenter,
             loadFavorites: loadFavorites,
             favoriteStatusForNoiseKey: favoriteStatusForNoiseKey,

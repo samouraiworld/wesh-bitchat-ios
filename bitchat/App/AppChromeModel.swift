@@ -9,11 +9,8 @@ final class AppChromeModel: ObservableObject {
     @Published var nickname: String
     @Published var showingFingerprintFor: PeerID?
     @Published var isAppInfoPresented = false
-    @Published var isLocationChannelsSheetPresented = false
-    @Published var isNoticesSheetPresented = false
     /// When the sheet is opened for "notes left here" (empty mesh timeline),
     /// it should land on the geo tab instead of the channel-derived default.
-    @Published var noticesSheetPrefersGeoTab = false
     @Published var showBluetoothAlert = false
     @Published var bluetoothAlertMessage = ""
     @Published var bluetoothState: CBManagerState = .unknown
@@ -23,7 +20,6 @@ final class AppChromeModel: ObservableObject {
     /// Tor bootstrap has stalled (network likely blocks it); drives the
     /// connectivity banner. Mirrored from `ChatViewModel.torBlocked`.
     @Published private(set) var torBlocked = false
-    @Published var showScreenshotPrivacyWarning = false
     /// Triple-tapping the logo asks first; the dialog lives on the header.
     @Published var showPanicConfirmation = false
     /// Mirrors `ChatViewModel.panicRecoveryBlocked` for the chrome: a wipe
@@ -32,16 +28,13 @@ final class AppChromeModel: ObservableObject {
     @Published private(set) var panicWipeBlocked = false
 
     private let chatViewModel: ChatViewModel
-    private let onPanicWipe: () -> Void
     private var cancellables = Set<AnyCancellable>()
 
     init(
         chatViewModel: ChatViewModel,
-        privateInboxModel: PrivateInboxModel,
-        onPanicWipe: @escaping () -> Void = {}
+        privateInboxModel: PrivateInboxModel
     ) {
         self.chatViewModel = chatViewModel
-        self.onPanicWipe = onPanicWipe
         self.nickname = chatViewModel.nickname
         self.noiseIdentityAvailability = chatViewModel.noiseIdentityAvailability
 
@@ -49,7 +42,7 @@ final class AppChromeModel: ObservableObject {
     }
 
     var shouldSuppressScreenshotNotification: Bool {
-        isLocationChannelsSheetPresented || isAppInfoPresented
+        isAppInfoPresented
     }
 
     func retryNoiseIdentityRecovery() {
@@ -82,15 +75,6 @@ final class AppChromeModel: ObservableObject {
         isAppInfoPresented = true
     }
 
-    func presentNotices(geoTab: Bool = false) {
-        noticesSheetPrefersGeoTab = geoTab
-        isNoticesSheetPresented = true
-    }
-
-    func triggerScreenshotPrivacyWarning() {
-        showScreenshotPrivacyWarning = true
-    }
-
     /// Entry point for the header triple-tap: confirm before destroying.
     /// The Settings-pane button has always confirmed; the gesture now goes
     /// through the same dialog so a mis-tap can't wipe the device.
@@ -107,11 +91,8 @@ final class AppChromeModel: ObservableObject {
         // path keeps its sheet presented) would hide the one signal that says
         // whether the wipe worked.
         isAppInfoPresented = false
-        isLocationChannelsSheetPresented = false
-        isNoticesSheetPresented = false
         showingFingerprintFor = nil
 
-        onPanicWipe()
         // Wesh: Bluetooth stays off until the welcome and its terms are accepted again, so the new
         // identity announces nothing before (`AppRuntime.welcomeFinished`).
         return chatViewModel.panicClearAllData(restartMesh: !WeshMode.isActive)
