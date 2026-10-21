@@ -33,16 +33,16 @@
     "store.steadyStateAppend": 53976
   },
   "floors": {
-    "bleInbound.roundTripAndDedup": 9500,
-    "gcs.buildAndDecode": 190,
-    "delivery.incrementalUpdate": 43000,
-    "delivery.storeUpdate": 39000,
-    "formatting.formatMessage": 2200,
-    "pipeline.privateIngest": 3000,
-    "pipeline.publicIngest": 2400,
-    "store.append": 48000,
-    "store.steadyStateAppend": 10000,
-    "store.audit": 70
+    "bleInbound.roundTripAndDedup": 3400,
+    "gcs.buildAndDecode": 140,
+    "delivery.incrementalUpdate": 33000,
+    "delivery.storeUpdate": 32000,
+    "formatting.formatMessage": 1100,
+    "pipeline.privateIngest": 1000,
+    "pipeline.publicIngest": 1000,
+    "store.append": 31000,
+    "store.steadyStateAppend": 9800,
+    "store.audit": 40
   },
   "_slowest_observed_ci_numbers_2026_06": {
     "nostrInbound.fresh": 918,
@@ -56,5 +56,17 @@
     "pipeline.publicIngest": 5006,
     "store.append": 97423,
     "store.audit": 140
+  },
+  "_slowest_observed_ci_numbers_2026_10": {
+    "bleInbound.roundTripAndDedup": 6846,
+    "gcs.buildAndDecode": 280,
+    "delivery.incrementalUpdate": 67163,
+    "delivery.storeUpdate": 65300,
+    "formatting.formatMessage": 2348,
+    "pipeline.privateIngest": 2000,
+    "pipeline.publicIngest": 2183,
+    "store.append": 62869,
+    "store.steadyStateAppend": 19639,
+    "store.audit": 81
   }
 }
