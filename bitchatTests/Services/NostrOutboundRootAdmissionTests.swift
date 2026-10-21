@@ -595,7 +595,8 @@ private func requireFixture(_ condition: Bool, _ message: String) throws {
 
 private func eventually(_ condition: () -> Bool) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
+    // A hang guard, not a latency budget: starved CI queues took over 5 s.
+    let deadline = clock.now.advanced(by: .seconds(TestConstants.settleTimeout))
     while !condition() {
         if clock.now >= deadline { throw RootFixtureError("owned readiness/completion guard expired") }
         await Task.yield()

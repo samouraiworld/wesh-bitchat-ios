@@ -797,13 +797,14 @@ struct NoiseEncryptionServiceTests {
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let bob = NoiseEncryptionService(
             keychain: MockKeychain(),
-            // Generous for the same reason as the quarantine-restore test
-            // (#1483): this timeout also arms during the `establishSessions`
-            // setup handshake below, where bob is the responder. At 0.06 a
-            // preempted runner could fire it mid-setup, tear down the half-open
-            // responder, and make message 3 be answered as a fresh initiation.
-            ordinaryResponderHandshakeTimeout: 1.0,
-            ordinaryReconnectRollbackCooldown: 0.3
+            // This timeout also arms during the `establishSessions` setup
+            // handshake below, where bob is the responder; a runner preempted
+            // past it fires it mid-setup. 3 s stays far above any preemption
+            // and well inside the restore wait (`TestConstants.longTimeout`).
+            ordinaryResponderHandshakeTimeout: 3.0,
+            // The test only checks behavior inside the cooldown, never its end:
+            // a long one keeps the slow waits below from outrunning it.
+            ordinaryReconnectRollbackCooldown: 30
         )
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
