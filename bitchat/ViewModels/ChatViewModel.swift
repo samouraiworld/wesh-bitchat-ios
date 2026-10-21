@@ -323,6 +323,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     #if os(iOS)
     private var nicknameProtectedDataObserver: AnyCancellable?
     #endif
+    private var startupCleanupRetryObserver: AnyCancellable?
     // Historical channel values remain decodable; the live UI selects mesh.
     var activeChannel: ChannelID {
         get { conversations.activeChannel }
@@ -844,6 +845,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         if !recoveryRequired && startupRetirementBlocked {
             self.startupRetirementBlocked = true
             panicRecoveryBlocked = true
+            observeStartupCleanupRetry()
         }
 
         if networkActivationAllowed {
@@ -1216,8 +1218,30 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     // MARK: - Emergency Functions
 
-    /// Retries only legacy metadata deletion. A newly pending panic still
-    /// requires the existing explicit recovery action before admission reopens.
+    /// A cleanup refused at launch (Keychain or App Group still locked before first unlock)
+    /// is retried as soon as data is readable again or the app comes forward, not only on a tap.
+    static var startupCleanupRetryNotifications: [Notification.Name] {
+        #if os(iOS)
+        [UIApplication.protectedDataDidBecomeAvailableNotification, UIApplication.didBecomeActiveNotification]
+        #else
+        [NSApplication.didBecomeActiveNotification]
+        #endif
+    }
+
+    private func observeStartupCleanupRetry() {
+        guard startupCleanupRetryObserver == nil else { return }
+        startupCleanupRetryObserver = Publishers.MergeMany(
+            Self.startupCleanupRetryNotifications.map { NotificationCenter.default.publisher(for: $0) }
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+            guard let self, self.startupRetirementBlocked else { return }
+            self.retryStartupRetirement()
+        }
+    }
+
+    /// Retries legacy metadata deletion. An erase found pending by the retry runs now, as it
+    /// would at launch, instead of leaving the cleanup screen with nothing to retry.
     @MainActor
     @discardableResult
     func retryStartupRetirement() -> Bool {
@@ -1234,8 +1258,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             wipeLegacyGroupKeys: panicPersistentStoreWipes.legacyGroupKeys
         )
         if decision.replayPanic {
-            startupRetirementBlocked = false
-            return false
+            _ = panicClearAllData(restartServices: false)
+            configureBootstrapIfNeeded()
+            return networkActivationAllowed
         }
         guard !decision.blockOrdinaryAdmission else { return false }
         startupRetirementBlocked = false
