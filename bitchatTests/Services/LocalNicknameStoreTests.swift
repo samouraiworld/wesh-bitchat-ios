@@ -104,7 +104,7 @@ struct LocalNicknameStoreTests {
 struct LocalNicknamePanicTests {
     private func viewModel(keychain: MockKeychain) -> (ChatViewModel, () -> Int) {
         var committed = 0
-        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
+        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: { committed += 1 })
         let wipes = PanicPersistentStoreWipes(

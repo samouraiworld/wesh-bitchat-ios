@@ -455,7 +455,7 @@ struct WeshPrivateDataAtRestTests {
         UserDefaults.standard.set("day", forKey: "wesh.appearance.v1")
         UserDefaults.standard.set(true, forKey: WeshWelcome.key)
         var committed = 0
-        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
+        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: { committed += 1 })
         let keychain = MockKeychain()
@@ -481,7 +481,7 @@ struct WeshPrivateDataAtRestTests {
         let keychain = MockKeychain()
         let identity = SecureIdentityStateManager(keychain)
         var committed = 0
-        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
+        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: { committed += 1 })
         let wipes = PanicPersistentStoreWipes(

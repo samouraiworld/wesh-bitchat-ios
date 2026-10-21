@@ -79,7 +79,7 @@ struct RetiredSightingsStoreTests {
         defaults.flushSucceeds = false
         var pending = true
         var completions = 0
-        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { pending }, begin: {
+        let operations = PanicRecoveryOperations(isPending: { pending }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: {
             completions += 1

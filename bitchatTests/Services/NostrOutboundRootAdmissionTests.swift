@@ -236,15 +236,6 @@ struct NostrOutboundRootAdmissionTests {
             f.transport.sendPrivateMessage("synthetic", to: f.peer, recipientNickname: "Synthetic", messageID: "noop-open")
             try await f.finishBeforePolicy()
             #expect(f.creatorCount == 1)
-            let report = PanicAppOwnerAdmission.liveUnconfirmed()
-            let missing = PanicOwnerStatus.unconfirmed(.checkedProducerMissing)
-            #expect(report.localPersistenceAndEditors == missing)
-            #expect(report.meshAndGossipCallbacks == missing)
-            #expect(report.nostrOutboundAndAckTasks == missing)
-            #expect(report.nostrInboundKeyUsers == missing)
-            #expect(report.remainingApplicationKeyUsers == missing)
-            #expect(report.startupProducers == missing)
-            #expect(report.internalCryptoOwners == missing)
         }
     }
 }

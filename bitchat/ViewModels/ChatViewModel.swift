@@ -685,7 +685,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // transiently successful second read must not skip recovery and leave
         // the service permanently suspended without running the wipe.
         let panicRecoveryOperations = PanicRecoveryOperations(
-            collectAppOwners: livePanicRecoveryOperations.collectAppOwners,
             isPending: {
                 if startupDecision.replayPanic {
                     return true
@@ -756,8 +755,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         self.keychain = keychain
         self.panicRecoveryOperations = panicRecoveryOperations
-            ?? .ephemeral(collectAppOwners: PanicAppOwnerAdmission.liveUnconfirmed,
-                          wipeMedia: panicMediaWipe ?? {})
+            ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
         self.nostrOutboundPanicBinding = services.nostrOutboundPanicBinding
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
@@ -1283,38 +1281,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             meshService.emergencyDisconnectAll()
         }
 
-        // IMPORTANT: Clear Nostr-related state
-        // Drop relay subscriptions, handlers, pending sends, and replay state.
-        // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
-        // disconnect is not enough here.
-        NostrRelayManager.shared.resetForPanicWipe()
-        // Clearing relay handlers stops NEW events, but a detached gift-wrap
-        // decrypt spawned just before the wipe still holds a pre-wipe key and
-        // ciphertext; bump the pipeline's wipe generation so its result is
-        // dropped at the main-actor delivery hop instead of landing here.
-        nostrCoordinator.inbound.invalidateInFlightDecrypts()
-        nostrRelayManager = nil
-
-        return admitPanicApplicationErasure(
-            intent: recoveryIntent,
-            collectOwners: panicRecoveryOperations.collectAppOwners
-        ) { intent, report in
-            self.erasePanicApplicationData(
-                recoveryIntent: intent, ownerReport: report,
-                networkWipeCompleted: networkWipeCompleted,
-                restartServices: restartServices, restartMesh: restartMesh
-            )
-        }
-    }
-
-    @MainActor
-    private func erasePanicApplicationData(
-        recoveryIntent: PanicRecoveryIntent,
-        ownerReport _: PanicAppOwnerReport,
-        networkWipeCompleted: Bool,
-        restartServices: Bool,
-        restartMesh: Bool
-    ) -> Bool {
         // Clear all messages (public timelines and private chats live in the
         // single-writer ConversationStore; the derived `messages` view and
         // the legacy mirror empty with it)
@@ -1418,6 +1384,18 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Clear read receipt tracking
         sentReadReceipts.removeAll()
         deduplicationService.clearAll()
+
+        // IMPORTANT: Clear Nostr-related state
+        // Drop relay subscriptions, handlers, pending sends, and replay state.
+        // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
+        // disconnect is not enough here.
+        NostrRelayManager.shared.resetForPanicWipe()
+        // Clearing relay handlers stops NEW events, but a detached gift-wrap
+        // decrypt spawned just before the wipe still holds a pre-wipe key and
+        // ciphertext; bump the pipeline's wipe generation so its result is
+        // dropped at the main-actor delivery hop instead of landing here.
+        nostrCoordinator.inbound.invalidateInFlightDecrypts()
+        nostrRelayManager = nil
 
         // Clear Nostr identity associations
         idBridge.clearAllAssociations()

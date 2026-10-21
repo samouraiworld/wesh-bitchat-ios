@@ -33,10 +33,7 @@ private func makeTestableViewModel(
         identityManager: identityManager,
         transport: transport,
         panicMediaWipe: panicMediaWipe,
-        panicRecoveryOperations: panicRecoveryOperations ?? .ephemeral(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
-            wipeMedia: panicMediaWipe ?? {}
-        ),
+        panicRecoveryOperations: panicRecoveryOperations,
         panicNetworkLifecycle: panicNetworkLifecycle
     )
 
@@ -1229,6 +1226,20 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
+    func panicClearAllData_withDefaultOperationsErasesKeychainAndMessages() {
+        let keychain = MockKeychain()
+        let (viewModel, _) = makeTestableViewModel(keychain: keychain)
+        viewModel.addMeshOnlySystemMessage("before erase")
+
+        let completed = viewModel.panicClearAllData()
+
+        #expect(completed)
+        #expect(keychain.deleteAllCallCount == 1)
+        #expect(!viewModel.messages.contains { $0.content == "before erase" })
+        #expect(!viewModel.panicRecoveryBlocked)
+    }
+
+    @Test @MainActor
     func panicClearAllData_stopsNetworkBeforeWipeAndRestartsAfterCommit() {
         var events: [String] = []
         let lifecycle = PanicNetworkLifecycle(
@@ -1252,7 +1263,6 @@ struct ChatViewModelPanicTests {
     func panicNetworkWipeFailureKeepsRecoveryPendingAndServicesStopped() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { false },
             begin: {
                 events.append("begin")
@@ -1290,7 +1300,6 @@ struct ChatViewModelPanicTests {
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { false },
             begin: {
                 events.append("begin")
@@ -1327,7 +1336,6 @@ struct ChatViewModelPanicTests {
     func pendingPanicRecoveryCompletesBeforeTransportBootstrap() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: {
                 events.append("read")
                 return true
@@ -1358,7 +1366,6 @@ struct ChatViewModelPanicTests {
         enum WipeFailure: Error { case failed }
         var completedMarker = false
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { true },
             begin: {
                 PanicRecoveryIntent(
@@ -1386,7 +1393,6 @@ struct ChatViewModelPanicTests {
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { true },
             begin: {
                 events.append("begin")

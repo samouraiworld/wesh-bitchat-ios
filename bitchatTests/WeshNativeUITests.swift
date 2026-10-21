@@ -191,7 +191,7 @@ struct WeshNativeUITests {
         let outbox = failing == "outbox" ? MessageOutboxStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
         let transport = MockTransport()
         var committed = 0
-        let operations = PanicRecoveryOperations(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork, isPending: { false }, begin: {
+        let operations = PanicRecoveryOperations(isPending: { false }, begin: {
             PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
         }, wipeMedia: { _ in }, complete: { committed += 1 })
         let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
@@ -277,7 +277,6 @@ struct WeshNativeUITests {
         var begun = 0
         var committed = 0
         let operations = PanicRecoveryOperations(
-            collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork,
             isPending: { false },
             begin: {
                 begun += 1
@@ -604,9 +603,7 @@ struct WeshNativeUITests {
         let identity = MockIdentityManager(storage)
         let vm = ChatViewModel(keychain: storage,
             idBridge: NostrIdentityBridge(keychain: MockKeychain()),
-            identityManager: identity, transport: transport,
-            panicRecoveryOperations: .ephemeral(collectAppOwners: PanicAppOwnerAdmissionFixture.confirmedNoWork),
-            weshPrivatePolicyEnabled: true)
+            identityManager: identity, transport: transport, weshPrivatePolicyEnabled: true)
         let peer = PeerID(hexData: key)
         transport.connectedPeers.formUnion([shortID, peer])
         transport.peerFingerprints[shortID] = key.sha256Fingerprint()
