@@ -305,6 +305,15 @@ private extension AppRuntime {
     }
 
     func bindRuntimeObservers() {
+        // A cleanup retried on its own (after first unlock) starts what the launch could not;
+        // `start` still checks that the network is allowed.
+        chatViewModel.$startupRetirementBlocked
+            .removeDuplicates()
+            .dropFirst()
+            .filter { !$0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.start() }
+            .store(in: &cancellables)
         chatViewModel.$noiseIdentityAvailability
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.configureComposerDrafts() }
