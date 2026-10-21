@@ -425,7 +425,7 @@ private final class RootFixture: @unchecked Sendable {
             }
             ledger.track(handle)
             creations.update { $0 += 1 }
-            if holdCreatorReturn && returnGate.wait(timeout: .now() + 5) != .success {
+            if holdCreatorReturn && returnGate.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned creator return barrier timed out") }
             }
             return handle
@@ -477,7 +477,7 @@ private final class RootFixture: @unchecked Sendable {
         ackQueue.async {
             hold.entered.update { $0 = true }
             defer { hold.finished.update { $0 = true } }
-            if hold.release.wait(timeout: .now() + 5) != .success {
+            if hold.release.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned ACK queue hold timed out") }
             }
         }

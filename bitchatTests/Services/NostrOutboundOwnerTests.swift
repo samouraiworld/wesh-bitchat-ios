@@ -542,7 +542,7 @@ private final class Fixture: @unchecked Sendable {
             }
             ledger.track(handle)
             creators.update { $0 += 1 }
-            if holdReturn && returnGate.wait(timeout: .now() + 5) != .success {
+            if holdReturn && returnGate.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned Task creator handle-return barrier timed out") }
             }
             return handle
