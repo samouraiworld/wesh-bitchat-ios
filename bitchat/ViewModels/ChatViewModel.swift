@@ -1410,6 +1410,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
         // disconnect is not enough here.
         NostrRelayManager.shared.resetForPanicWipe()
+        // Paced acks and sends captured before the wipe hold the pre-wipe Nostr identity.
+        NostrTransport.sharedAckPacer.discardWorkBeforeErase()
         // Clearing relay handlers stops NEW events, but a detached gift-wrap
         // decrypt spawned just before the wipe still holds a pre-wipe key and
         // ciphertext; bump the pipeline's wipe generation so its result is

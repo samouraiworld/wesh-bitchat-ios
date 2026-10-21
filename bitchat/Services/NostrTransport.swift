@@ -144,6 +144,22 @@ final class NostrTransport: Transport, @unchecked Sendable {
             }
         }
 
+        private var epoch: UInt64 = 0
+
+        /// Bumped by the emergency erase. Sends and acks captured before it are dropped when
+        /// they run, so nothing reserved under the pre-erase identity leaves afterwards. Shared
+        /// in production like the pacer; isolated per `Dependencies` in tests.
+        var eraseEpoch: UInt64 { queue.sync { epoch } }
+
+        /// Erase: drops every ack still waiting for its turn and fences every send captured
+        /// before this point. The send already handed to the relay manager is not recalled.
+        func discardWorkBeforeErase() {
+            queue.sync {
+                epoch &+= 1
+                pending.removeAll()
+            }
+        }
+
         /// Must be called on `queue`.
         private func processNext() {
             guard !isSending, !pending.isEmpty else { return }
@@ -315,7 +331,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
     func sendMessage(_ content: String, mentions: [String]) { /* no-op */ }
 
     func sendPrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
+        let epoch = dependencies.ackPacer.eraseEpoch
         Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -336,13 +354,16 @@ final class NostrTransport: Transport, @unchecked Sendable {
     /// Explicit-identity acks ride throwaway transport instances that must stay alive
     /// until their ack leaves the queue.
     private func enqueueAck(_ ack: QueuedAck) {
-        dependencies.ackPacer.enqueue { self.sendAckItem(ack) }
+        let epoch = dependencies.ackPacer.eraseEpoch
+        dependencies.ackPacer.enqueue { self.sendAckItem(ack, epoch: epoch) }
     }
 
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
         // Wesh sends `[FAVORITED]:npub` only over a Noise session, never over a relay.
         if queue.sync(execute: { weshNpubs != nil }) { return }
+        let epoch = dependencies.ackPacer.eraseEpoch
         Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -377,7 +398,9 @@ extension NostrTransport {
 
     // MARK: Private messages using the supplied Nostr identity
     func sendPrivateMessageForNostrIdentity(content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
+        let epoch = dependencies.ackPacer.eraseEpoch
         Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard !recipientHex.isEmpty else { return }
             SecureLogger.debug("GeoDM: send PM mid=\(messageID.prefix(8))…", category: .session)
             guard let embedded = NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: content, messageID: messageID) else {
@@ -420,8 +443,9 @@ extension NostrTransport {
 
 
     /// Sends a single ack item (invoked by the pacer, one per interval)
-    private func sendAckItem(_ item: QueuedAck) {
+    private func sendAckItem(_ item: QueuedAck, epoch: UInt64) {
         Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             switch item {
             case .readDirect(let receipt, let peerID):
                 guard let recipientNpub = resolveRecipientNpub(for: peerID),
