@@ -332,8 +332,10 @@ struct WeshRootView: View {
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:
-                // Nickname and terms, then Bluetooth: the system prompt waits for that step.
-                PaveOnboardingFlow(nickname: WeshWelcome.keptNickname(chrome.nickname),
+                // Nickname and terms, then Bluetooth: the system prompt waits for that step. Read from
+                // the view model: the chrome copy follows it a run-loop later and could still hold the
+                // nickname from before an erase.
+                PaveOnboardingFlow(nickname: WeshWelcome.keptNickname(viewModel.nickname),
                                    onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
                     chrome.setNickname(nickname)
                     chrome.validateAndSaveNickname()
