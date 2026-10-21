@@ -1569,7 +1569,11 @@ struct BLEServiceCoreTests {
     /// has to wait for the convergence handshake and use its new session.
     @Test
     func timeoutRestoredSessionDefersQueueDrainUntilConvergence() async throws {
-        let ble = makeService(noiseResponderHandshakeTimeout: 0.3)
+        // The responder deadline also arms during the setup handshake below; a
+        // drain delayed past 0.3 s under parallel load fired it before message
+        // 3. 2 s cannot be outrun there and still restores well inside the
+        // `TestConstants.longTimeout` wait.
+        let ble = makeService(noiseResponderHandshakeTimeout: 2.0)
         let alice = NoiseEncryptionService(keychain: MockKeychain())
         let mallory = NoiseEncryptionService(keychain: MockKeychain())
         let alicePeerID = PeerID(publicKey: alice.getStaticPublicKeyData()!)
