@@ -20,7 +20,7 @@ Contact: `support@samourai.coop`. Security issues: `security@samourai.coop`.
 - A private message not yet delivered is kept encrypted for at most 24 hours.
 - Recent local-room messages may be kept for a few hours, so they can be relayed to phones that arrive later.
 - On iPhone, Wesh may also keep, for at most 24 hours, an encrypted private message that a verified contact hands it for someone else. You cannot read it.
-- Keys are held in the iOS Keychain or protected by the Android Keystore. They do not leave the phone.
+- Keys are held in the iOS Keychain or protected by the Android Keystore. Wesh does not send them to anyone (backups: §4).
 
 ## 4. Backups
 - **Android:** Wesh excludes all of its data from Google backups and from transfers to a new phone.
