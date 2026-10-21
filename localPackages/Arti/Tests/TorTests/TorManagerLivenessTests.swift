@@ -9,6 +9,7 @@ private final class FakeArti: @unchecked Sendable {
     private var _socksAlive = true
     private var _startCalls = 0
     private var _stopCalls = 0
+    private var _endpoints: [SocksEndpoint] = []
 
     var running: Bool {
         get { lock.withLock { _running } }
@@ -19,13 +20,15 @@ private final class FakeArti: @unchecked Sendable {
         set { lock.withLock { _socksAlive = newValue } }
     }
     var startCalls: Int { lock.withLock { _startCalls } }
+    var endpoints: [SocksEndpoint] { lock.withLock { _endpoints } }
     var stopCalls: Int { lock.withLock { _stopCalls } }
 
     var backend: ArtiBackend {
         ArtiBackend(
-            start: { [self] _, _ in
+            start: { [self] _, socks in
                 lock.withLock {
                     _startCalls += 1
+                    _endpoints.append(socks)
                     _running = true
                 }
                 return 0
@@ -353,6 +356,37 @@ final class TorManagerLivenessTests: XCTestCase {
         manager.setAppForeground(true)
 
         XCTAssertEqual(arti.startCalls, 0)
+    }
+
+    // MARK: - SOCKS endpoint
+
+    func test_eachStartGivesArtiAndTheSessionANewSocksPortAndLogin() async {
+        let arti = FakeArti()
+        let urlSession = TorURLSession()
+        let directory = stateDirectory
+        let manager = TorManager(
+            backend: arti.backend, urlSession: urlSession, dataDirectory: { directory },
+            pollIntervalNanoseconds: 5_000_000, livenessIntervalNanoseconds: 5_000_000, usesPathMonitor: false
+        )
+        let unused = urlSession.endpoint
+
+        await startReady(manager)
+        XCTAssertTrue(manager.stopSynchronously(timeout: 1))
+        await startReady(manager)
+        defer { manager.shutdownCompletely() }
+
+        let starts = arti.endpoints
+        XCTAssertEqual(starts.count, 2)
+        XCTAssertEqual(starts.last, urlSession.endpoint, "the session must use the login Arti was started with")
+        XCTAssertFalse(starts.contains(unused), "the endpoint known before any start is never used")
+        XCTAssertNotEqual(starts[0].username, starts[1].username)
+        XCTAssertNotEqual(starts[0].password, starts[1].password)
+        for socks in starts {
+            XCTAssertEqual(socks.host, "127.0.0.1")
+            XCTAssertTrue(SocksEndpoint.portRange.contains(socks.port))
+            XCTAssertEqual(socks.username.count, 32)
+            XCTAssertEqual(socks.password.count, 32)
+        }
     }
 
     // MARK: - Arti dying mid-session

@@ -16,7 +16,10 @@ private final class NWPathMonitor {
 
 // FFI declarations for Arti (Rust)
 @_silgen_name("arti_start")
-private func arti_start(_ dataDir: UnsafePointer<CChar>, _ socksPort: UInt16) -> Int32
+private func arti_start(
+    _ dataDir: UnsafePointer<CChar>, _ socksPort: UInt16,
+    _ socksUsername: UnsafePointer<CChar>, _ socksPassword: UnsafePointer<CChar>
+) -> Int32
 
 @_silgen_name("arti_stop")
 private func arti_stop() -> Int32
@@ -33,7 +36,7 @@ private func arti_bootstrap_summary(_ buf: UnsafeMutablePointer<CChar>, _ len: I
 /// The Arti calls `TorManager` makes, injectable so tests can start, kill and
 /// probe a fake Arti without the Rust library touching the network.
 struct ArtiBackend: Sendable {
-    var start: @Sendable (_ dataDir: String, _ socksPort: UInt16) -> Int32
+    var start: @Sendable (_ dataDir: String, _ socks: SocksEndpoint) -> Int32
     var stop: @Sendable () -> Int32
     var isRunning: @Sendable () -> Bool
     var bootstrapProgress: @Sendable () -> Int
@@ -43,8 +46,12 @@ struct ArtiBackend: Sendable {
     var probeSocks: @Sendable (_ port: Int) async -> Bool
 
     static let live = ArtiBackend(
-        start: { dataDir, socksPort in
-            dataDir.withCString { arti_start($0, socksPort) }
+        start: { dataDir, socks in
+            dataDir.withCString { dir in
+                socks.username.withCString { user in
+                    socks.password.withCString { arti_start(dir, UInt16(socks.port), user, $0) }
+                }
+            }
         },
         stop: { arti_stop() },
         isRunning: { arti_is_running() != 0 },
@@ -117,9 +124,8 @@ final class SocksProbeAttempt: @unchecked Sendable {
 public final class TorManager: ObservableObject {
     public static let shared = TorManager()
 
-    // SOCKS endpoint where Arti listens
-    let socksHost: String = "127.0.0.1"
-    let socksPort: Int = 39050
+    // SOCKS endpoint where Arti listens: a new port and login for each start.
+    private var socksPort: Int { urlSession.endpoint.port }
 
     // State
     @Published private(set) public var isReady: Bool = false
@@ -185,6 +191,7 @@ public final class TorManager: ObservableObject {
     private(set) var allowAutoStart: Bool = false
 
     nonisolated private let backend: ArtiBackend
+    private let urlSession: TorURLSession
     private let dataDirectory: () -> URL?
     private let pollIntervalNanoseconds: UInt64
     private let livenessIntervalNanoseconds: UInt64
@@ -196,12 +203,14 @@ public final class TorManager: ObservableObject {
 
     init(
         backend: ArtiBackend,
+        urlSession: TorURLSession = .shared,
         dataDirectory: @escaping () -> URL? = TorManager.defaultDataDirectory,
         pollIntervalNanoseconds: UInt64 = 1_000_000_000,
         livenessIntervalNanoseconds: UInt64 = 5_000_000_000,
         usesPathMonitor: Bool = true
     ) {
         self.backend = backend
+        self.urlSession = urlSession
         self.dataDirectory = dataDirectory
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
         self.livenessIntervalNanoseconds = livenessIntervalNanoseconds
@@ -307,7 +316,7 @@ public final class TorManager: ObservableObject {
             return
         }
 
-        let result = backend.start(dir, UInt16(socksPort))
+        let result = backend.start(dir, urlSession.renewEndpoint())
 
         if result != 0 {
             SecureLogger.error("TorManager: arti_start failed rc=\(result)", category: .session)
@@ -316,7 +325,7 @@ public final class TorManager: ObservableObject {
             return
         }
 
-        SecureLogger.info("TorManager: arti_start OK (SOCKS \(socksHost):\(socksPort))", category: .session)
+        SecureLogger.info("TorManager: arti_start OK (SOCKS port \(socksPort))", category: .session)
         startBootstrapMonitor()
 
         // Start SOCKS readiness probe
@@ -330,7 +339,7 @@ public final class TorManager: ObservableObject {
                 guard !Task.isCancelled, generation == self.bootstrapGeneration else { return }
                 self.socksReady = ready
                 if ready {
-                    SecureLogger.info("TorManager: SOCKS ready at \(self.socksHost):\(self.socksPort)", category: .session)
+                    SecureLogger.info("TorManager: SOCKS ready on port \(self.socksPort)", category: .session)
                 } else {
                     self.lastError = NSError(domain: "TorManager", code: -14, userInfo: [NSLocalizedDescriptionKey: "SOCKS not reachable"])
                     SecureLogger.error("TorManager: SOCKS not reachable (timeout)", category: .session)

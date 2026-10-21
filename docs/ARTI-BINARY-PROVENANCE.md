@@ -85,6 +85,8 @@ A child linked to the final arm64 macOS library passed bootstrap-stop, double-st
 
 Exact-head CI, integrated OFF/panic behavior, packet captures, physical-device gates and unresolved native dependency review remain required. No public-release verdict follows from these local checks.
 
+The 21 October SOCKS refresh changes only the listener, as Android #28 did. The proxy now accepts nothing but the RFC 1929 username/password set for each start: no-auth clients get "no acceptable method" and a wrong login is refused before any request is read, and credentials never print. `arti_start` takes the port and the login from the caller, which picks a new random port in 10000–32767 and new 128-bit credentials for each start. Each destination host gets its own isolation token, so streams to two relays never share a circuit. The C API keeps seven functions; only `arti_start` gains the two credential parameters, and -6 reports an invalid login. `Cargo.lock` and the release flags are unchanged. All five targets were rebuilt with `BUILD_JOBS=3 KEEP_BUILD_CACHE=0` and the same pinned rustc 1.96.0 and cbindgen 0.29.4. 37 crate tests and 22 Swift package tests pass, including a URLSession login against a fake proxy.
+
 ## Audited Source And Recipe Hashes
 
 These hashes bind the reviewed source and recipe to this build record. CI compares the complete tracked Arti crate, lockfile and recipe set; changing a source without refreshing this record fails the gate. This consistency check complements binary review and does not independently prove a compilation.
@@ -96,9 +98,10 @@ da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5  localPackages/
 f96c53d5c449a37739dcb8c2f513fbff2aa7b5ea1c0b9d4963108aa25696be0b  localPackages/Arti/arti-bitchat/cbindgen.toml
 dfd4262666f5555b85c93f88a256f11ed16fdc119a3367c93bfb916416711df4  localPackages/Arti/arti-bitchat/src/connections.rs
 9a7afba1ce0baf6724d85c4c0fe71c86e48d0515d527f11abdf9e945c34e0269  localPackages/Arti/arti-bitchat/src/controller.rs
-181e21a6979cad390ac08db1f3e23e9c4efbcaa7aff9ae98f57a5d14e564733f  localPackages/Arti/arti-bitchat/src/lib.rs
+0430dc1e3983df03cc9f6ef65098fa34918d7ac29701a65152bb7989e50214ae  localPackages/Arti/arti-bitchat/src/isolation.rs
+87092d7f0b888b33acfb5aaf80f18c2aecf107f9cfef467150b12132e84aacee  localPackages/Arti/arti-bitchat/src/lib.rs
 f70f1f32efcac8cc8ec8e272686a5d1877c8e3bfd4f93eeee0e72e14a15bb912  localPackages/Arti/arti-bitchat/src/lifecycle.rs
-83791b96824df0a640b562d287d49323fd1c786e91565b8b6e501fde4dfb36df  localPackages/Arti/arti-bitchat/src/socks.rs
+9ced36c42318abd8910984fb12e10f3d2b70af59ec382aceea2c7f26689e8174  localPackages/Arti/arti-bitchat/src/socks.rs
 a7eeae2a6c7d9afd2a288a2f8c106e50e3d6a66e6f28eb12eacb1e4d349c59e3  localPackages/Arti/build-ios.sh
 6e440299177e019d88825ec0a78a36664a6a764e67f0ae130e120f88bc60d3f1  localPackages/Arti/normalize-archive.py
 ```
@@ -117,12 +120,12 @@ Current hashes:
 
 ```text
 cac99db408280bbef15cae8ce64c8ccdbf2e8863c205168d59f83fe8ab680f94  localPackages/Arti/Frameworks/arti.xcframework/Info.plist
-f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/Headers/arti.h
-87ce69ba0ee859fe1805526f6f527910ec6fc9c5dd79cbbc89be1f6d575bc22c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
-f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/Headers/arti.h
-ffa5b69077fb880090716f1418642e8d9e9d2333fd15c0b6ca3038508fab10a0  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
-f612553fe9a4ba47cce6a4ff65a43e403e14c05eaef739997eed9fcc08477fb7  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/Headers/arti.h
-fc1fd320070a45dd5341bbb45f4978a1fcb2fc1af6095d299846d7bb5fcfb483  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
+aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/Headers/arti.h
+aa3c7ae2ecbde84ba5f0918a723452547bdc858225566b46a27c0075f242ed58  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
+aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/Headers/arti.h
+07397ba815890faee373cd91cb0e905fd4fa097add2cd5b3c10b25ed42d570f9  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
+aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/Headers/arti.h
+c5c9827454723d1da5d3f81d7d36c83bd372666a8562bafd78c4070182c44c85  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
 ```
 
 ## Review Checklist

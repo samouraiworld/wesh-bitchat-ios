@@ -27,7 +27,9 @@
  *
  * # Arguments
  * * `data_dir` - Path to data directory for Tor state (C string)
- * * `socks_port` - Port for SOCKS5 proxy (e.g., 39050)
+ * * `socks_port` - Port for SOCKS5 proxy on 127.0.0.1, chosen anew by the caller for each start
+ * * `socks_username`, `socks_password` - RFC 1929 login the proxy requires for this start
+ *   (C strings, 1 to 255 bytes each); clients without it are refused
  *
  * # Returns
  * * 0 on success
@@ -36,9 +38,12 @@
  * * -3 if runtime initialization failed
  * * -4 if bootstrap failed
  * * -5 if native teardown became unconfirmed while admitting this start; restart the process before starting again
+ * * -6 if the SOCKS username or password is invalid
  */
 int arti_start(const char *data_dir,
-               uint16_t socks_port);
+               uint16_t socks_port,
+               const char *socks_username,
+               const char *socks_password);
 
 /**
  * Stop Arti gracefully.
