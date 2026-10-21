@@ -142,7 +142,7 @@ struct SocialIdentity: Codable {
 enum TrustLevel: String, Codable {
     case unknown
     case casual
-    // periphery:ignore - retired vouch tier: never written, kept so a stored raw value still decodes
+    // Retired vouch tier: never written, kept so a stored raw value still decodes.
     case vouched
     case trusted
     case verified

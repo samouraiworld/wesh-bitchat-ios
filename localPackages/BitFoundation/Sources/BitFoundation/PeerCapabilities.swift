@@ -20,7 +20,7 @@ public struct PeerCapabilities: OptionSet, Equatable, Hashable, Sendable {
     // periphery:ignore - BitChat groups: never advertised, kept so the wire bit is never reused
     public static let groups = PeerCapabilities(rawValue: 1 << 3)
     public static let board = PeerCapabilities(rawValue: 1 << 4)
-    // periphery:ignore - retired vouch bit: never advertised, kept so the wire bit is never reused
+    // Retired vouch bit: never advertised, kept so the wire bit is never reused.
     public static let vouch = PeerCapabilities(rawValue: 1 << 5)
     public static let meshDiagnostics = PeerCapabilities(rawValue: 1 << 6)
     /// Retired bridge bit: reserved for wire compatibility, never advertised.
