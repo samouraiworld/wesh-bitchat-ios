@@ -341,6 +341,108 @@ struct NostrOutboundOwnerTests {
             await actual.handle.value
         }
     }
+
+    @Test
+    func selectedTaskReadinessRejectionStillWaitsForItsOriginalResources() async throws {
+        let expected = Locked<ReadinessRejection?>(nil)
+        let saved = Locked<CleanupObservation?>(nil)
+        do {
+            try await withFixture { f in
+                let ticket = try taskTicket(f.owner)
+                f.owner.dispatch(ticket) {}
+                let operation = try await f.ledger.prepareCleanupDecision(reject: true)
+                expected.update { $0 = operation.expectedRejection }
+                try await f.startCleanupConsumer(operation)
+                try await eventually { operation.readinessSnapshot != .admitted }
+                let observation = await MainActor.run { operation.observation() }
+                saved.update { $0 = observation }
+            }
+            throw FixtureError("selected Task readiness rejection was not retained by cleanup")
+        } catch let error as ReadinessRejection {
+            guard let original = expected.read(), error === original else { throw error }
+        }
+        let observation = try #require(saved.read())
+        try requireSelectedRejection(observation, expected: try #require(expected.read()), kind: .task)
+        #expect(!observation.finished, "The actual drain must observe its same held Task and observer before returning")
+    }
+
+    @Test
+    func selectedWorkerReadinessRejectionStillWaitsForItsOriginalWorker() async throws {
+        let expected = Locked<ReadinessRejection?>(nil)
+        let saved = Locked<CleanupObservation?>(nil)
+        do {
+            try await withFixture(holdReturn: true) { f in
+                let ticket = try taskTicket(f.owner)
+                f.dispatchOnWorker(ticket) {}
+                let operation = try await f.prepareWorkerCleanupDecision(reject: true)
+                expected.update { $0 = operation.expectedRejection }
+                try await f.startCleanupConsumer(operation)
+                try await eventually { operation.readinessSnapshot != .admitted }
+                let observation = await MainActor.run { operation.observation() }
+                saved.update { $0 = observation }
+            }
+            throw FixtureError("selected worker readiness rejection was not retained by cleanup")
+        } catch let error as ReadinessRejection {
+            guard let original = expected.read(), error === original else { throw error }
+        }
+        let observation = try #require(saved.read())
+        try requireSelectedRejection(observation, expected: try #require(expected.read()), kind: .worker)
+        #expect(!observation.finished, "The actual reaper must observe its same held Thread before returning")
+    }
+
+    @Test
+    func defaultPreparedDecisionsKeepActualTaskAndWorkerCompletion() async throws {
+        let saved = Locked<[CleanupObservation]>([])
+        try await withFixture(holdReturn: true) { f in
+            let ticket = try taskTicket(f.owner)
+            f.dispatchOnWorker(ticket) {}
+            let workerOperation = try await f.prepareWorkerCleanupDecision(reject: false)
+            try await f.startCleanupConsumer(workerOperation)
+            f.releaseReturn()
+            f.body.open()
+            try await eventually { workerOperation.readinessSnapshot == .finished }
+            let taskOperation = try await f.ledger.prepareCleanupDecision(reject: false)
+            try await f.startCleanupConsumer(taskOperation, waitForEntry: false)
+            try await eventually { taskOperation.readinessSnapshot == .finished && workerOperation.readinessSnapshot == .finished }
+            let observations = await MainActor.run { [taskOperation.observation(), workerOperation.observation()] }
+            saved.update { $0 = observations }
+        }
+        let observations = saved.read()
+        try requireFixture(observations.count == 2, "both original prepared helpers must finish")
+        for observation in observations {
+            try requireFixture(observation.subjectSeen && !observation.rejected && observation.terminalError == nil,
+                               "default decision changed the original successful readiness path")
+            #expect(observation.finished)
+            #expect(!observation.targetPending)
+        }
+    }
+
+    @Test
+    func bodyPrimaryAndQueueFailureKeepDistinctOriginalErrors() async throws {
+        let primary = CleanupSentinel("synthetic equal error descriptions")
+        let secondary = CleanupSentinel("synthetic equal error descriptions")
+        let executed = Locked(false)
+        do {
+            try await withFixture(holdReturn: true) { f in
+                let ticket = try taskTicket(f.owner)
+                f.dispatchOnWorker(ticket) { executed.update { $0 = true } }
+                let operation = try await f.prepareWorkerCleanupDecision(reject: false)
+                try await f.startCleanupConsumer(operation)
+                f.extraCleanup = { throw secondary }
+                throw primary
+            }
+            throw FixtureError("original body and queue errors were lost")
+        } catch let failure as FixtureCleanupFailure {
+            guard let body = failure.primary as? CleanupSentinel, body === primary,
+                  failure.cleanup.count == 1,
+                  let queue = failure.cleanup.first?.error as? CleanupSentinel, queue === secondary else {
+                throw failure
+            }
+            try requireFixture(executed.read(), "real owner work was not completed before reporting errors")
+            #expect(body !== queue)
+            #expect(failure.cleanup.first?.site == "queue cleanup")
+        }
+    }
 }
 
 private enum LocalValue { @TaskLocal static var value: String? }
@@ -350,11 +452,17 @@ private struct FixtureError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
+private struct CleanupErrorRecord: Sendable {
+    let site: String
+    let error: Error
+    var description: String { "\(site): \(error)" }
+}
+
 private struct FixtureCleanupFailure: Error, CustomStringConvertible {
     let primary: Error
-    let cleanup: [String]
+    let cleanup: [CleanupErrorRecord]
     var description: String {
-        "primary: \(primary); independent cleanup failures: \(cleanup.joined(separator: "; "))"
+        "primary: \(primary); independent cleanup failures: \(cleanup.map(\.description).joined(separator: "; "))"
     }
 }
 
@@ -392,6 +500,196 @@ private final class AsyncGate: @unchecked Sendable {
     }
 }
 
+private enum CleanupKind: Sendable, Equatable { case task, worker }
+private enum CleanupReadiness: Sendable, Equatable { case admitted, aboutToObserve, finished }
+
+private final class ReadinessRejection: Error {
+    let kind: CleanupKind
+    init(_ kind: CleanupKind) { self.kind = kind }
+}
+
+private final class CleanupSentinel: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
+}
+
+private struct CleanupObservation: Sendable {
+    let kind: CleanupKind
+    let subjectSeen: Bool
+    let rejected: Bool
+    let rejection: ReadinessRejection
+    let finished: Bool
+    let terminalError: Error?
+    let targetPending: Bool
+}
+
+/// A selected decision over real retained resources. Phase is never a completion receipt.
+@MainActor
+private final class CleanupOperation {
+    private enum Target {
+        case task(TaskLedger, TaskLedger.Tracked)
+        case worker(Fixture, Thread)
+    }
+    nonisolated private let readiness = Locked(CleanupReadiness.admitted)
+    nonisolated var readinessSnapshot: CleanupReadiness { readiness.read() }
+    nonisolated let expectedRejection: ReadinessRejection
+    let kind: CleanupKind
+    private let target: Target
+    private let reject: Bool
+    private var begun = false
+    private var subjectSeen = false
+    private var rejected = false
+    private var finished = false
+    private var terminalError: Error?
+    private var consumerBound = false
+    private var consumerReturned = false
+    private var transportedError: Error?
+
+    init(ledger: TaskLedger, row: TaskLedger.Tracked, reject: Bool) {
+        kind = .task; target = .task(ledger, row); self.reject = reject
+        expectedRejection = ReadinessRejection(.task)
+    }
+    init(fixture: Fixture, worker: Thread, reject: Bool) {
+        kind = .worker; target = .worker(fixture, worker); self.reject = reject
+        expectedRejection = ReadinessRejection(.worker)
+    }
+    func bindConsumer(to fixture: Fixture) throws {
+        guard !consumerBound else { throw FixtureError("prepared cleanup consumer was replayed") }
+        switch target {
+        case .task(let ledger, _):
+            guard ledger === fixture.ledger else { throw FixtureError("prepared Task consumer has a foreign fixture") }
+        case .worker(let original, _):
+            guard original === fixture else { throw FixtureError("prepared worker consumer has a foreign fixture") }
+        }
+        consumerBound = true
+    }
+    func beginTask(_ ledger: TaskLedger) throws {
+        guard consumerBound, !begun, case .task(let original, let row) = target, original === ledger,
+              ledger.handles.contains(where: { $0.finished === row.finished }) else {
+            throw FixtureError("foreign or replayed prepared Task cleanup")
+        }
+        begun = true
+    }
+    func beginWorker(_ fixture: Fixture, workers: [Thread]) throws {
+        guard consumerBound, !begun, case .worker(let original, let worker) = target, original === fixture,
+              workers.contains(where: { $0 === worker }) else {
+            throw FixtureError("foreign or replayed prepared worker cleanup")
+        }
+        begun = true
+    }
+    func decideTask(_ row: TaskLedger.Tracked) throws {
+        guard begun, case .task(_, let original) = target, original.finished === row.finished else { return }
+        try decideSelectedSubject()
+    }
+    func decideWorker(_ worker: Thread) throws {
+        guard begun, case .worker(_, let original) = target, original === worker else { return }
+        try decideSelectedSubject()
+    }
+    private func decideSelectedSubject() throws {
+        subjectSeen = true
+        if reject && !rejected {
+            rejected = true
+            throw expectedRejection
+        }
+    }
+    func aboutToObserveTask(_ row: TaskLedger.Tracked) {
+        if case .task(_, let original) = target, original.finished === row.finished {
+            readiness.update { $0 = .aboutToObserve }
+        }
+    }
+    func aboutToObserveWorker(_ worker: Thread) {
+        if case .worker(_, let original) = target, original === worker {
+            readiness.update { $0 = .aboutToObserve }
+        }
+    }
+    /// Called inside the actual isolated helper before that invocation returns or throws.
+    func finish(error: Error?) {
+        terminalError = error
+        finished = true
+        readiness.update { $0 = .finished }
+    }
+    /// Delivery bookkeeping only; never changes phase or helper completion.
+    func consumerDidReturn(error: Error?) {
+        transportedError = error
+        consumerReturned = true
+    }
+    func observation() -> CleanupObservation {
+        let pending: Bool
+        switch target {
+        case .task(_, let row): pending = !row.finished.read()
+        case .worker(_, let worker): pending = !worker.isFinished
+        }
+        return CleanupObservation(kind: kind, subjectSeen: subjectSeen, rejected: rejected,
+            rejection: expectedRejection, finished: finished, terminalError: terminalError,
+            targetPending: pending)
+    }
+    /// Only new prepared records use this release-first backstop; ordinary helper traversal stays throwing.
+    func reapSelectedActualResource() async -> [CleanupErrorRecord] {
+        var failures: [CleanupErrorRecord] = []
+        switch target {
+        case .task(_, let row):
+            await row.handle.value
+            await row.observer.value
+        case .worker(let fixture, let worker):
+            while !worker.isFinished {
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            // The same creator has returned before this actual ledger snapshot.
+            let actual = fixture.ledger.handles
+            if actual.count != 1 {
+                failures.append(CleanupErrorRecord(site: "selected worker creator", error: FixtureError("selected worker did not publish exactly one actual creator row")))
+            }
+            // Even an unexpected extra actual row is retained and completed before the count error escapes.
+            for row in actual {
+                await row.handle.value
+                await row.observer.value
+            }
+        }
+        return failures
+    }
+    func errorsAfterActualConsumerReturn() -> [CleanupErrorRecord] {
+        var errors: [CleanupErrorRecord] = []
+        if let terminalError {
+            errors.append(CleanupErrorRecord(site: "prepared helper", error: terminalError))
+        }
+        if let transportedError {
+            // Only this same authenticated reference error is known to be one rethrown occurrence.
+            let sameSelectedOccurrence: Bool
+            if rejected, subjectSeen,
+               let selected = terminalError as? ReadinessRejection,
+               let delivered = transportedError as? ReadinessRejection {
+                sameSelectedOccurrence = selected === expectedRejection && delivered === expectedRejection
+            } else {
+                sameSelectedOccurrence = false
+            }
+            if !sameSelectedOccurrence {
+                errors.append(CleanupErrorRecord(site: "prepared consumer", error: transportedError))
+            }
+        }
+        if !consumerReturned { errors.append(CleanupErrorRecord(site: "prepared consumer", error: FixtureError("consumer delivery missing after actual Task.value"))) }
+        if !begun || !finished || !subjectSeen {
+            errors.append(CleanupErrorRecord(site: "prepared consumer", error: FixtureError("prepared helper invocation did not finish authentically")))
+        }
+        return errors
+    }
+}
+
+private struct CleanupConsumer: Sendable {
+    let handle: Task<Void, Never>
+    let operation: CleanupOperation
+}
+
+private func requireSelectedRejection(_ observation: CleanupObservation,
+                                      expected: ReadinessRejection, kind: CleanupKind) throws {
+    try requireFixture(observation.kind == kind && expected.kind == kind && observation.subjectSeen &&
+                       observation.rejected && observation.rejection === expected && observation.targetPending,
+                       "selected readiness refusal or actual held resource prerequisite was absent")
+    if let error = observation.terminalError {
+        guard let rejection = error as? ReadinessRejection, rejection === expected else { throw error }
+    }
+}
+
 private final class TaskLedger: @unchecked Sendable {
     struct Tracked: Sendable {
         let handle: Task<Void, Never>
@@ -407,15 +705,33 @@ private final class TaskLedger: @unchecked Sendable {
         rows.update { $0.append(Tracked(handle: handle, observer: observer, finished: finished)) }
         return handle
     }
-    func drain() async throws {
-        // A finite controlled parent may register a child while being joined; reread this actual ledger.
-        var index = 0
-        while index < handles.count {
-            let row = handles[index]
-            try await eventually { row.finished.read() }
-            await row.handle.value
-            await row.observer.value
-            index += 1
+    @MainActor
+    func prepareCleanupDecision(reject: Bool) throws -> CleanupOperation {
+        let actual = handles
+        guard actual.count == 1, let row = actual.first else {
+            throw FixtureError("prepared Task cleanup requires one actual selected row")
+        }
+        return CleanupOperation(ledger: self, row: row, reject: reject)
+    }
+    @MainActor
+    func drain(operation: CleanupOperation? = nil) async throws {
+        try operation?.beginTask(self)
+        do {
+            // A finite controlled parent may register a child while being joined; reread this actual ledger.
+            var index = 0
+            while index < handles.count {
+                let row = handles[index]
+                try operation?.decideTask(row)
+                try await eventually { @Sendable in row.finished.read() }
+                operation?.aboutToObserveTask(row)
+                await row.handle.value
+                await row.observer.value
+                index += 1
+            }
+            operation?.finish(error: nil)
+        } catch {
+            operation?.finish(error: error)
+            throw error
         }
     }
 }
@@ -515,6 +831,7 @@ private final class Fixture: @unchecked Sendable {
     private let returnGate: DispatchSemaphore
     private let workers = Locked<[Thread]>([])
     private let joiners = Locked<[Joiner]>([])
+    private let cleanupConsumers = Locked<[CleanupConsumer]>([])
     var extraCleanup: (() async throws -> Void)?
     var createdCount: Int { creators.read() }
 
@@ -561,24 +878,84 @@ private final class Fixture: @unchecked Sendable {
         joiners.update { $0.append(joiner) }
         return joiner
     }
-    func reapWorkers() async throws {
-        for worker in workers.read() { try await eventually { worker.isFinished } }
-        try requireFixture(errors.read().isEmpty, errors.read().joined(separator: "; "))
+    @MainActor
+    func prepareWorkerCleanupDecision(reject: Bool) throws -> CleanupOperation {
+        let actual = workers.read()
+        guard actual.count == 1, let worker = actual.first else {
+            throw FixtureError("prepared worker cleanup requires one actual selected Thread")
+        }
+        return CleanupOperation(fixture: self, worker: worker, reject: reject)
     }
-    func cleanup() async -> [String] {
-        var failures: [String] = []
+    private func awaitCleanupEntry(_ kind: CleanupKind) async throws {
+        switch kind {
+        case .task: try await eventually { self.taskEntered.read() && self.ledger.handles.count == 1 }
+        case .worker: try await eventually { self.createdCount == 1 && self.taskEntered.read() }
+        }
+    }
+    @MainActor
+    func startCleanupConsumer(_ operation: CleanupOperation, waitForEntry: Bool = true) throws {
+        try operation.bindConsumer(to: self)
+        let handle = Task { @MainActor [self] in
+            do {
+                if waitForEntry { try await awaitCleanupEntry(operation.kind) }
+                switch operation.kind {
+                case .task: try await ledger.drain(operation: operation)
+                case .worker: try await reapWorkers(operation: operation)
+                }
+                operation.consumerDidReturn(error: nil)
+            } catch {
+                operation.consumerDidReturn(error: error)
+            }
+        }
+        cleanupConsumers.update { $0.append(CleanupConsumer(handle: handle, operation: operation)) }
+    }
+    @MainActor
+    func reapWorkers(operation: CleanupOperation? = nil) async throws {
+        let actual = workers.read()
+        try operation?.beginWorker(self, workers: actual)
+        do {
+            for worker in actual {
+                try operation?.decideWorker(worker)
+                try await eventually { @Sendable in worker.isFinished }
+                operation?.aboutToObserveWorker(worker)
+                // Baseline still has no unconditional completion after a thrown readiness decision.
+            }
+            try requireFixture(errors.read().isEmpty, errors.read().joined(separator: "; "))
+            operation?.finish(error: nil)
+        } catch {
+            operation?.finish(error: error)
+            throw error
+        }
+    }
+    func cleanup() async -> [CleanupErrorRecord] {
+        var failures: [CleanupErrorRecord] = []
         body.open()
         workers.read().forEach { _ in returnGate.signal() }
         joiners.read().forEach { $0.handle.cancel() }
         installer.forwardAndRelease()
-        if let extraCleanup {
-            do { try await extraCleanup() } catch { failures.append("queue cleanup: \(error)") }
+        // New prepared consumers are outside the ledger they drain. Every gate is already released.
+        let consumers = cleanupConsumers.read()
+        for consumer in consumers {
+            await consumer.handle.value
+            let resourceErrors = await consumer.operation.reapSelectedActualResource()
+            failures.append(contentsOf: await consumer.operation.errorsAfterActualConsumerReturn())
+            failures.append(contentsOf: resourceErrors)
         }
-        do { try await reapWorkers() } catch { failures.append("worker cleanup: \(error)") }
-        do { try await ledger.drain() } catch { failures.append("actual Task.value cleanup: \(error)") }
+        // These actual handles have returned; retirement breaks only this new fixture custody cycle.
+        let retired = cleanupConsumers.update { records in
+            let retained = records
+            records.removeAll()
+            return retained
+        }
+        withExtendedLifetime(retired) {}
+        if let extraCleanup {
+            do { try await extraCleanup() } catch { failures.append(CleanupErrorRecord(site: "queue cleanup", error: error)) }
+        }
+        do { try await reapWorkers() } catch { failures.append(CleanupErrorRecord(site: "worker cleanup", error: error)) }
+        do { try await ledger.drain() } catch { failures.append(CleanupErrorRecord(site: "actual Task.value cleanup", error: error)) }
         installer.forwardAndRelease()
-        if installer.pendingCount != 0 { failures.append("real waiter installer still held") }
-        if !owner.provenanceSnapshot().waiters.isEmpty { failures.append("registration continuation still pending") }
+        if installer.pendingCount != 0 { failures.append(CleanupErrorRecord(site: "installer cleanup", error: FixtureError("real waiter installer still held"))) }
+        if !owner.provenanceSnapshot().waiters.isEmpty { failures.append(CleanupErrorRecord(site: "installer cleanup", error: FixtureError("registration continuation still pending"))) }
         return failures
     }
 }
@@ -621,7 +998,10 @@ private func withFixture(useDefaultCreator: Bool = false, holdReturn: Bool = fal
         if cleanup.isEmpty { throw primary }
         throw FixtureCleanupFailure(primary: primary, cleanup: cleanup)
     }
-    try requireFixture(cleanup.isEmpty, cleanup.joined(separator: "; "))
+    if let first = cleanup.first {
+        if cleanup.count == 1 { throw first.error }
+        throw FixtureCleanupFailure(primary: first.error, cleanup: Array(cleanup.dropFirst()))
+    }
 }
 
 private func taskTicket(_ owner: NostrOutboundOwner, kind: NostrOutboundOwner.TaskKind = .privateMessage,
