@@ -1000,13 +1000,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Some data may remain here. Messaging stays paused."
+            "value" : "Part of it could not be checked. Wesh erases everything again the next time it opens, before connecting."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Certaines données peuvent rester ici. Les échanges restent suspendus."
+            "value" : "Une partie n'a pas pu être vérifiée. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter."
           }
         }
       }
@@ -1017,13 +1017,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Erasing did not finish"
+            "value" : "Erasing not finished"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L'effacement n'a pas abouti"
+            "value" : "Effacement à terminer"
           }
         }
       }
@@ -3653,13 +3653,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+            "value" : "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Local erasure did not finish. Some data may remain here and exchanges stay suspended."
+            "value" : "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting."
           }
         }
       }
@@ -5313,23 +5313,6 @@
         }
       }
     },
-    "pave.wesh.erase.blockedBody" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Some data may remain here. Exchanges are suspended. Retrying resumes the full erasure without restoring the old identity."
-          }
-        }
-      }
-    },
     "pave.wesh.erase.confirmAction" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5360,40 +5343,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erase Wesh data on this phone?"
-          }
-        }
-      }
-    },
-    "pave.wesh.erase.incomplete" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effacement local inachevé"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local erasure incomplete"
-          }
-        }
-      }
-    },
-    "pave.wesh.erase.resume" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reprendre l’effacement local"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Resume local erasure"
           }
         }
       }

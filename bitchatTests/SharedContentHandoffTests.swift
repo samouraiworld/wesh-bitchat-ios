@@ -194,7 +194,7 @@ struct SharedContentRetirementTests {
             #expect(commits == 1 && !viewModel.panicRecoveryBlocked)
         } else {
             #expect(!completed)
-            #expect(commits == 0 && viewModel.panicRecoveryBlocked)
+            #expect(commits == 0 && !viewModel.panicRecoveryBlocked)
             for key in legacyKeys { #expect(defaults.data(forKey: key) == retained) }
             defaults.refuseEnvelopeRemoval = false
             if failureMode == "unavailableLock" {

@@ -1260,7 +1260,7 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
-    func panicNetworkWipeFailureKeepsRecoveryPendingAndServicesStopped() {
+    func panicNetworkWipeFailureKeepsTheIntentAndStillResetsToAFreshStart() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
             isPending: { false },
@@ -1280,22 +1280,22 @@ struct ChatViewModelPanicTests {
             restart: { events.append("restart") },
             closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
-        let (viewModel, transport) = makeTestableViewModel(
+        let (viewModel, _) = makeTestableViewModel(
             panicRecoveryOperations: operations,
             panicNetworkLifecycle: lifecycle
         )
-        let startsBeforePanic = transport.startServicesCallCount
 
         let completed = viewModel.panicClearAllData()
 
+        // The intent stays on disk, so the next launch erases again before startup.
         #expect(!completed)
-        #expect(events == ["stop", "begin", "wipe"])
-        #expect(transport.startServicesCallCount == startsBeforePanic)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(events == ["stop", "begin", "wipe", "restart"])
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
-    func panicKeychainFailureKeepsRecoveryPendingAndServicesStopped() {
+    func panicKeychainFailureKeepsTheIntentAndStillResetsToAFreshStart() {
         let keychain = MockKeychain()
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
@@ -1316,20 +1316,19 @@ struct ChatViewModelPanicTests {
             restart: { events.append("restart") },
             closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
-        let (viewModel, transport) = makeTestableViewModel(
+        let (viewModel, _) = makeTestableViewModel(
             keychain: keychain,
             panicRecoveryOperations: operations,
             panicNetworkLifecycle: lifecycle
         )
-        let startsBeforePanic = transport.startServicesCallCount
 
         let completed = viewModel.panicClearAllData()
 
         #expect(!completed)
-        #expect(events == ["stop", "begin", "wipe"])
+        #expect(events == ["stop", "begin", "wipe", "restart"])
         #expect(keychain.deleteAllCallCount == 1)
-        #expect(transport.startServicesCallCount == startsBeforePanic)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
@@ -1362,7 +1361,7 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
-    func failedStartupRecoveryLeavesTransportAndNetworkBlocked() {
+    func failedStartupRecoveryKeepsTheIntentWithoutBlockingStartup() {
         enum WipeFailure: Error { case failed }
         var completedMarker = false
         let operations = PanicRecoveryOperations(
@@ -1383,12 +1382,12 @@ struct ChatViewModelPanicTests {
 
         #expect(!completedMarker)
         #expect(transport.emergencyDisconnectCallCount == 1)
-        #expect(transport.startServicesCallCount == 0)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == (WeshWelcome.meshMayStart() ? 1 : 0))
+        #expect(viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
-    func failedStartupKeychainRecoveryLeavesIntentAndTransportBlocked() {
+    func failedStartupKeychainRecoveryKeepsTheIntentWithoutBlockingStartup() {
         let keychain = MockKeychain()
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
@@ -1413,8 +1412,8 @@ struct ChatViewModelPanicTests {
         #expect(events == ["begin", "wipe"])
         #expect(keychain.deleteAllCallCount == 1)
         #expect(transport.emergencyDisconnectCallCount == 1)
-        #expect(transport.startServicesCallCount == 0)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == (WeshWelcome.meshMayStart() ? 1 : 0))
+        #expect(viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor

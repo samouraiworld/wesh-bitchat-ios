@@ -323,19 +323,12 @@ struct WeshRootView: View {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        if viewModel.startupRetirementBlocked {
-                            Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
-                                .font(.headline).accessibilityAddTraits(.isHeader)
-                            Text(PaveCopy.text("pave.cleanup.body"))
-                            Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
-                                .frame(minHeight: 44)
-                        } else {
-                            Label(PaveCopy.text("pave.wesh.erase.incomplete"), systemImage: "exclamationmark.triangle")
-                                .font(.headline).accessibilityAddTraits(.isHeader)
-                            Text(PaveCopy.text("pave.wesh.erase.blockedBody"))
-                            Button(PaveCopy.text("pave.wesh.erase.resume")) { chrome.requestPanicWipe() }
-                                .frame(minHeight: 44)
-                        }
+                        // An erase never stops here: only legacy cleanup before startup does.
+                        Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
+                            .font(.headline).accessibilityAddTraits(.isHeader)
+                        Text(PaveCopy.text("pave.cleanup.body"))
+                        Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
+                            .frame(minHeight: 44)
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:
