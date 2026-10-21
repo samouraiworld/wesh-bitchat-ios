@@ -1226,6 +1226,16 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
+    func panicDiscardsNostrWorkCapturedBeforeTheErase() {
+        let (viewModel, _) = makeTestableViewModel()
+        let before = NostrTransport.sharedAckPacer.eraseEpoch
+
+        viewModel.panicClearAllData()
+
+        #expect(NostrTransport.sharedAckPacer.eraseEpoch != before)
+    }
+
+    @Test @MainActor
     func panicClearAllData_withDefaultOperationsErasesKeychainAndMessages() {
         let keychain = MockKeychain()
         let (viewModel, _) = makeTestableViewModel(keychain: keychain)
