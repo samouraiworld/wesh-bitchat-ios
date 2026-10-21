@@ -201,14 +201,14 @@ struct WeshNativeUITests {
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
         #expect(attempts == ["geography", "courier", "bridge", "archive", "sightings", "groups", "prekeys", "board", "share"])
-        #expect(committed == 0 && vm.panicRecoveryBlocked)
+        // Back to a fresh start, but the radio stays off until a wipe is confirmed.
+        #expect(committed == 0 && !vm.panicRecoveryBlocked && !vm.networkActivationAllowed)
         #expect(transport.startServicesCallCount == starts)
-        #expect(vm.weshMeetingNote.isSuspended)
         failed = false
         files.refuseRemoval = false
         attempts.removeAll()
         #expect(vm.panicClearAllData())
-        #expect(committed == 1 && !vm.panicRecoveryBlocked)
+        #expect(committed == 1 && !vm.panicRecoveryBlocked && vm.networkActivationAllowed)
         #expect(transport.startServicesCallCount == starts + 1)
         #expect(attempts.count == 9)
     }
@@ -262,7 +262,7 @@ struct WeshNativeUITests {
     }
 
     @Test(arguments: [false, true]) @MainActor
-    func confirmedGlobalWipeKeepsAdmissionClosedUntilNoteErasureAndRetryCommit(failNote: Bool) {
+    func unconfirmedGlobalWipeKeepsOnlyTheUnconfirmedNoteClosedUntilARetryCommits(failNote: Bool) {
         var allowNoteErasure = !failNote
         var eraseAttempts = 0
         let note = WeshMeetingNoteStore(erasePersisted: {
@@ -302,14 +302,11 @@ struct WeshNativeUITests {
         chrome.requestPanicWipe()
         #expect(!chrome.panicClearAllData())
         #expect(!chrome.showPanicConfirmation)
-        #expect(vm.panicRecoveryBlocked && note.isSuspended)
+        // Only an unconfirmed note stays closed; the rest resets to a fresh start.
+        #expect(!vm.panicRecoveryBlocked && note.isSuspended == failNote)
         #expect(note.content.note.isEmpty)
         #expect(committed == 0 && begun == 1 && eraseAttempts == 1)
         #expect(transport.startServicesCallCount == starts)
-        #expect(!vm.canSendWeshPublic)
-        var draft = "Brouillon après refus"
-        #expect(!vm.sendWeshDraft(&draft, to: nil))
-        #expect(draft == "Brouillon après refus")
         #expect(transport.sentMessages.isEmpty)
         let failedGeneration = note.generation
         #expect(!note.edit(\.note, value: "Retour ancien éditeur", generation: oldGeneration))

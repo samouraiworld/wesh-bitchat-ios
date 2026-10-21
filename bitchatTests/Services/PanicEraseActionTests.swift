@@ -31,7 +31,7 @@ struct PanicEraseActionTests {
     }
 
     @Test
-    func failedShortcutEraseReturnsFalseAndNeverActivates() {
+    func unconfirmedShortcutEraseReturnsFalseAndStillActivatesAFreshStart() {
         let fixture = BoolEraseFixture()
         fixture.eraseSucceeds = false
 
@@ -39,10 +39,8 @@ struct PanicEraseActionTests {
 
         #expect(fixture.eraseCalls == 1)
         #expect(fixture.reports == [false])
-        #expect(fixture.bootstrapCalls == 0)
-        #expect(fixture.runtimeStarts == 0)
-        #expect(!fixture.bootstrapConfigured)
-        #expect(!fixture.runtimeStarted)
+        #expect(fixture.bootstrapCalls == 1)
+        #expect(fixture.runtimeStarts == 1)
     }
 
     @Test

@@ -14,10 +14,10 @@ func makePanicEraseAction(
     {
         let completed = erase()
         report(completed)
-        if completed {
-            if needsBootstrap() { bootstrap() }
-            if needsRuntimeStart() { startRuntime() }
-        }
+        // Even an unconfirmed erase resets to a fresh start; its intent stays for the next launch.
+        // Both steps check `networkActivationAllowed`, which stays false until a wipe is confirmed.
+        if needsBootstrap() { bootstrap() }
+        if needsRuntimeStart() { startRuntime() }
         return completed
     }
 }

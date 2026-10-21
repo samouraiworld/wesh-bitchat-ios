@@ -323,32 +323,36 @@ struct WeshRootView: View {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        if viewModel.startupRetirementBlocked {
-                            Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
-                                .font(.headline).accessibilityAddTraits(.isHeader)
-                            Text(PaveCopy.text("pave.cleanup.body"))
-                            Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
-                                .frame(minHeight: 44)
-                        } else {
-                            Label(PaveCopy.text("pave.wesh.erase.incomplete"), systemImage: "exclamationmark.triangle")
-                                .font(.headline).accessibilityAddTraits(.isHeader)
-                            Text(PaveCopy.text("pave.wesh.erase.blockedBody"))
-                            Button(PaveCopy.text("pave.wesh.erase.resume")) { chrome.requestPanicWipe() }
-                                .frame(minHeight: 44)
-                        }
+                        // An erase never stops here: only legacy cleanup before startup does.
+                        Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
+                            .font(.headline).accessibilityAddTraits(.isHeader)
+                        Text(PaveCopy.text("pave.cleanup.body"))
+                        Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
+                            .frame(minHeight: 44)
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:
-                // Nickname and terms, then Bluetooth: the system prompt waits for that step.
-                PaveOnboardingFlow(nickname: WeshWelcome.keptNickname(chrome.nickname),
+                // Nickname and terms, then Bluetooth: the system prompt waits for that step. Read from
+                // the view model: the chrome copy follows it a run-loop later and could still hold the
+                // nickname from before an erase.
+                PaveOnboardingFlow(nickname: WeshWelcome.keptNickname(viewModel.nickname),
                                    onRequestBluetooth: { runtime.allowBluetoothPrompt() }, onFinish: { nickname in
                     chrome.setNickname(nickname)
                     chrome.validateAndSaveNickname()
                     welcomed = true
                     runtime.welcomeFinished()
                 })
+                // An erase while the welcome is up rebuilds it too, so its typed nickname goes.
+                .id(viewModel.weshPanicGeneration)
             case .tabs:
-                if !panicFeedback.isEmpty {
+                if viewModel.panicNetworkFenced {
+                    // Also after a launch whose replayed erase failed again: say why nothing connects.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(WeshFeedbackCopy.eraseOutcome(false)).font(.subheadline)
+                        Button(PaveCopy.text("pave.action.retry")) { chrome.requestPanicWipe() }
+                            .frame(minHeight: 44)
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                } else if !panicFeedback.isEmpty {
                     Text(panicFeedback).font(.subheadline).padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityAddTraits(.updatesFrequently)

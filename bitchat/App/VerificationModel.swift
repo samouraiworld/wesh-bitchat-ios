@@ -45,7 +45,7 @@ final class VerificationModel: ObservableObject {
         let bridge = chatViewModel.idBridge
         guard let identity = WeshQRNpub.identityForMyQR(
             internetEnabled: WeshInternetSettings.isEnabled(),
-            panicFenced: chatViewModel.panicRecoveryBlocked,
+            panicFenced: !chatViewModel.networkActivationAllowed,
             storedIdentity: { try? bridge.storedNostrIdentity() }
         ) else {
             return VerificationService.shared.buildMyQRString(nickname: currentNickname, npub: nil) ?? ""

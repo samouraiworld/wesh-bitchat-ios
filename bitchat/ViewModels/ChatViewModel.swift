@@ -156,7 +156,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published private(set) var panicRecoveryBlocked = false
     @Published private(set) var startupRetirementBlocked = false
     @Published private(set) var weshPanicGeneration: UInt64 = 0
-    var networkActivationAllowed: Bool { !panicRecoveryBlocked }
+    /// An unconfirmed erase keeps Bluetooth and Internet off until a wipe is
+    /// confirmed, at the latest when the next launch replays it.
+    @Published private(set) var panicNetworkFenced = false
+    var networkActivationAllowed: Bool { !panicRecoveryBlocked && !panicNetworkFenced }
     @Published var nickname: String = "" {
         didSet {
             // Canonicalize whenever nickname is set: trim whitespace
@@ -821,8 +824,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             recoveryRequired = try self.panicRecoveryOperations.isPending()
         } catch {
             // Failure to read the latch cannot fail open. Re-run the complete
-            // transaction; a persistent storage failure leaves services
-            // blocked below.
+            // transaction; anything still unconfirmed stays pending for the
+            // next launch.
             recoveryRequired = true
             SecureLogger.error(
                 "Could not read panic-recovery state; retrying the full wipe before startup: \(error)",
@@ -1301,7 +1304,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         userDefaults.removeObject(forKey: "bitchat.messageRetentionKey")
 
         // Delete legacy geographic state without loading it or creating a
-        // location manager; any unconfirmed erase keeps recovery blocked.
+        // location manager; any unconfirmed erase keeps the intent pending.
         let geographyWipeCompleted = panicPersistentStoreWipes.geography()
 
         // Reset nickname to anonymous; the previous one must be gone from
@@ -1414,9 +1417,11 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // The wipe must finish before this security action returns. A detached
         // task could otherwise lose a race with a new capture or app exit and
         // leave pre-panic media behind.
-        let panicCompleted: Bool
+        var panicCompleted = false
+        var draftsWiped = false
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
+            draftsWiped = true
             panicCompleted = try panicRecoveryOperations.completeIfConfirmed(
                 existingStoreResults: [
                     networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
@@ -1433,13 +1438,16 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                 )
             }
         } catch {
-            panicCompleted = false
-            SecureLogger.error(
-                "Panic transaction did not commit; services remain stopped: \(error)",
-                category: .security
-            )
+            SecureLogger.error("Panic media or marker step failed: \(error)", category: .security)
         }
-        panicRecoveryBlocked = !panicCompleted
+        // Never a dead end: the app restarts fresh either way. An unconfirmed
+        // store keeps the durable intent, so the next launch erases again
+        // before anything starts; until then nothing goes on the network.
+        if !panicCompleted {
+            SecureLogger.error("Panic erase left pending until the next launch; network stays off", category: .security)
+        }
+        panicRecoveryBlocked = false
+        panicNetworkFenced = !panicCompleted
 
         // BCH-01-013: Clear iOS app switcher snapshots. Keep tests away from
         // the host user's real cache tree just as the default media wipe does.
@@ -1449,22 +1457,25 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
         #endif
 
-        guard panicCompleted else { return false }
-
         if let panicTransport = meshService as? PanicResettingTransport {
             // Startup recovery reopens admission but leaves actual service
             // start to the bootstrapper immediately after this method.
             panicTransport.completePanicReset(
-                restartServices: restartServices && restartMesh
+                restartServices: restartServices && restartMesh && panicCompleted
             )
         }
 
-        ComposerDraftStore.completePanic(
-            success: true, noiseKey: meshService.noiseStaticPublicKeyData()
-        )
-        weshMeetingNote.completePanic()
+        // A store whose wipe is unconfirmed stays closed so nothing old reloads.
+        if draftsWiped {
+            ComposerDraftStore.completePanic(
+                success: true, noiseKey: meshService.noiseStaticPublicKeyData()
+            )
+        }
+        if meetingNoteWipeCompleted {
+            weshMeetingNote.completePanic()
+        }
 
-        if restartServices {
+        if restartServices && panicCompleted {
             // All persistent state and media are gone. Bring each service back
             // only now, under the new identity — a panic-resetting transport
             // owns its own restart sequencing above.
@@ -1481,12 +1492,14 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         // In a duress scenario "did it work?" must not be a guess — the
         // natural response to uncertainty is to trigger the wipe again.
-        // The failure case surfaces separately via `panicRecoveryBlocked`.
-        addMeshOnlySystemMessage(
-            String(localized: "system.panic.completed", defaultValue: "all data wiped — new identity created", comment: "System message confirming a successful panic wipe")
-        )
+        // The caller reports an unconfirmed erase from the return value.
+        if panicCompleted {
+            addMeshOnlySystemMessage(
+                String(localized: "system.panic.completed", defaultValue: "all data wiped — new identity created", comment: "System message confirming a successful panic wipe")
+            )
+        }
 
-        return true
+        return panicCompleted
     }
 
     /// BCH-01-013: Clear iOS app switcher snapshots during panic mode

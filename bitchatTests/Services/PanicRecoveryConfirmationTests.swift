@@ -43,7 +43,7 @@ struct PanicRecoveryConfirmationTests {
     }
 
     @Test
-    func failedConfirmedEraseNeverBootstrapsOrStartsTheRuntime() {
+    func unconfirmedConfirmedEraseStillBootstrapsAndStartsTheRuntime() {
         let fixture = ActivationFixture()
         fixture.eraseSucceeds = false
 
@@ -51,10 +51,8 @@ struct PanicRecoveryConfirmationTests {
 
         #expect(fixture.eraseCalls == 1)
         #expect(fixture.reports == [false])
-        #expect(fixture.bootstrapCalls == 0)
-        #expect(fixture.runtimeStarts == 0)
-        #expect(!fixture.bootstrapConfigured)
-        #expect(!fixture.runtimeStarted)
+        #expect(fixture.bootstrapCalls == 1)
+        #expect(fixture.runtimeStarts == 1)
     }
 
     @Test

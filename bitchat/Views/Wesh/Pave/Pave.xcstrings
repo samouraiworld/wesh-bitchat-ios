@@ -1000,13 +1000,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Some data may remain here. Messaging stays paused."
+            "value" : "Some data may remain on this phone. Wesh erases everything again the next time it starts, before connecting. Until then, Bluetooth and Internet stay off."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Certaines données peuvent rester ici. Les échanges restent suspendus."
+            "value" : "Des données peuvent rester sur ce téléphone. Wesh efface tout à nouveau à son prochain lancement, avant de se connecter. D’ici là, Bluetooth et Internet restent coupés."
           }
         }
       }
@@ -1017,13 +1017,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Erasing did not finish"
+            "value" : "Erasing not finished"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L'effacement n'a pas abouti"
+            "value" : "Effacement à terminer"
           }
         }
       }
@@ -3653,13 +3653,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L’effacement local n’a pas abouti. Certaines données peuvent rester ici et les échanges restent suspendus."
+            "value" : "Effacement local à terminer : des données peuvent rester sur ce téléphone. Wesh efface tout à nouveau à son prochain lancement, avant de se connecter. D’ici là, Bluetooth et Internet restent coupés."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Local erasure did not finish. Some data may remain here and exchanges stay suspended."
+            "value" : "Local erasure not finished: some data may remain on this phone. Wesh erases everything again the next time it starts, before connecting. Until then, Bluetooth and Internet stay off."
           }
         }
       }
@@ -5313,23 +5313,6 @@
         }
       }
     },
-    "pave.wesh.erase.blockedBody" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Certaines données peuvent rester ici. Les échanges sont suspendus. Réessayer reprend l’effacement complet, sans restaurer l’ancienne identité."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Some data may remain here. Exchanges are suspended. Retrying resumes the full erasure without restoring the old identity."
-          }
-        }
-      }
-    },
     "pave.wesh.erase.confirmAction" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5360,40 +5343,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erase Wesh data on this phone?"
-          }
-        }
-      }
-    },
-    "pave.wesh.erase.incomplete" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effacement local inachevé"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local erasure incomplete"
-          }
-        }
-      }
-    },
-    "pave.wesh.erase.resume" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reprendre l’effacement local"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Resume local erasure"
           }
         }
       }
