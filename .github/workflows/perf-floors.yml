@@ -1,0 +1,47 @@
+name: Performance floors
+
+# Advisory order-of-magnitude regression gate. It is not a required check:
+# GitHub macOS runners vary by about 2.5x between runs, so a slow runner must
+# not block a merge. The nightly run on main keeps a regression visible.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: Performance floors (advisory)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Build tests
+        run: swift build --build-tests
+
+      # Benchmarks run serially on an otherwise idle runner for stable
+      # numbers; BITCHAT_PERF_LOG captures the PERF[...] lines for the gate.
+      - name: Run performance benchmarks (serial)
+        timeout-minutes: 6
+        env:
+          BITCHAT_PERF_LOG: ${{ github.workspace }}/perf-output.log
+        run: swift test --skip-build --quiet --filter PerformanceBaselineTests
+
+      # Floors sit at about half of the slowest CI run observed (see
+      # bitchatTests/Performance/perf-floors.json). Below a floor, the script
+      # re-measures and keeps each benchmark's best value, so noise clears on
+      # retry while a real algorithmic regression fails every attempt.
+      - name: Performance floor gate
+        timeout-minutes: 10
+        run: ./scripts/check-perf-floors.sh perf-output.log
