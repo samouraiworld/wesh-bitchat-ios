@@ -309,6 +309,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     private let panicRecoveryOperations: PanicRecoveryOperations
     private let panicNetworkLifecycle: PanicNetworkLifecycle
     private let nostrOutboundPanicBinding: NostrOutboundPanicBinding
+    private let panicComposerRepository: ComposerDraftRepository
     private let panicPersistentStoreWipes: PanicPersistentStoreWipes
     let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
@@ -730,6 +731,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         identityManager: SecureIdentityStateManagerProtocol,
         transport: Transport,
         nostrDependencies: NostrTransport.Dependencies? = nil,
+        panicComposerRepository: ComposerDraftRepository = ComposerDraftStore.repository,
         conversations: ConversationStore? = nil,
         peerIdentityStore: PeerIdentityStore? = nil,
         readReceiptsDefaults: UserDefaults? = nil,
@@ -762,6 +764,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
                           wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
         self.nostrOutboundPanicBinding = services.nostrOutboundPanicBinding
+        self.panicComposerRepository = panicComposerRepository
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
             ?? (TestEnvironment.isRunningTests
@@ -1260,28 +1263,119 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         return finishPanicApplicationErasure(prepared, restartServices: restartServices, restartMesh: restartMesh)
     }
 
-    /// Synchronous protective begin; only its authentic continuation enters the retained Task.
+    /// Synchronous protective begin; the old Bool adapter consumes the SAME operation.
     @MainActor
     func beginPanicClearAllDataAwaitingKnownOutboundTasks(restartServices: Bool = true, restartMesh: Bool = true) -> PanicEraseCommand.Erase? {
-        guard let attempt = claimPanicAttempt() else { return nil }
-        let prepared = preparePanicApplicationErasure()
-        return { [self] in
-            guard activePanicAttempt == attempt, !panicContinuationStarted else { return false }
-            panicContinuationStarted = true
-            defer { finishPanicAttempt(attempt) }
-            try Task.checkCancellation()
-            let known = try await awaitCapturedOriginalReturnedTaskBatch(prepared.binding, closeOutcome: prepared.closeOutcome)
-            try Task.checkCancellation()
-            guard known.permitsExistingOwnerCheck else { return false }
-            return finishPanicApplicationErasure(prepared, restartServices: restartServices, restartMesh: restartMesh)
+        guard let operation = beginPreparedPanicApplicationErasure(restartServices: restartServices, restartMesh: restartMesh) else { return nil }
+        return {
+            do {
+                let outcome = try await operation.run()
+                return operation.consume(outcome)
+            } catch PreparedPanicOperationError.refusedReplayOrStaleAttempt { return false }
         }
     }
 
-    private struct PreparedPanicApplicationErasure {
+    @MainActor
+    func beginPreparedPanicApplicationErasure(restartServices: Bool = true, restartMesh: Bool = true) -> PreparedPanicOperation? {
+        guard let attempt = claimPanicAttempt() else { return nil }
+        let prepared = preparePanicApplicationErasure(captureComposer: true)
+        return PreparedPanicOperation(viewModel: self, attempt: attempt, prepared: prepared,
+            restartServices: restartServices, restartMesh: restartMesh)
+    }
+
+    @MainActor
+    final class PreparedPanicOperation {
+        enum Stage: Equatable { case prepared, outbound, composer, finalized }
+        struct Outcome: Equatable {
+            let operationID: UUID
+            let attempt: UUID
+            let originalComposer: ComposerOriginalIOIdentity?
+            let outboundPermitted: Bool
+            let outboundEmpty: Bool
+            let composer: ComposerOriginalWaitOutcome?
+            let applicationErased: Bool
+        }
+        struct Inspection {
+            let stage: Stage
+            let finalized: Bool
+            let outcome: Outcome?
+        }
+        private let id = UUID()
+        private let viewModel: ChatViewModel
+        private let attempt: UUID
+        private let prepared: PreparedPanicApplicationErasure
+        private let restartServices: Bool
+        private let restartMesh: Bool
+        private var stage: Stage = .prepared
+        private var finalOutcome: Outcome?
+        private var consumed = false
+
+        fileprivate init(viewModel: ChatViewModel, attempt: UUID, prepared: PreparedPanicApplicationErasure,
+                         restartServices: Bool, restartMesh: Bool) {
+            self.viewModel = viewModel; self.attempt = attempt; self.prepared = prepared
+            self.restartServices = restartServices; self.restartMesh = restartMesh
+        }
+        func inspect() -> Inspection {
+            Inspection(stage: stage, finalized: stage == .finalized, outcome: finalOutcome)
+        }
+        func run() async throws -> Outcome {
+            guard stage == .prepared, finalOutcome == nil,
+                  viewModel.activePanicAttempt == attempt, !viewModel.panicContinuationStarted else {
+                throw PreparedPanicOperationError.refusedReplayOrStaleAttempt
+            }
+            viewModel.panicContinuationStarted = true
+            stage = .outbound
+            do {
+                try Task.checkCancellation()
+                let known = try await awaitCapturedOriginalReturnedTaskBatch(prepared.binding, closeOutcome: prepared.closeOutcome)
+                try Task.checkCancellation()
+                guard known.permitsExistingOwnerCheck else {
+                    return finalize(outboundPermitted: false, composer: nil, applicationErased: false)
+                }
+                // BASELINE: this production-used MainActor segment has NO suspension.
+                // The only deliberately omitted action is awaiting original Composer IO.
+                stage = .composer
+                guard let close = prepared.composer else {
+                    return finalize(outboundPermitted: true, outboundEmpty: known.empty != nil, composer: nil, applicationErased: false)
+                }
+                let requested = viewModel.panicComposerRepository.requestedOriginalIO(close)
+                let completed: Bool
+                if case .requestedNotAwaited = requested {
+                    completed = viewModel.finishPanicApplicationErasure(prepared,
+                        restartServices: restartServices, restartMesh: restartMesh)
+                } else { completed = false }
+                return finalize(outboundPermitted: true, outboundEmpty: known.empty != nil, composer: requested, applicationErased: completed)
+            } catch {
+                _ = finalize(outboundPermitted: false, composer: nil, applicationErased: false)
+                throw error
+            }
+        }
+        private func finalize(outboundPermitted: Bool, outboundEmpty: Bool = false, composer: ComposerOriginalWaitOutcome?, applicationErased: Bool) -> Outcome {
+            let identity: ComposerOriginalIOIdentity?
+            if let result = prepared.composer, case .captured(let close) = result { identity = close.identity }
+            else { identity = nil }
+            let outcome = Outcome(operationID: id, attempt: attempt, originalComposer: identity,
+                outboundPermitted: outboundPermitted, outboundEmpty: outboundEmpty, composer: composer, applicationErased: applicationErased)
+            viewModel.finishPanicAttempt(attempt)
+            finalOutcome = outcome
+            stage = .finalized
+            return outcome
+        }
+        fileprivate func consume(_ outcome: Outcome) -> Bool {
+            guard !consumed, stage == .finalized, finalOutcome == outcome,
+                  outcome.operationID == id, outcome.attempt == attempt else { return false }
+            consumed = true
+            return outcome.applicationErased
+        }
+    }
+    enum PreparedPanicOperationError: Error { case refusedReplayOrStaleAttempt }
+
+    fileprivate struct PreparedPanicApplicationErasure {
         let binding: NostrOutboundPanicBinding
         let closeOutcome: NostrOutboundOwner.RootCloseOutcome
         let recoveryIntent: PanicRecoveryIntent
         let networkWipeCompleted: Bool
+        let composer: ComposerOriginalCloseResult?
     }
     private var activePanicAttempt: UUID?
     private var panicContinuationStarted = false
@@ -1304,7 +1398,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     }
 
     @MainActor
-    private func preparePanicApplicationErasure() -> PreparedPanicApplicationErasure {
+    private func preparePanicApplicationErasure(captureComposer: Bool = false) -> PreparedPanicApplicationErasure {
         startupRetirementBlocked = false
         panicRecoveryBlocked = true
         let originalBinding = nostrOutboundPanicBinding
@@ -1324,9 +1418,16 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // `wipeMedia` will still attempt deletion if neither write succeeds.
         let recoveryIntent = panicRecoveryOperations.begin()
 
-        // Fence UI/load callbacks and drain old draft IO before deleting keys.
-        // The utility queue never synchronously waits on Main.
-        ComposerDraftStore.suspendForPanic()
+        // Fence UI/load callbacks synchronously. Legacy mode keeps its existing
+        // barrier; async mode captures the original queue frontier now.
+        let composer: ComposerOriginalCloseResult?
+        if captureComposer {
+            let original = panicComposerRepository.captureOriginalIOBinding()
+            composer = panicComposerRepository.closeOriginalIO(original)
+        } else {
+            ComposerDraftStore.suspendForPanic()
+            composer = nil
+        }
 
         // Quiesce the mesh before clearing stores. Identity replacement below
         // deliberately stays stopped until media deletion and marker commit.
@@ -1349,7 +1450,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         nostrRelayManager = nil
 
         return PreparedPanicApplicationErasure(binding: originalBinding, closeOutcome: closeOutcome,
-            recoveryIntent: recoveryIntent, networkWipeCompleted: networkWipeCompleted)
+            recoveryIntent: recoveryIntent, networkWipeCompleted: networkWipeCompleted, composer: composer)
     }
 
     @MainActor

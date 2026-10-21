@@ -89,6 +89,70 @@ enum ComposerDraftStore {
     static func countForTesting() -> Int { repository.count }
 }
 
+/// Scalar evidence never restores authority to an original repository or epoch.
+struct ComposerOriginalIOIdentity: Equatable, Sendable {
+    let repository: UUID
+    let epoch: UUID
+    let close: UUID
+}
+
+enum ComposerOriginalIOGap: Equatable, Sendable {
+    case foreignRepository, changedEpoch, configurationOrLegacyOverlap, originalQueueCaller
+}
+
+enum ComposerOriginalWaitOutcome: Equatable, Sendable {
+    case requestedNotAwaited(ComposerOriginalIOIdentity)
+    case ordinaryDraftSubmissionsReturned(ComposerOriginalIOIdentity, itemIDs: [UUID])
+    case unconfirmed(ComposerOriginalIOGap)
+}
+
+struct ComposerOriginalIOBinding: @unchecked Sendable {
+    fileprivate let repository: ComposerDraftRepository
+    fileprivate let epoch: UUID
+}
+
+struct ComposerOriginalIOClose: @unchecked Sendable {
+    fileprivate let repository: ComposerDraftRepository
+    fileprivate let state: ComposerOriginalCloseState
+    fileprivate let externalCaller: Bool
+    var identity: ComposerOriginalIOIdentity { state.identity }
+}
+
+enum ComposerOriginalCloseResult: @unchecked Sendable {
+    case captured(ComposerOriginalIOClose)
+    case unconfirmed(ComposerOriginalIOGap)
+}
+
+fileprivate final class ComposerOriginalItem {
+    let id = UUID()
+    var work: DispatchWorkItem?
+}
+
+fileprivate final class ComposerOriginalWaiter: @unchecked Sendable {
+    let id = UUID()
+    var continuation: CheckedContinuation<ComposerOriginalWaitOutcome, Error>?
+    var cancelled = false
+    var resolved = false
+}
+
+fileprivate final class ComposerOriginalCloseState: @unchecked Sendable {
+    let identity: ComposerOriginalIOIdentity
+    let controlVersion: UInt64
+    let admittedWithoutControlOverlap: Bool
+    let itemIDs: [UUID]
+    var pending: Set<UUID>
+    var invalidationOffered = false
+    var invalidationReturned = false
+    var waiters: [UUID: ComposerOriginalWaiter] = [:]
+    init(identity: ComposerOriginalIOIdentity, controlVersion: UInt64, admittedWithoutControlOverlap: Bool, itemIDs: [UUID]) {
+        self.identity = identity
+        self.controlVersion = controlVersion
+        self.admittedWithoutControlOverlap = admittedWithoutControlOverlap
+        self.itemIDs = itemIDs
+        self.pending = Set(itemIDs)
+    }
+}
+
 /// RAM access never performs IO. A serial utility queue owns the encrypted
 /// backend. IO only sends asynchronous Main notifications and never waits Main.
 /// Mutable RAM state is protected by lock; backend IO is confined to ioQueue.
@@ -134,6 +198,184 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     private var suspended = false
     private var state: ComposerDraftStatus = .sessionOnly
     private var scheduled: DispatchWorkItem?
+
+    private let originalRepositoryID = UUID()
+    private var originalEpoch = UUID()
+    private var originalItems: [UUID: ComposerOriginalItem] = [:]
+    private var originalClose: ComposerOriginalCloseState?
+    private var controlVersion: UInt64 = 0
+    private var controlAdmissions = 0
+
+    func captureOriginalIOBinding() -> ComposerOriginalIOBinding {
+        locked { ComposerOriginalIOBinding(repository: self, epoch: originalEpoch) }
+    }
+
+    /// This fence never waits for the utility queue or invokes a provider.
+    func closeOriginalIO(_ binding: ComposerOriginalIOBinding) -> ComposerOriginalCloseResult {
+        guard binding.repository === self else { return .unconfirmed(.foreignRepository) }
+        let externalCaller = DispatchQueue.getSpecific(key: ioSpecific) == nil
+        var cancelled: DispatchWorkItem?
+        let result: ComposerOriginalCloseResult = locked {
+            guard binding.epoch == originalEpoch else { return .unconfirmed(.changedEpoch) }
+            if let originalClose {
+                return .captured(ComposerOriginalIOClose(repository: self, state: originalClose, externalCaller: externalCaller))
+            }
+            // The old synchronous protective prefix is preserved here; only its
+            // queue wait moves into the authentic external continuation.
+            generation &+= 1; suspended = true; loaded = false
+            entries.removeAll(); pending.removeAll()
+            cancelled = scheduled
+            owner = nil; boundOwner = nil; state = .suspended; notify(reset: true)
+            let identity = ComposerOriginalIOIdentity(repository: originalRepositoryID, epoch: originalEpoch, close: UUID())
+            let close = ComposerOriginalCloseState(identity: identity, controlVersion: controlVersion,
+                admittedWithoutControlOverlap: controlAdmissions == 0, itemIDs: originalItems.keys.sorted { $0.uuidString < $1.uuidString })
+            originalClose = close
+            return .captured(ComposerOriginalIOClose(repository: self, state: close, externalCaller: externalCaller))
+        }
+        cancelled?.cancel()
+        progressOriginalClose()
+        return result
+    }
+
+    /// A request is evidence of preparation only, including when items are held.
+    func requestedOriginalIO(_ result: ComposerOriginalCloseResult) -> ComposerOriginalWaitOutcome {
+        switch result {
+        case .unconfirmed(let gap): return .unconfirmed(gap)
+        case .captured(let close):
+            return locked {
+                if let gap = originalGapLocked(close) { return .unconfirmed(gap) }
+                return .requestedNotAwaited(close.identity)
+            }
+        }
+    }
+
+    func awaitOriginalIO(_ close: ComposerOriginalIOClose) async throws -> ComposerOriginalWaitOutcome {
+        let waiter = ComposerOriginalWaiter()
+        let outcome = try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { continuation in
+                var resolution: Result<ComposerOriginalWaitOutcome, Error>?
+                locked {
+                    if waiter.cancelled { resolution = .failure(CancellationError()) }
+                    else if let gap = originalGapLocked(close) { resolution = .success(.unconfirmed(gap)) }
+                    else if close.state.invalidationReturned {
+                        resolution = .success(.ordinaryDraftSubmissionsReturned(close.identity, itemIDs: close.state.itemIDs))
+                    } else {
+                        waiter.continuation = continuation
+                        close.state.waiters[waiter.id] = waiter
+                    }
+                    if resolution != nil { waiter.resolved = true }
+                }
+                if let resolution { continuation.resume(with: resolution) }
+            }
+        }, onCancel: {
+            var continuation: CheckedContinuation<ComposerOriginalWaitOutcome, Error>?
+            self.locked {
+                guard !waiter.resolved else { return }
+                waiter.cancelled = true
+                if let installed = waiter.continuation {
+                    continuation = installed
+                    waiter.continuation = nil
+                    waiter.resolved = true
+                    close.state.waiters.removeValue(forKey: waiter.id)
+                }
+            }
+            continuation?.resume(throwing: CancellationError())
+        })
+        try Task.checkCancellation()
+        return locked {
+            if let gap = originalGapLocked(close) { return .unconfirmed(gap) }
+            return outcome
+        }
+    }
+
+    private func originalGapLocked(_ close: ComposerOriginalIOClose) -> ComposerOriginalIOGap? {
+        guard close.repository === self else { return .foreignRepository }
+        guard close.state.identity.epoch == originalEpoch, originalClose === close.state else { return .changedEpoch }
+        guard close.externalCaller else { return .originalQueueCaller }
+        guard close.state.admittedWithoutControlOverlap, controlAdmissions == 0,
+              close.state.controlVersion == controlVersion else { return .configurationOrLegacyOverlap }
+        return nil
+    }
+
+    // Called only under RAM, before an escaping body captures its token.
+    private func reserveOriginalItemLocked() -> ComposerOriginalItem {
+        let item = ComposerOriginalItem()
+        originalItems[item.id] = item
+        return item
+    }
+
+    private func offerOriginalItemLocked(_ item: ComposerOriginalItem, after delay: TimeInterval? = nil,
+                                         body: @escaping () -> Void) -> DispatchWorkItem {
+        let work = DispatchWorkItem(block: body)
+        item.work = work
+        let itemID = item.id
+        work.notify(queue: ioQueue) { [self] in originalItemReturned(itemID) }
+        if let delay { ioQueue.asyncAfter(deadline: .now() + delay, execute: work) }
+        else { ioQueue.async(execute: work) }
+        return work
+    }
+
+    private func originalItemReturned(_ id: UUID) {
+        // Detach the original item under RAM; release its actual handle after it.
+        let returned = locked { () -> ComposerOriginalItem? in
+            originalClose?.pending.remove(id)
+            let item = originalItems.removeValue(forKey: id)
+            if let work = item?.work, scheduled === work { scheduled = nil }
+            return item
+        }
+        withExtendedLifetime(returned) {}
+        progressOriginalClose()
+    }
+
+    private func progressOriginalClose() {
+        var resolutions: [(CheckedContinuation<ComposerOriginalWaitOutcome, Error>, ComposerOriginalWaitOutcome)] = []
+        locked {
+            guard let close = originalClose else { return }
+            let capability = ComposerOriginalIOClose(repository: self, state: close, externalCaller: true)
+            let outcome: ComposerOriginalWaitOutcome?
+            if let gap = originalGapLocked(capability) { outcome = .unconfirmed(gap) }
+            else if close.invalidationReturned {
+                outcome = .ordinaryDraftSubmissionsReturned(close.identity, itemIDs: close.itemIDs)
+            } else {
+                outcome = nil
+                if close.pending.isEmpty, !close.invalidationOffered {
+                    close.invalidationOffered = true
+                    let capturedBackend = backend
+                    let work = DispatchWorkItem { capturedBackend?.invalidate() }
+                    // Retain this one actual submission exactly like ordinary work.
+                    let item = reserveOriginalItemLocked()
+                    item.work = work
+                    let itemID = item.id
+                    work.notify(queue: ioQueue) { [self] in
+                        locked { close.invalidationReturned = true }
+                        originalItemReturned(itemID)
+                    }
+                    ioQueue.async(execute: work)
+                }
+            }
+            if let outcome {
+                for waiter in close.waiters.values {
+                    if let continuation = waiter.continuation {
+                        resolutions.append((continuation, outcome))
+                        waiter.continuation = nil
+                        waiter.resolved = true
+                    }
+                }
+                close.waiters.removeAll()
+            }
+        }
+        for (continuation, outcome) in resolutions { continuation.resume(returning: outcome) }
+    }
+
+    // Control admission precedes the whole existing RAM prefix/provider call.
+    private func beginControl() {
+        locked { controlAdmissions += 1; controlVersion &+= 1 }
+        progressOriginalClose()
+    }
+    private func endControl() {
+        locked { controlAdmissions -= 1 }
+        progressOriginalClose()
+    }
 
     init(persistence: ComposerDraftPersistence? = nil, owner: Data? = nil, debounce: TimeInterval = 0.3) {
         self.backend = persistence
@@ -273,19 +515,32 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     }
     func configureLive(keychain: KeychainManagerProtocol, owner: Data?) {
         guard !TestEnvironment.isRunningTests else { return }
-        locked {
-            guard !suspended else { return }
-            if backend == nil, let url = ComposerDraftPersistence.defaultFileURL() {
-                backend = ComposerDraftPersistence(keychain: keychain, fileURL: url)
+        beginControl()
+        defer { endControl() }
+        let admission = locked { () -> UUID? in
+            guard !suspended, backend == nil else { return nil }
+            return originalEpoch
+        }
+        if let admission {
+            let candidate = ComposerDraftPersistence.defaultFileURL().map {
+                ComposerDraftPersistence(keychain: keychain, fileURL: $0)
+            }
+            locked {
+                guard !suspended, originalEpoch == admission, backend == nil else { return }
+                guard let candidate else { return }
+                backend = candidate
                 for entry in entries.values where entry.key.isPersistentDestination {
                     pending[entry.key.storageString] = Mutation(entry: entry, revision: entry.revision)
                 }
             }
+            withExtendedLifetime(candidate) {}
         }
         setOwner(owner)
     }
     /// Explicitly injected owners are useful to tests without accessing live storage.
     func setOwner(_ newOwner: Data?) {
+        beginControl()
+        defer { endControl() }
         locked {
             guard !suspended else { return }
             if let boundOwner, let newOwner, boundOwner != newOwner {
@@ -302,69 +557,74 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
         retry()
     }
     func retry(completion: (@MainActor () -> Void)? = nil) {
-        let token: (ComposerDraftPersistence, Data, UInt64)? = locked {
-            guard !suspended, let backend, let owner else { return nil }
+        let offered = locked { () -> Bool in
+            guard !suspended, let backend, let owner else { return false }
+            let item = reserveOriginalItemLocked()
             loaded = false; state = .loading; notify()
-            return (backend, owner, generation)
-        }
-        guard let token else {
-            if let completion { Task { @MainActor in completion() } }
-            return
-        }
-        ioQueue.async { [weak self] in
-            guard let self, self.isCurrent(token.2, owner: token.1) else { return }
-            do {
-                let records = try token.0.load(owner: token.1)
-                self.locked {
-                    guard self.isCurrentLocked(token.2, owner: token.1) else { return }
-                    // Only edits/tombstones made locally override the validated baseline.
-                    var candidate = self.entries.filter { !$0.value.key.isPersistentDestination }
-                    var restored: [ComposerDraftStore.Key: UInt64] = [:]
-                    for record in records {
-                        self.revision &+= 1
-                        candidate[record.key.storageString] = Entry(key: record.key, text: record.text,
-                            updatedAt: record.updatedAt, revision: self.revision, unsupported: false)
-                        if self.pending[record.key.storageString] == nil { restored[record.key] = self.revision }
+            let token = (backend, owner, generation)
+            _ = offerOriginalItemLocked(item) { [weak self] in
+                guard let self, self.isCurrent(token.2, owner: token.1) else { return }
+                do {
+                    let records = try token.0.load(owner: token.1)
+                    self.locked {
+                        guard self.isCurrentLocked(token.2, owner: token.1) else { return }
+                        // Only edits/tombstones made locally override the validated baseline.
+                        var candidate = self.entries.filter { !$0.value.key.isPersistentDestination }
+                        var restored: [ComposerDraftStore.Key: UInt64] = [:]
+                        for record in records {
+                            self.revision &+= 1
+                            candidate[record.key.storageString] = Entry(key: record.key, text: record.text,
+                                updatedAt: record.updatedAt, revision: self.revision, unsupported: false)
+                            if self.pending[record.key.storageString] == nil { restored[record.key] = self.revision }
+                        }
+                        for (key, mutation) in self.pending { candidate[key] = mutation.entry }
+                        // Capacity conflicts preserve the durable baseline and all
+                        // pending intents. Never drop a tombstone to make space.
+                        guard candidate.values.filter({ $0.key.isPersistentDestination }).count <= ComposerDraftStore.maxDraftCount else {
+                            self.loaded = false; self.state = .unavailable(.capacityReached); self.notify(); return
+                        }
+                        self.entries = candidate
+                        self.loaded = true
+                        self.state = self.pending.isEmpty ? .durable : .dirty
+                        restored = restored.filter { self.entries[$0.key.storageString]?.revision == $0.value }
+                        self.notify(keys: Set(restored.keys), restoredRevisions: restored)
                     }
-                    for (key, mutation) in self.pending { candidate[key] = mutation.entry }
-                    // Capacity conflicts preserve the durable baseline and all
-                    // pending intents. Never drop a tombstone to make space.
-                    guard candidate.values.filter({ $0.key.isPersistentDestination }).count <= ComposerDraftStore.maxDraftCount else {
-                        self.loaded = false; self.state = .unavailable(.capacityReached); self.notify(); return
-                    }
-                    self.entries = candidate
-                    self.loaded = true
-                    self.state = self.pending.isEmpty ? .durable : .dirty
-                    restored = restored.filter { self.entries[$0.key.storageString]?.revision == $0.value }
-                    self.notify(keys: Set(restored.keys), restoredRevisions: restored)
-                }
-                self.persistOnQueue(generation: token.2, owner: token.1)
-            } catch { self.fail(error, generation: token.2, owner: token.1) }
-            if let completion { Task { @MainActor in completion() } }
+                    self.persistOnQueue(generation: token.2, owner: token.1)
+                } catch { self.fail(error, generation: token.2, owner: token.1) }
+                if let completion { Task { @MainActor in completion() } }
+            }
+            return true
         }
+        if !offered, let completion { Task { @MainActor in completion() } }
     }
     private func scheduleSave() {
+        var previous: DispatchWorkItem?
         locked {
-            scheduled?.cancel()
+            previous = scheduled
+            previous?.cancel()
             guard backend != nil, loaded, !suspended, let owner else { return }
+            let item = reserveOriginalItemLocked()
             let token = generation
-            let work = DispatchWorkItem { [weak self] in self?.persistOnQueue(generation: token, owner: owner) }
-            scheduled = work
-            ioQueue.asyncAfter(deadline: .now() + debounce, execute: work)
+            scheduled = offerOriginalItemLocked(item, after: debounce) { [weak self] in
+                self?.persistOnQueue(generation: token, owner: owner)
+            }
         }
+        withExtendedLifetime(previous) {}
     }
     /// Queue a best-effort flush; it never claims a still-pending keystroke is durable.
     func flush(completion: (@MainActor () -> Void)? = nil) {
-        let token = locked { () -> (UInt64, Data)? in
+        let offered = locked { () -> Bool in
             scheduled?.cancel()
-            guard loaded, !suspended, let owner else { return nil }
-            return (generation, owner)
+            guard loaded, !suspended, let owner else { return false }
+            let item = reserveOriginalItemLocked()
+            let token = generation
+            _ = offerOriginalItemLocked(item) { [weak self] in
+                self?.persistOnQueue(generation: token, owner: owner)
+                if let completion { Task { @MainActor in completion() } }
+            }
+            return true
         }
-        guard let token else { retry(completion: completion); return }
-        ioQueue.async { [weak self] in
-            self?.persistOnQueue(generation: token.0, owner: token.1)
-            if let completion { Task { @MainActor in completion() } }
-        }
+        if !offered { retry(completion: completion) }
     }
     private func persistOnQueue(generation token: UInt64, owner: Data) {
         let snapshot: (ComposerDraftPersistence, [ComposerDraftRecord], UInt64)? = locked {
@@ -403,6 +663,8 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
         !suspended && self.generation == generation && self.owner == owner
     }
     func resetMemory() {
+        beginControl()
+        defer { endControl() }
         locked {
             generation &+= 1; entries.removeAll(); pending.removeAll(); scheduled?.cancel()
             loaded = false; state = suspended ? .suspended : .sessionOnly
@@ -412,6 +674,8 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     /// Main may wait at this security barrier. Actual IO remains on the utility
     /// queue; that queue never synchronously waits on Main or a UI callback.
     func suspendForPanic() {
+        beginControl()
+        defer { endControl() }
         locked {
             generation &+= 1; suspended = true; loaded = false
             entries.removeAll(); pending.removeAll(); scheduled?.cancel()
@@ -420,6 +684,8 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
         onIO { locked { backend }?.invalidate() }
     }
     func wipeForPanic(defaultFileURL: URL? = nil) throws {
+        beginControl()
+        defer { endControl() }
         try onIO {
             if let backend = locked({ backend }) { try backend.wipeFile() }
             else if let defaultFileURL {
@@ -441,8 +707,12 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
         }
     }
     func completePanic(success: Bool, owner: Data?) {
+        beginControl()
+        defer { endControl() }
         locked {
             guard success else { return }
+            originalEpoch = UUID()
+            originalClose = nil
             suspended = false; self.owner = owner; boundOwner = owner
             loaded = false; state = backend == nil ? .sessionOnly : .loading; notify()
         }
@@ -454,10 +724,15 @@ final class ComposerDraftRepository: ObservableObject, @unchecked Sendable {
     }
     @discardableResult
     func replaceForTesting(_ newEntries: [String: String]) -> [String: String] {
-        locked {
+        beginControl()
+        defer { endControl() }
+        return locked {
             let previous = entries.mapValues(\.text)
             generation &+= 1; scheduled?.cancel(); entries.removeAll(); pending.removeAll()
-            if backend == nil { suspended = false; owner = nil; boundOwner = nil }
+            if backend == nil {
+                originalEpoch = UUID(); originalClose = nil
+                suspended = false; owner = nil; boundOwner = nil
+            }
             for (key, text) in newEntries {
                 let decoded: ComposerDraftStore.Key
                 if key == "mesh" { decoded = .mesh }
