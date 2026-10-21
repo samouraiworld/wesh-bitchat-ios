@@ -48,6 +48,13 @@ struct StartupCleanupRetryTests {
         let (viewModel, _) = makeBlockedViewModel(fixture)
         #expect(viewModel.startupRetirementBlocked && !viewModel.networkActivationAllowed)
 
+        // Still locked: the retry fails again and nothing opens.
+        for name in ChatViewModel.startupCleanupRetryNotifications {
+            NotificationCenter.default.post(name: name, object: nil)
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(viewModel.startupRetirementBlocked && !viewModel.networkActivationAllowed)
+
         fixture.locked = false
         for name in ChatViewModel.startupCleanupRetryNotifications {
             NotificationCenter.default.post(name: name, object: nil)
