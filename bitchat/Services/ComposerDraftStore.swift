@@ -94,6 +94,9 @@ struct ComposerOriginalIOIdentity: Equatable, Sendable {
     let repository: UUID
     let epoch: UUID
     let close: UUID
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.repository == rhs.repository && lhs.epoch == rhs.epoch && lhs.close == rhs.close
+    }
 }
 
 enum ComposerOriginalIOGap: Equatable, Sendable {
@@ -123,19 +126,19 @@ enum ComposerOriginalCloseResult: @unchecked Sendable {
     case unconfirmed(ComposerOriginalIOGap)
 }
 
-fileprivate final class ComposerOriginalItem {
+private final class ComposerOriginalItem {
     let id = UUID()
     var work: DispatchWorkItem?
 }
 
-fileprivate final class ComposerOriginalWaiter: @unchecked Sendable {
+private final class ComposerOriginalWaiter: @unchecked Sendable {
     let id = UUID()
     var continuation: CheckedContinuation<ComposerOriginalWaitOutcome, Error>?
     var cancelled = false
     var resolved = false
 }
 
-fileprivate final class ComposerOriginalCloseState: @unchecked Sendable {
+private final class ComposerOriginalCloseState: @unchecked Sendable {
     let identity: ComposerOriginalIOIdentity
     let controlVersion: UInt64
     let admittedWithoutControlOverlap: Bool

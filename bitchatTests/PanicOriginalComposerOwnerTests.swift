@@ -4,9 +4,13 @@ import Testing
 @testable import bitchat
 
 private enum ComposerFixtureFailure: Error { case readiness, missingOriginalClose, unexpectedNostrWork }
-private struct ComposerFixtureCleanupFailure: Error {
+private struct ComposerFixtureCleanupFailure: Error, CustomStringConvertible {
     let primary: Error
     let secondary: [Error]
+    var description: String {
+        let later = secondary.map { String(describing: $0) }.joined(separator: "; ")
+        return "primary: \(primary); independent cleanup failures: \(later)"
+    }
 }
 
 /// Blocks only the actual repository's utility-queue FileAccess call, never Main.
@@ -333,7 +337,14 @@ struct PanicOriginalComposerOwnerTests {
     @Test func cancelledDebounceRequiresItsActualCompletion() async throws {
         try await withComposerOwnerFixture { fixture in
             let files = ComposerFileControl(); let repository = fixture.repository(files)
-            try await fixture.waitUntil { repository.persistenceStatus == .durable }
+            // This existing callback follows both serial load-body persist calls,
+            // but does not claim their original completion-notify rows retired.
+            var initialRetryCompleted = false
+            repository.retry { initialRetryCompleted = true }
+            try await fixture.waitUntil { initialRetryCompleted }
+            try #require(repository.persistenceStatus == .durable)
+            let preparedCounts = files.counts()
+            try #require(preparedCounts.reads == 2 && preparedCounts.writes == 0)
             let gate = fixture.gate(); files.armWrite(gate)
             try #require(repository.save("one-shot naturally delayed edit", for: .mesh))
             // Positive actual FileAccess entry, not elapsed-time readiness.
@@ -342,13 +353,14 @@ struct PanicOriginalComposerOwnerTests {
             var returned: ComposerOriginalWaitOutcome?
             fixture.task { returned = try await repository.awaitOriginalIO(close) }
             // Close cancels this SAME already-running delayed item. No flush,
-            // competing offer, started/nil oracle or per-notify-return claim.
+            // competing write, started/nil oracle or per-notify-return claim.
             return {
                 guard case .some(.ordinaryDraftSubmissionsReturned(let identity, let ids)) = returned else {
                     throw ComposerFixtureFailure.missingOriginalClose
                 }
-                // An extra retained row invalidates this positive's setup.
-                try #require(identity == close.identity && ids.count == 1)
+                // Preserve every genuine selected ordinary ID, including any
+                // initial-load notification rows that had not yet retired.
+                try #require(identity == close.identity && !ids.isEmpty && Set(ids).count == ids.count)
             }
         }
     }
