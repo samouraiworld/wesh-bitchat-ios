@@ -342,6 +342,8 @@ struct WeshRootView: View {
                     welcomed = true
                     runtime.welcomeFinished()
                 })
+                // An erase while the welcome is up rebuilds it too, so its typed nickname goes.
+                .id(viewModel.weshPanicGeneration)
             case .tabs:
                 if viewModel.panicNetworkFenced {
                     // Also after a launch whose replayed erase failed again: say why nothing connects.
