@@ -176,14 +176,14 @@ struct WeshQRNpubTests {
         #expect(roundTrip.npub == fixtureNpub && roundTrip.isNpubProven)
     }
 
-    @Test func myQRCarriesAnNpubOnlyWhileInternetIsOnAndUnfenced() throws {
+    @Test func myQRAlwaysCarriesMyNpubUnlessAnEraseIsUnconfirmed() throws {
         let stored = try NostrIdentity.generate()
         var reads = 0
         let read: () -> NostrIdentity? = { reads += 1; return stored }
-        #expect(WeshQRNpub.identityForMyQR(internetEnabled: false, panicFenced: false, storedIdentity: read) == nil)
-        #expect(WeshQRNpub.identityForMyQR(internetEnabled: true, panicFenced: true, storedIdentity: read) == nil)
+        #expect(WeshQRNpub.identityForMyQR(panicFenced: true, storedIdentity: read) == nil)
         #expect(reads == 0)
-        #expect(WeshQRNpub.identityForMyQR(internetEnabled: true, panicFenced: false, storedIdentity: read)?.npub == stored.npub)
-        #expect(WeshQRNpub.identityForMyQR(internetEnabled: true, panicFenced: false, storedIdentity: { nil }) == nil)
+        // Internet on or off makes no difference: the key is only shown, never used on the network.
+        #expect(WeshQRNpub.identityForMyQR(panicFenced: false, storedIdentity: read)?.npub == stored.npub)
+        #expect(WeshQRNpub.identityForMyQR(panicFenced: false, storedIdentity: { nil }) == nil)
     }
 }
