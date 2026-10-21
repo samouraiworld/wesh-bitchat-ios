@@ -49,7 +49,7 @@ struct WeshPresentationLocalizationTests {
         #expect(WeshFeedbackCopy.eraseOutcome(true, bundle: bundle, locale: locale)
             == "Local erasure confirmed. Verify your contacts again before any private exchange.")
         #expect(WeshFeedbackCopy.eraseOutcome(false, bundle: bundle, locale: locale)
-            == "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting.")
+            == "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting. Until then, it stays offline.")
         let warning = WeshFeedbackCopy.eraseWarning(bundle: bundle, locale: locale)
         #expect(warning.contains("other people") && warning.contains("backups"))
         #expect(warning.contains("does not guarantee physical erasure"))
@@ -76,7 +76,7 @@ struct WeshPresentationLocalizationTests {
         #expect(WeshContactStorageNotice(identityAvailable: true, identityRequiresRecovery: false,
                                         contactsState: .available, bundle: bundle, locale: locale) == nil)
         #expect(WeshFeedbackCopy.eraseOutcome(false, bundle: bundle, locale: locale)
-            == "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter.")
+            == "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter. D’ici là, il reste hors ligne.")
         #expect(WeshFeedbackCopy.composerTooLong(bundle: bundle, locale: locale)
             == "Message trop long. Raccourcissez-le pour l’envoyer. Votre brouillon est conservé.")
     }

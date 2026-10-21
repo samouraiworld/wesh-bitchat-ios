@@ -201,14 +201,15 @@ struct WeshNativeUITests {
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
         #expect(attempts == ["geography", "courier", "bridge", "archive", "sightings", "groups", "prekeys", "board", "share"])
-        #expect(committed == 0 && !vm.panicRecoveryBlocked)
-        #expect(transport.startServicesCallCount == starts + 1)
+        // Back to a fresh start, but the radio stays off until a wipe is confirmed.
+        #expect(committed == 0 && !vm.panicRecoveryBlocked && !vm.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == starts)
         failed = false
         files.refuseRemoval = false
         attempts.removeAll()
         #expect(vm.panicClearAllData())
-        #expect(committed == 1 && !vm.panicRecoveryBlocked)
-        #expect(transport.startServicesCallCount == starts + 2)
+        #expect(committed == 1 && !vm.panicRecoveryBlocked && vm.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == starts + 1)
         #expect(attempts.count == 9)
     }
 

@@ -156,7 +156,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published private(set) var panicRecoveryBlocked = false
     @Published private(set) var startupRetirementBlocked = false
     @Published private(set) var weshPanicGeneration: UInt64 = 0
-    var networkActivationAllowed: Bool { !panicRecoveryBlocked }
+    /// An unconfirmed erase keeps Bluetooth and Internet off until a wipe is
+    /// confirmed, at the latest when the next launch replays it.
+    private var panicNetworkFenced = false
+    var networkActivationAllowed: Bool { !panicRecoveryBlocked && !panicNetworkFenced }
     @Published var nickname: String = "" {
         didSet {
             // Canonicalize whenever nickname is set: trim whitespace
@@ -1439,11 +1442,12 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
         // Never a dead end: the app restarts fresh either way. An unconfirmed
         // store keeps the durable intent, so the next launch erases again
-        // before anything starts.
+        // before anything starts; until then nothing goes on the network.
         if !panicCompleted {
-            SecureLogger.error("Panic erase left pending until the next launch", category: .security)
+            SecureLogger.error("Panic erase left pending until the next launch; network stays off", category: .security)
         }
         panicRecoveryBlocked = false
+        panicNetworkFenced = !panicCompleted
 
         // BCH-01-013: Clear iOS app switcher snapshots. Keep tests away from
         // the host user's real cache tree just as the default media wipe does.
@@ -1457,7 +1461,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             // Startup recovery reopens admission but leaves actual service
             // start to the bootstrapper immediately after this method.
             panicTransport.completePanicReset(
-                restartServices: restartServices && restartMesh
+                restartServices: restartServices && restartMesh && panicCompleted
             )
         }
 
@@ -1471,9 +1475,9 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             weshMeetingNote.completePanic()
         }
 
-        if restartServices {
-            // Persistent state and media are erased (or pending for the next
-            // launch). Bring each service back only now, under the new identity — a panic-resetting transport
+        if restartServices && panicCompleted {
+            // All persistent state and media are gone. Bring each service back
+            // only now, under the new identity — a panic-resetting transport
             // owns its own restart sequencing above.
             if !(meshService is PanicResettingTransport) && restartMesh {
                 meshService.startServices()

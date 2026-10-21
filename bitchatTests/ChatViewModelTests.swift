@@ -1260,7 +1260,7 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
-    func panicNetworkWipeFailureKeepsTheIntentAndStillResetsToAFreshStart() {
+    func panicNetworkWipeFailureResetsToAFreshStartWithTheNetworkOff() {
         var events: [String] = []
         let operations = PanicRecoveryOperations(
             isPending: { false },
@@ -1289,13 +1289,13 @@ struct ChatViewModelPanicTests {
 
         // The intent stays on disk, so the next launch erases again before startup.
         #expect(!completed)
-        #expect(events == ["stop", "begin", "wipe", "restart"])
+        #expect(events == ["stop", "begin", "wipe"])
         #expect(!viewModel.panicRecoveryBlocked)
-        #expect(viewModel.networkActivationAllowed)
+        #expect(!viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
-    func panicKeychainFailureKeepsTheIntentAndStillResetsToAFreshStart() {
+    func panicKeychainFailureResetsToAFreshStartWithTheNetworkOff() {
         let keychain = MockKeychain()
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
@@ -1316,19 +1316,65 @@ struct ChatViewModelPanicTests {
             restart: { events.append("restart") },
             closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
         )
+        let (viewModel, transport) = makeTestableViewModel(
+            keychain: keychain,
+            panicRecoveryOperations: operations,
+            panicNetworkLifecycle: lifecycle
+        )
+        let startsBeforePanic = transport.startServicesCallCount
+
+        let completed = viewModel.panicClearAllData()
+
+        #expect(!completed)
+        #expect(events == ["stop", "begin", "wipe"])
+        #expect(keychain.deleteAllCallCount == 1)
+        #expect(transport.startServicesCallCount == startsBeforePanic)
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(!viewModel.networkActivationAllowed)
+    }
+
+    @Test @MainActor
+    func unconfirmedPanicKeepsTheNetworkOffUntilAWipeIsConfirmed() {
+        let keychain = MockKeychain()
+        keychain.simulatedDeleteAllResult = false
+        var pending = false
+        var restarts = 0
+        let operations = PanicRecoveryOperations(
+            isPending: { pending },
+            begin: {
+                pending = true
+                return PanicRecoveryIntent(fileMarkerEstablished: true, externalMarkerEstablished: false)
+            },
+            wipeMedia: { _ in },
+            complete: { pending = false }
+        )
+        let lifecycle = PanicNetworkLifecycle(
+            stop: { true },
+            restart: { restarts += 1 },
+            closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
+        )
         let (viewModel, _) = makeTestableViewModel(
             keychain: keychain,
             panicRecoveryOperations: operations,
             panicNetworkLifecycle: lifecycle
         )
 
-        let completed = viewModel.panicClearAllData()
-
-        #expect(!completed)
-        #expect(events == ["stop", "begin", "wipe", "restart"])
-        #expect(keychain.deleteAllCallCount == 1)
+        #expect(!viewModel.panicClearAllData())
+        // The screen goes back to the welcome, but no radio and no Internet.
         #expect(!viewModel.panicRecoveryBlocked)
-        #expect(viewModel.networkActivationAllowed)
+        #expect(!viewModel.networkActivationAllowed)
+        #expect(restarts == 0)
+        #expect(pending)
+
+        // Next launch: the pending intent replays first and, once confirmed, lets the network start.
+        keychain.simulatedDeleteAllResult = true
+        let (relaunched, _) = makeTestableViewModel(
+            keychain: keychain,
+            panicRecoveryOperations: operations,
+            panicNetworkLifecycle: lifecycle
+        )
+        #expect(!pending)
+        #expect(relaunched.networkActivationAllowed)
     }
 
     @Test @MainActor
@@ -1361,7 +1407,7 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
-    func failedStartupRecoveryKeepsTheIntentWithoutBlockingStartup() {
+    func failedStartupRecoveryKeepsTheIntentAndTheNetworkOff() {
         enum WipeFailure: Error { case failed }
         var completedMarker = false
         let operations = PanicRecoveryOperations(
@@ -1382,12 +1428,13 @@ struct ChatViewModelPanicTests {
 
         #expect(!completedMarker)
         #expect(transport.emergencyDisconnectCallCount == 1)
-        #expect(transport.startServicesCallCount == (WeshWelcome.meshMayStart() ? 1 : 0))
-        #expect(viewModel.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == 0)
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(!viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor
-    func failedStartupKeychainRecoveryKeepsTheIntentWithoutBlockingStartup() {
+    func failedStartupKeychainRecoveryKeepsTheIntentAndTheNetworkOff() {
         let keychain = MockKeychain()
         keychain.simulatedDeleteAllResult = false
         var events: [String] = []
@@ -1412,8 +1459,9 @@ struct ChatViewModelPanicTests {
         #expect(events == ["begin", "wipe"])
         #expect(keychain.deleteAllCallCount == 1)
         #expect(transport.emergencyDisconnectCallCount == 1)
-        #expect(transport.startServicesCallCount == (WeshWelcome.meshMayStart() ? 1 : 0))
-        #expect(viewModel.networkActivationAllowed)
+        #expect(transport.startServicesCallCount == 0)
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(!viewModel.networkActivationAllowed)
     }
 
     @Test @MainActor

@@ -1000,13 +1000,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Part of it could not be checked. Wesh erases everything again the next time it opens, before connecting."
+            "value" : "Part of it could not be checked. Wesh erases everything again the next time it opens, before connecting. Until then, it stays offline."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Une partie n'a pas pu être vérifiée. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter."
+            "value" : "Une partie n'a pas pu être vérifiée. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter. D’ici là, il reste hors ligne."
           }
         }
       }
@@ -3653,13 +3653,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter."
+            "value" : "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter. D’ici là, il reste hors ligne."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting."
+            "value" : "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting. Until then, it stays offline."
           }
         }
       }
