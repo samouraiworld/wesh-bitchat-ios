@@ -5,9 +5,9 @@ import CFNetwork
 
 /// The local SOCKS port and the RFC 1929 login Arti requires, both new for each Tor start,
 /// so another app on the phone can neither find the proxy at a known port nor use it.
-public struct SocksEndpoint: Equatable, Sendable, CustomStringConvertible {
-    public let host: String
-    public let port: Int
+struct SocksEndpoint: Equatable, Sendable, CustomStringConvertible {
+    let host: String
+    let port: Int
     let username: String
     let password: String
 
@@ -23,7 +23,7 @@ public struct SocksEndpoint: Equatable, Sendable, CustomStringConvertible {
         (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
     }
 
-    public var description: String { "SocksEndpoint(\(host):\(port), login redacted)" }
+    var description: String { "SocksEndpoint(\(host):\(port), login redacted)" }
 }
 
 /// Provides the shared URLSession that routes traffic via Tor's SOCKS5 proxy.
@@ -50,6 +50,12 @@ public final class TorURLSession {
         endpoint = .random()
         torSession = TorURLSession.makeTorSession(endpoint: endpoint)
         return endpoint
+    }
+
+    /// Back to `endpoint` after a refused start, so the session keeps matching the Arti that runs.
+    func restoreEndpoint(_ endpoint: SocksEndpoint) {
+        self.endpoint = endpoint
+        torSession = TorURLSession.makeTorSession(endpoint: endpoint)
     }
 
     // Recreate the session so new clients bind to the fresh SOCKS port after a Tor restart.

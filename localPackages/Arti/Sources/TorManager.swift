@@ -17,9 +17,8 @@ private final class NWPathMonitor {
 // FFI declarations for Arti (Rust)
 @_silgen_name("arti_start")
 private func arti_start(
-    _ dataDir: UnsafePointer<CChar>, _ socksPort: UInt16,
-    _ socksUsername: UnsafePointer<CChar>, _ socksPassword: UnsafePointer<CChar>
-) -> Int32
+    _: UnsafePointer<CChar>, _: UInt16, _: UnsafePointer<CChar>, _: UnsafePointer<CChar>
+) -> Int32 // data dir, SOCKS port, SOCKS username, SOCKS password
 
 @_silgen_name("arti_stop")
 private func arti_stop() -> Int32
@@ -316,7 +315,10 @@ public final class TorManager: ObservableObject {
             return
         }
 
+        let previous = urlSession.endpoint
         let result = backend.start(dir, urlSession.renewEndpoint())
+        // A refused start (an older Arti still running or stopping) keeps the login it accepts.
+        if result != 0 { urlSession.restoreEndpoint(previous) }
 
         if result != 0 {
             SecureLogger.error("TorManager: arti_start failed rc=\(result)", category: .session)
