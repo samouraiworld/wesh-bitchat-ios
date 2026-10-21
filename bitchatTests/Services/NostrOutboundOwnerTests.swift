@@ -716,23 +716,32 @@ private final class TaskLedger: @unchecked Sendable {
     @MainActor
     func drain(operation: CleanupOperation? = nil) async throws {
         try operation?.beginTask(self)
-        do {
-            // A finite controlled parent may register a child while being joined; reread this actual ledger.
-            var index = 0
-            while index < handles.count {
-                let row = handles[index]
+        var failures: [CleanupErrorRecord] = []
+        // A finite controlled parent may register a child while being joined; reread this actual ledger.
+        var index = 0
+        while index < handles.count {
+            let row = handles[index]
+            do {
                 try operation?.decideTask(row)
                 try await eventually { @Sendable in row.finished.read() }
-                operation?.aboutToObserveTask(row)
-                await row.handle.value
-                await row.observer.value
-                index += 1
+            } catch {
+                failures.append(CleanupErrorRecord(site: "Task readiness", error: error))
             }
-            operation?.finish(error: nil)
-        } catch {
-            operation?.finish(error: error)
-            throw error
+            operation?.aboutToObserveTask(row)
+            await row.handle.value
+            await row.observer.value
+            index += 1
         }
+        let terminal: Error?
+        if failures.isEmpty {
+            terminal = nil
+        } else if failures.count == 1 {
+            terminal = failures[0].error
+        } else {
+            terminal = FixtureCleanupFailure(primary: failures[0].error, cleanup: Array(failures.dropFirst()))
+        }
+        operation?.finish(error: terminal)
+        if let terminal { throw terminal }
     }
 }
 
@@ -913,19 +922,35 @@ private final class Fixture: @unchecked Sendable {
     func reapWorkers(operation: CleanupOperation? = nil) async throws {
         let actual = workers.read()
         try operation?.beginWorker(self, workers: actual)
-        do {
-            for worker in actual {
+        var failures: [CleanupErrorRecord] = []
+        for worker in actual {
+            do {
                 try operation?.decideWorker(worker)
                 try await eventually { @Sendable in worker.isFinished }
-                operation?.aboutToObserveWorker(worker)
-                // Baseline still has no unconditional completion after a thrown readiness decision.
+            } catch {
+                failures.append(CleanupErrorRecord(site: "worker readiness", error: error))
             }
-            try requireFixture(errors.read().isEmpty, errors.read().joined(separator: "; "))
-            operation?.finish(error: nil)
-        } catch {
-            operation?.finish(error: error)
-            throw error
+            operation?.aboutToObserveWorker(worker)
+            while !worker.isFinished {
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(1))
+            }
         }
+        do {
+            try requireFixture(errors.read().isEmpty, errors.read().joined(separator: "; "))
+        } catch {
+            failures.append(CleanupErrorRecord(site: "worker error ledger", error: error))
+        }
+        let terminal: Error?
+        if failures.isEmpty {
+            terminal = nil
+        } else if failures.count == 1 {
+            terminal = failures[0].error
+        } else {
+            terminal = FixtureCleanupFailure(primary: failures[0].error, cleanup: Array(failures.dropFirst()))
+        }
+        operation?.finish(error: terminal)
+        if let terminal { throw terminal }
     }
     func cleanup() async -> [CleanupErrorRecord] {
         var failures: [CleanupErrorRecord] = []
