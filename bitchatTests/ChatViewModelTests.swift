@@ -1360,9 +1360,9 @@ struct ChatViewModelPanicTests {
         )
 
         #expect(!viewModel.panicClearAllData())
-        // The screen goes back to the welcome, but no radio and no Internet.
+        // The screen goes back to the welcome, but no radio and no Internet; the tabs say why.
         #expect(!viewModel.panicRecoveryBlocked)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
         #expect(restarts == 0)
         #expect(pending)
 
@@ -1374,7 +1374,7 @@ struct ChatViewModelPanicTests {
             panicNetworkLifecycle: lifecycle
         )
         #expect(!pending)
-        #expect(relaunched.networkActivationAllowed)
+        #expect(relaunched.networkActivationAllowed && !relaunched.panicNetworkFenced)
     }
 
     @Test @MainActor
@@ -1430,7 +1430,8 @@ struct ChatViewModelPanicTests {
         #expect(transport.emergencyDisconnectCallCount == 1)
         #expect(transport.startServicesCallCount == 0)
         #expect(!viewModel.panicRecoveryBlocked)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
+        #expect(!viewModel.bootstrapConfigured)
     }
 
     @Test @MainActor
@@ -1461,7 +1462,8 @@ struct ChatViewModelPanicTests {
         #expect(transport.emergencyDisconnectCallCount == 1)
         #expect(transport.startServicesCallCount == 0)
         #expect(!viewModel.panicRecoveryBlocked)
-        #expect(!viewModel.networkActivationAllowed)
+        #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
+        #expect(!viewModel.bootstrapConfigured)
     }
 
     @Test @MainActor

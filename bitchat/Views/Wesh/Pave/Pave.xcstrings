@@ -1000,13 +1000,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Part of it could not be checked. Wesh erases everything again the next time it opens, before connecting. Until then, it stays offline."
+            "value" : "Some data may remain on this phone. Wesh erases everything again the next time it starts, before connecting. Until then, Bluetooth and Internet stay off."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Une partie n'a pas pu être vérifiée. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter. D’ici là, il reste hors ligne."
+            "value" : "Des données peuvent rester sur ce téléphone. Wesh efface tout à nouveau à son prochain lancement, avant de se connecter. D’ici là, Bluetooth et Internet restent coupés."
           }
         }
       }
@@ -3653,13 +3653,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Effacement local à terminer. Wesh efface tout à nouveau à sa prochaine ouverture, avant de se connecter. D’ici là, il reste hors ligne."
+            "value" : "Effacement local à terminer : des données peuvent rester sur ce téléphone. Wesh efface tout à nouveau à son prochain lancement, avant de se connecter. D’ici là, Bluetooth et Internet restent coupés."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Local erasure not finished. Wesh erases everything again the next time it opens, before connecting. Until then, it stays offline."
+            "value" : "Local erasure not finished: some data may remain on this phone. Wesh erases everything again the next time it starts, before connecting. Until then, Bluetooth and Internet stay off."
           }
         }
       }

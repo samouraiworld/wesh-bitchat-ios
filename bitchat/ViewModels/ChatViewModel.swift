@@ -158,7 +158,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published private(set) var weshPanicGeneration: UInt64 = 0
     /// An unconfirmed erase keeps Bluetooth and Internet off until a wipe is
     /// confirmed, at the latest when the next launch replays it.
-    private var panicNetworkFenced = false
+    @Published private(set) var panicNetworkFenced = false
     var networkActivationAllowed: Bool { !panicRecoveryBlocked && !panicNetworkFenced }
     @Published var nickname: String = "" {
         didSet {

@@ -341,7 +341,14 @@ struct WeshRootView: View {
                     runtime.welcomeFinished()
                 })
             case .tabs:
-                if !panicFeedback.isEmpty {
+                if viewModel.panicNetworkFenced {
+                    // Also after a launch whose replayed erase failed again: say why nothing connects.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(WeshFeedbackCopy.eraseOutcome(false)).font(.subheadline)
+                        Button(PaveCopy.text("pave.action.retry")) { chrome.requestPanicWipe() }
+                            .frame(minHeight: 44)
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                } else if !panicFeedback.isEmpty {
                     Text(panicFeedback).font(.subheadline).padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityAddTraits(.updatesFrequently)
