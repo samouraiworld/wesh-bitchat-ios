@@ -797,7 +797,7 @@ struct BLEServiceCoreTests {
         let capabilities = try #require(announcement.capabilities)
         #expect(!capabilities.contains(.privateMedia))
         #expect(!capabilities.contains(.privateMediaReceipts))
-        #expect(capabilities.contains(.vouch))
+        #expect(!capabilities.contains(.vouch))
     }
 
     @Test @MainActor
@@ -1475,7 +1475,11 @@ struct BLEServiceCoreTests {
             recipientNickname: "Alice",
             messageID: privateMessageID
         )
-        ble.sendVouchAttestations(Data("queued-during-quarantine".utf8), to: alicePeerID)
+        ble.sendVerifyChallenge(
+            to: alicePeerID,
+            noiseKeyHex: alicePeerID.id,
+            nonceA: Data("queued-during-quarantine".utf8)
+        )
         await ble._test_drainNoiseMessagePipeline()
         #expect(outbound.count(ofType: .noiseEncrypted) == 0)
 
@@ -1547,7 +1551,7 @@ struct BLEServiceCoreTests {
         )
         #expect(
             plaintexts.filter {
-                $0.first == NoisePayloadType.vouch.rawValue
+                $0.first == NoisePayloadType.verifyChallenge.rawValue
             }.count == 1
         )
         #expect(outbound.count(ofType: .announce) == 0)
@@ -1622,7 +1626,7 @@ struct BLEServiceCoreTests {
         )
         ble._test_enqueuePendingNoisePayload(
             NoisePayload(
-                type: .vouch,
+                type: .verifyChallenge,
                 data: Data("queued-during-quarantine".utf8)
             ).encode(),
             for: alicePeerID
@@ -1749,7 +1753,7 @@ struct BLEServiceCoreTests {
         )
         #expect(
             plaintexts.filter {
-                $0.first == NoisePayloadType.vouch.rawValue
+                $0.first == NoisePayloadType.verifyChallenge.rawValue
             }.count == 1
         )
     }

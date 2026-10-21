@@ -240,11 +240,6 @@ final class MockTransport: Transport, MeshIdentityRecovering,
 
     // MARK: - Remaining mesh capabilities (recording stubs)
 
-    private(set) var sentVouchAttestations: [(Data, PeerID)] = []
-    func sendVouchAttestations(_ payload: Data, to peerID: PeerID) {
-        sentVouchAttestations.append((payload, peerID))
-    }
-
     var archivedPublicMessages: [ArchivedPublicMessage] = []
     private(set) var purgedAllArchived = false
     func collectArchivedPublicMessages(completion: @escaping @MainActor ([ArchivedPublicMessage]) -> Void) {

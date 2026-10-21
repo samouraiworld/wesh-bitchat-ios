@@ -202,7 +202,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Noise key hex + npub pairs already sent `[FAVORITED]:npub` in this process.
     var weshAnnouncedInternetKeys: Set<String> = []
     lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
-    lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
 
     // Computed properties for compatibility
     @MainActor
@@ -1693,7 +1692,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func setupNoiseCallbacks() {
         verificationCoordinator.setupNoiseCallbacks()
-        vouchCoordinator.setupNoiseCallbacks()
     }
 
     // MARK: - BitchatDelegate Methods
@@ -1799,9 +1797,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         case .peerListUpdated(let peers):
             peerListCoordinator.didUpdatePeerListSynchronously(peers)
-            // A peer-list update follows every verified announce, which is
-            // where a peer's `.vouch` capability actually arrives.
-            vouchCoordinator.peersUpdated(peers)
 
         case .peerSnapshotsUpdated:
             break
@@ -1876,12 +1871,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func didUpdatePeerList(_ peers: [PeerID]) {
         peerListCoordinator.didUpdatePeerList(peers)
-        // A peer-list update follows every verified announce, which is where a
-        // peer's `.vouch` capability actually arrives — retry vouching now that
-        // capabilities may finally be known (closes the auth-time capability race).
-        Task { @MainActor [weak self] in
-            self?.vouchCoordinator.peersUpdated(peers)
-        }
     }
 
     @MainActor

@@ -170,7 +170,7 @@ struct GatewayRetirementTests {
     }
 
     @Test
-    func ordinaryAnnounceKeepsPrekeysAndVouchWithoutGatewayRoles() async throws {
+    func ordinaryAnnounceKeepsPrekeysWithoutGatewayOrVouchRoles() async throws {
         let scheduler = BLEEngineManualScheduler()
         let service = makeService(scheduler: scheduler)
         defer { service.stopServices() }
@@ -184,7 +184,7 @@ struct GatewayRetirementTests {
         let announce = try #require(AnnouncementPacket.decode(from: packet.payload))
         let capabilities = try #require(announce.capabilities)
         #expect(capabilities.contains(.prekeys))
-        #expect(capabilities.contains(.vouch))
+        #expect(!capabilities.contains(.vouch))
         #expect(!capabilities.contains(.gateway))
         #expect(!capabilities.contains(.bridge))
         #expect(announce.bridgeGeohash == nil)
