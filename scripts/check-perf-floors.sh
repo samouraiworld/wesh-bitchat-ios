@@ -6,8 +6,8 @@
 # prints into captured test output and fails if any benchmark's throughput is
 # below its floor from bitchatTests/Performance/perf-floors.json.
 #
-# Floor philosophy (see the floors file): floors sit at ~25% of locally
-# measured throughput, so they catch algorithmic regressions (O(n) -> O(n^2)),
+# Floor philosophy (see the floors file): floors sit at ~50% of the slowest
+# observed CI throughput, so they catch algorithmic regressions (O(n) -> O(n^2)),
 # never runner variance. Raise floors deliberately after intentional
 # improvements; never tune them to chase noise.
 #
@@ -139,7 +139,7 @@ if missing:
 if below_floor:
     print("\nperf-floors: below floor — order-of-magnitude-class regression suspected:")
     print("\n".join(below_floor))
-    print("\nFloors are ~25% of healthy local throughput; falling below one means an")
+    print("\nFloors are ~50% of the slowest observed CI throughput; falling below one means an")
     print("algorithmic regression, not runner noise. If the change is intentional,")
     print("update bitchatTests/Performance/perf-floors.json deliberately.")
     sys.exit(1)
