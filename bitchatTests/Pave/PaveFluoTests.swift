@@ -44,8 +44,44 @@ struct PaveFluoTests {
         #expect(text.contains("SIL Open Font License"))
         #expect(PaveDisplayFont.isAvailable)
         // Shown in full in Licences, as the OFL asks of a bundled font.
-        #expect(PaveDisplayFont.licenseText?.contains("SIL Open Font License") == true)
+        #expect(PaveDisplayFont.licenseText()?.contains("SIL Open Font License") == true)
     }
+
+    @Test func everyThirdPartyNoticeShipsOfflineWithItsSources() throws {
+        for component in PaveLegalNotices.Component.allCases {
+            let text = try component.text()
+            #expect(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(component.sourceURL.scheme == "https")
+        }
+        let secp = try PaveLegalNotices.Component.secp256k1.text()
+        #expect(secp.contains("Copyright (c) 2020 GigaBitcoin LLC"))
+        #expect(secp.contains("Copyright (c) 2013 Pieter Wuille"))
+        #expect(secp.contains(PaveLegalNotices.secpCoreSourceURL.absoluteString))
+        let arti = try PaveLegalNotices.Component.arti.text()
+        #expect(arti.contains("arti-client@0.38.0"))
+        #expect(arti.contains("LICENSE-BoringSSL"))
+        #expect(arti.contains("LICENSE-other-bits"))
+        #expect(arti.contains("Apache License"))
+        #expect(arti.contains("Permission to use, copy, modify, and/or distribute"))
+        let archivo = try PaveLegalNotices.Component.archivo.text()
+        #expect(archivo == PaveDisplayFont.licenseText())
+    }
+
+    @Test func nativeNoticeInventoryHasNoMissingPrimaryTerms() throws {
+        try PaveLegalNotices.requireCompleteInventory()
+    }
+
+    @Test func missingNoticeResourcesProduceAnExplicitFailure() {
+        // The Foundation bundle deliberately contains no app notices.
+        let emptyBundle = Bundle(for: NSObject.self)
+        #expect(throws: PaveLegalNotices.ResourceError.missingOrEmpty) {
+            try PaveLegalNotices.Component.arti.text(in: emptyBundle)
+        }
+        #expect(throws: PaveLegalNotices.ResourceError.missingOrEmpty) {
+            try PaveLegalNotices.requireCompleteInventory(in: emptyBundle)
+        }
+    }
+
 }
 
 struct PaveSettingsWiringTests {

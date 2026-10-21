@@ -69,14 +69,6 @@ struct LocalFileProtectionTests {
         #expect(LocalFileProtection.isExcludedFromBackup(url))
     }
 
-    @Test func bridgeDropDedupRecordIsExcluded() throws {
-        let root = Root()
-        let url = root.url.appendingPathComponent("courier/bridge-drop-dedup.json")
-        BridgeDropDedupStore(fileURL: url).save(.init(publishedDropKeys: ["drop": Date()], seenDropEventIDs: [:]))
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        #expect(LocalFileProtection.isExcludedFromBackup(url))
-    }
-
     @Test func privateOutboxIsExcluded() throws {
         let root = Root()
         let url = root.url.appendingPathComponent("outbox/outbox.enc")
@@ -89,36 +81,12 @@ struct LocalFileProtectionTests {
         #expect(LocalFileProtection.isExcludedFromBackup(url))
     }
 
-    @Test func incomingMediaPanicMarkerAndLiveCaptureDirectoryAreExcluded() throws {
+    @Test func panicRecoveryMarkerIsExcluded() throws {
         let root = Root()
-        let store = BLEIncomingFileStore(baseDirectory: root.url)
-        let saved = try #require(store.save(
-            data: Data([0xFF, 0xD8, 0xFF]), preferredName: "photo.jpg", subdirectory: "images/incoming",
-            fallbackExtension: "jpg", defaultPrefix: "img"
-        ))
-        #expect(LocalFileProtection.isExcludedFromBackup(saved))
-        #expect(LocalFileProtection.isExcludedFromBackup(root.url.appendingPathComponent("files", isDirectory: true)))
-
-        let live = try store.incomingDirectory(subdirectory: "voicenotes/incoming")
-        #expect(LocalFileProtection.isExcludedFromBackup(live))
-
-        try store.markPanicRecoveryPending()
+        try PanicRecoveryFileStore(baseDirectory: root.url).markPanicRecoveryPending()
         let marker = try #require(try FileManager.default.contentsOfDirectory(at: root.url, includingPropertiesForKeys: nil)
             .first { !$0.hasDirectoryPath })
         #expect(LocalFileProtection.isExcludedFromBackup(marker))
-    }
-
-    @Test func privateMediaReceiptsAreExcluded() throws {
-        let root = Root()
-        let incoming = root.url.appendingPathComponent("files/images/incoming", isDirectory: true)
-        try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
-        let payload = incoming.appendingPathComponent("payload.jpg")
-        try Data([0xFF, 0xD8, 0xFF, 0xD9]).write(to: payload)
-        let messageID = "media-00112233445566778899aabbccddeeff"
-        #expect(BLEPrivateMediaReceiptStore(baseDirectory: root.url).commitAccepted(messageID: messageID, storedURL: payload))
-        let record = root.url.appendingPathComponent("files/.private-media-receipts/\(messageID).json")
-        #expect(FileManager.default.fileExists(atPath: record.path))
-        #expect(LocalFileProtection.isExcludedFromBackup(record))
     }
 
     @Test func sealedQRContactsAndMeetingNoteFilesAreExcluded() throws {

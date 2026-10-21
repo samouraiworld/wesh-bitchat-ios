@@ -85,18 +85,12 @@ protocol ChatPeerIdentityContext: AnyObject {
     // MARK: Favorites
     /// The persisted favorite relationship for the peer's Noise static key, if any.
     func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship?
-    /// The persisted favorite relationship for a short (ephemeral) peer ID, if any.
-    func favoriteRelationship(forPeerID peerID: PeerID) -> FavoritesPersistenceService.FavoriteRelationship?
     /// Adds (or updates) a favorite in the favorites store.
     func addFavorite(noiseKey: Data, nostrPublicKey: String?, nickname: String)
     /// Removes a favorite from the favorites store.
     func removeFavorite(noiseKey: Data)
 
-    // MARK: Geohash & Nostr
-    var geoNicknames: [String: String] { get }
-    func visibleGeohashPeople() -> [GeoPerson]
-    /// Records the Nostr pubkey behind a (possibly virtual) peer ID.
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID)
+    // MARK: Account Nostr identity
     func bridgedNostrPublicKey(for noiseKey: Data) -> String?
     func sendFavoriteNotificationViaNostr(noisePublicKey: Data, isFavorite: Bool)
 }
@@ -104,10 +98,9 @@ protocol ChatPeerIdentityContext: AnyObject {
 extension ChatViewModel: ChatPeerIdentityContext {
     // `privateChats`, `unreadPrivateMessages`, `selectedPrivateChatPeer`,
     // `selectedPrivateChatFingerprint`, `myPeerID`,
-    // `activeChannel`, `connectedPeers`, `geoNicknames`, `notifyUIChanged()`,
+    // `connectedPeers`, `notifyUIChanged()`,
     // `addSystemMessage(_:)`, `peerNickname(for:)`, `meshPeerNicknames()`,
     // `ephemeralPeerID(forNoiseKey:)`, `unifiedPeer(for:)`,
-    // `registerNostrKeyMapping(_:for:)`, `visibleGeohashPeople()`,
     // `markPrivateMessagesAsRead(from:)`, `sendFavoriteNotificationViaNostr`,
     // and the conversation-store sync methods are shared requirements with
     // the other contexts or satisfied by existing `ChatViewModel` members.
@@ -322,15 +315,6 @@ final class ChatPeerIdentityCoordinator {
     func startPrivateChat(with peerID: PeerID) {
         guard peerID != context.myPeerID else { return }
 
-        // Group chats are virtual conversations: no peer identity, favorites,
-        // handshake, or message consolidation applies — just select the chat.
-        if peerID.isGroup {
-            context.selectedPrivateChatFingerprint = nil
-            context.beginPrivateChatSession(with: peerID)
-            context.markPrivateChatRead(peerID)
-            return
-        }
-
         let peerNickname = context.peerNickname(for: peerID) ?? "unknown"
 
         if context.unifiedIsBlocked(peerID) {
@@ -518,32 +502,7 @@ final class ChatPeerIdentityCoordinator {
         let nickname = nickname.normalizedNickname
         switch context.activeChannel {
         case .location:
-            if nickname.contains("#") {
-                let people = context.visibleGeohashPeople().filter {
-                    $0.displayName.normalizedNickname == nickname
-                }
-                if people.count == 1, let person = people.first {
-                    let conversationKey = PeerID(nostr_: person.id)
-                    context.registerNostrKeyMapping(person.id, for: conversationKey)
-                    return conversationKey
-                }
-            }
-
-            let base = nickname
-                .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
-                .first
-                .map(String.init)?
-                .lowercased() ?? nickname.lowercased()
-            let geoMatches = context.geoNicknames.filter { $0.value.lowercased() == base }
-            if geoMatches.count == 1, let pubkey = geoMatches.keys.first {
-                let conversationKey = PeerID(nostr_: pubkey)
-                context.registerNostrKeyMapping(pubkey, for: conversationKey)
-                return conversationKey
-            }
-            if geoMatches.count > 1 {
-                return nil
-            }
-
+            return nil
         case .mesh:
             break
         }
@@ -551,23 +510,6 @@ final class ChatPeerIdentityCoordinator {
         return context.unifiedPeerID(forNickname: nickname)
     }
 
-    @MainActor
-    func nicknameForPeer(_ peerID: PeerID) -> String {
-        if let name = context.peerNickname(for: peerID) {
-            return name
-        }
-        if let favorite = context.favoriteRelationship(forPeerID: peerID),
-           !favorite.peerNickname.isEmpty {
-            return favorite.peerNickname
-        }
-        if let noiseKey = Data(hexString: peerID.id),
-           let favorite = context.favoriteRelationship(forNoiseKey: noiseKey),
-           !favorite.peerNickname.isEmpty {
-            return favorite.peerNickname
-        }
-        // "anon" matches the default-nickname convention; "user" is banned copy.
-        return "anon"
-    }
 }
 
 private extension ChatPeerIdentityCoordinator {

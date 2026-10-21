@@ -64,6 +64,54 @@ final class GossipSyncManager {
         }
     }
 
+    /// IDs of broadcast fragments this node refused (retired types). They
+    /// only feed our sync filter, so peers stop re-offering them; the packets
+    /// themselves are never kept, served or relayed.
+    private struct RefusedFragmentIDs {
+        struct Entry {
+            let id: Data
+            let timestamp: UInt64
+            let senderID: Data
+        }
+        private(set) var entries: [String: Entry] = [:]
+        private var order: [String] = []
+
+        /// Bounded overall and per sender, so one neighbor cannot fill it.
+        mutating func insert(_ entry: Entry, capacity: Int, perSenderCapacity: Int) {
+            guard capacity > 0, perSenderCapacity > 0 else { return }
+            let key = entry.id.hexEncodedString()
+            guard entries[key] == nil else { return }
+            let fromSender = order.filter { entries[$0]?.senderID == entry.senderID }
+            if fromSender.count >= perSenderCapacity, let oldest = fromSender.first {
+                entries.removeValue(forKey: oldest)
+                order.removeAll { $0 == oldest }
+            }
+            order.append(key)
+            entries[key] = entry
+            while order.count > capacity {
+                entries.removeValue(forKey: order.removeFirst())
+            }
+        }
+
+        func all(isFresh: (UInt64) -> Bool) -> [Entry] {
+            order.compactMap { key in
+                guard let entry = entries[key], isFresh(entry.timestamp) else { return nil }
+                return entry
+            }
+        }
+
+        mutating func remove(where shouldRemove: (Entry) -> Bool) {
+            order = order.filter { key in
+                guard let entry = entries[key] else { return false }
+                if shouldRemove(entry) {
+                    entries.removeValue(forKey: key)
+                    return false
+                }
+                return true
+            }
+        }
+    }
+
     private struct SyncSchedule {
         let types: SyncTypeFlags
         let interval: TimeInterval
@@ -74,7 +122,7 @@ final class GossipSyncManager {
         var seenCapacity: Int = 1000          // max packets per sync (cap across types)
         var gcsMaxBytes: Int = 400           // filter size budget (128..1024)
         var gcsTargetFpr: Double = 0.01      // 1%
-        var maxMessageAgeSeconds: TimeInterval = 900  // 15 min - fragments/files/announces
+        var maxMessageAgeSeconds: TimeInterval = 900  // 15 min - fragments/announces
         // Whole public messages stay sync-able much longer so devices carry
         // the room's recent history between partitions and across restarts.
         var publicMessageMaxAgeSeconds: TimeInterval = 900
@@ -82,24 +130,20 @@ final class GossipSyncManager {
         var stalePeerCleanupIntervalSeconds: TimeInterval = 60.0
         var stalePeerTimeoutSeconds: TimeInterval = 60.0
         var fragmentCapacity: Int = 600
-        var fileTransferCapacity: Int = 200
-        var groupMessageCapacity: Int = 200
         // Payload byte budgets on top of the count caps. Each sits well above
         // what the count cap holds in ordinary traffic (1000 chat messages,
         // 600 fragments of ~500 B), so it only binds when packets are
-        // oversized — e.g. 200 file transfers at the 1.1 MB frame cap.
+        // oversized.
         var messageByteBudget: Int = 8 * 1024 * 1024
         var fragmentByteBudget: Int = 1024 * 1024
-        var fileTransferByteBudget: Int = 32 * 1024 * 1024
-        var groupMessageByteBudget: Int = 4 * 1024 * 1024
+        // Refused (retired-type) fragment IDs listed in our filter so peers stop
+        // re-offering them: a small store, bounded per sender, that only fills
+        // the room real packets leave in the filter.
+        var refusedFragmentCapacity: Int = 128
+        var refusedFragmentPerSenderCapacity: Int = 16
+        var refusedFragmentFilterCapacity: Int = 64
         var fragmentSyncIntervalSeconds: TimeInterval = 30.0
-        var fileTransferSyncIntervalSeconds: TimeInterval = 60.0
         var messageSyncIntervalSeconds: TimeInterval = 15.0
-        // Board posts are few but long-lived (days, until each post's own
-        // expiry), so they get a slow round with their own capacity instead
-        // of competing with the 15-minute message window.
-        var boardCapacity: Int = 200
-        var boardSyncIntervalSeconds: TimeInterval = 60.0
         var responseRateLimitMaxResponses: Int = 8
         var responseRateLimitWindowSeconds: TimeInterval = 30.0
         // Prekey bundles: one per peer, own sync round, long freshness so
@@ -118,17 +162,10 @@ final class GossipSyncManager {
     private let archive: GossipMessageArchive?
     weak var delegate: Delegate?
 
-    /// Source of raw signed board packets (posts + tombstones). The board
-    /// store is the single owner of board retention (expiry, tombstones,
-    /// caps, persistence), so sync rounds query it instead of keeping a
-    /// second copy here. Must be thread-safe; set before `start()`.
-    var boardPacketsProvider: (() -> [BitchatPacket])?
-
     // Storage: broadcast packets by type, and latest announce per sender
     private var messages = PacketStore()
     private var fragments = PacketStore()
-    private var fileTransfers = PacketStore()
-    private var groupMessages = PacketStore()
+    private var refusedFragments = RefusedFragmentIDs()
     private var latestAnnouncementByPeer: [PeerID: BitchatPacket] = [:]
     // Latest verified prekey bundle per owner. Unlike announces, bundles are
     // NOT dropped on leave/stale peer: their whole purpose is reaching a
@@ -154,25 +191,13 @@ final class GossipSyncManager {
         )
         var schedules: [SyncSchedule] = []
         if config.seenCapacity > 0 && config.messageSyncIntervalSeconds > 0 {
-            // Group messages ride the public-message cadence; old clients
-            // ignore the extended bit and answer with announces/messages only.
-            var messageTypes: SyncTypeFlags = .publicMessages
-            if config.groupMessageCapacity > 0 {
-                messageTypes.formUnion(.groupMessage)
-            }
-            schedules.append(SyncSchedule(types: messageTypes, interval: config.messageSyncIntervalSeconds, lastSent: .distantPast))
+            schedules.append(SyncSchedule(types: .publicMessages, interval: config.messageSyncIntervalSeconds, lastSent: .distantPast))
         }
         if config.fragmentCapacity > 0 && config.fragmentSyncIntervalSeconds > 0 {
             schedules.append(SyncSchedule(types: .fragment, interval: config.fragmentSyncIntervalSeconds, lastSent: .distantPast))
         }
-        if config.fileTransferCapacity > 0 && config.fileTransferSyncIntervalSeconds > 0 {
-            schedules.append(SyncSchedule(types: .fileTransfer, interval: config.fileTransferSyncIntervalSeconds, lastSent: .distantPast))
-        }
         if config.prekeyBundleCapacity > 0 && config.prekeyBundleSyncIntervalSeconds > 0 {
             schedules.append(SyncSchedule(types: .prekeyBundle, interval: config.prekeyBundleSyncIntervalSeconds, lastSent: .distantPast))
-        }
-        if config.boardCapacity > 0 && config.boardSyncIntervalSeconds > 0 {
-            schedules.append(SyncSchedule(types: .board, interval: config.boardSyncIntervalSeconds, lastSent: .distantPast))
         }
         syncSchedules = schedules
 
@@ -211,40 +236,54 @@ final class GossipSyncManager {
             guard let self = self else { return }
 
             var types: SyncTypeFlags = .publicMessages
-            if self.config.groupMessageCapacity > 0 {
-                types.formUnion(.groupMessage)
-            }
             if self.config.fragmentCapacity > 0 && self.config.fragmentSyncIntervalSeconds > 0 {
                 types.formUnion(.fragment)
             }
-            if self.config.fileTransferCapacity > 0 && self.config.fileTransferSyncIntervalSeconds > 0 {
-                types.formUnion(.fileTransfer)
-            }
             if self.config.prekeyBundleCapacity > 0 && self.config.prekeyBundleSyncIntervalSeconds > 0 {
                 types.formUnion(.prekeyBundle)
-            }
-            if self.config.boardCapacity > 0 && self.config.boardSyncIntervalSeconds > 0 && self.boardPacketsProvider != nil {
-                types.formUnion(.board)
             }
             self.sendRequestSync(to: peerID, types: types)
         }
     }
 
     func onPublicPacketSeen(_ packet: BitchatPacket) {
+        guard !BLEReceivePipeline.isRetiredBoardPacket(packet) else { return }
+        guard !BLEReceivePipeline.isRetiredCarrierPacket(packet) else { return }
         queue.async { [weak self] in
             self?._onPublicPacketSeen(packet)
         }
     }
 
+    /// A broadcast fragment this node refused: listed in our sync filter
+    /// ("known") so peers stop re-offering it, never stored or served.
+    func onRefusedFragmentSeen(_ packet: BitchatPacket) {
+        queue.async { [weak self] in
+            guard let self,
+                  packet.type == MessageType.fragment.rawValue,
+                  self.isPacketFresh(packet) else { return }
+            self.refusedFragments.insert(
+                RefusedFragmentIDs.Entry(
+                    id: PacketIdUtil.computeId(packet),
+                    timestamp: packet.timestamp,
+                    senderID: packet.senderID
+                ),
+                capacity: self.config.refusedFragmentCapacity,
+                perSenderCapacity: self.config.refusedFragmentPerSenderCapacity
+            )
+        }
+    }
+
     // Helper to check if a packet is within the age threshold. Whole public
-    // messages get the long town-crier window; fragments, file transfers and
-    // announces keep the short one.
+    // messages get the long town-crier window; fragments and announces keep
+    // the short one.
     private func isPacketFresh(_ packet: BitchatPacket) -> Bool {
-        // Group messages share the whole-message window: members off the mesh
-        // for a while should backfill their crew's history like public chat.
+        isFresh(timestamp: packet.timestamp, type: packet.type)
+    }
+
+    private func isFresh(timestamp: UInt64, type: UInt8) -> Bool {
         let maxAgeSeconds: TimeInterval
-        switch packet.type {
-        case MessageType.message.rawValue, MessageType.groupMessage.rawValue:
+        switch type {
+        case MessageType.message.rawValue:
             maxAgeSeconds = config.publicMessageMaxAgeSeconds
         case MessageType.prekeyBundle.rawValue:
             maxAgeSeconds = config.prekeyBundleMaxAgeSeconds
@@ -256,7 +295,7 @@ final class GossipSyncManager {
         // expire, sort ahead of everything in each GCS filter, and push the
         // requester's since-cursor past all real history, so anything dated
         // beyond the ingress skew is never stored, served or restored.
-        if packet.timestamp > nowMs, packet.timestamp - nowMs > config.maxFutureSkewMs {
+        if timestamp > nowMs, timestamp - nowMs > config.maxFutureSkewMs {
             return false
         }
         let ageThresholdMs = UInt64(maxAgeSeconds * 1000)
@@ -265,7 +304,7 @@ final class GossipSyncManager {
         guard nowMs >= ageThresholdMs else { return true }
 
         let cutoffMs = nowMs - ageThresholdMs
-        return packet.timestamp >= cutoffMs
+        return timestamp >= cutoffMs
     }
 
     private func isAnnouncementFresh(_ packet: BitchatPacket) -> Bool {
@@ -305,18 +344,6 @@ final class GossipSyncManager {
             guard isPacketFresh(packet) else { return }
             let idHex = PacketIdUtil.computeId(packet).hexEncodedString()
             fragments.insert(idHex: idHex, packet: packet, capacity: max(1, config.fragmentCapacity), byteBudget: config.fragmentByteBudget)
-        case .fileTransfer:
-            guard isBroadcastRecipient else { return }
-            guard isPacketFresh(packet) else { return }
-            let idHex = PacketIdUtil.computeId(packet).hexEncodedString()
-            fileTransfers.insert(idHex: idHex, packet: packet, capacity: max(1, config.fileTransferCapacity), byteBudget: config.fileTransferByteBudget)
-        case .groupMessage:
-            // Opaque ciphertext to non-members; carried and served like any
-            // other broadcast so members get backfill from any relay.
-            guard isBroadcastRecipient else { return }
-            guard isPacketFresh(packet) else { return }
-            let idHex = PacketIdUtil.computeId(packet).hexEncodedString()
-            groupMessages.insert(idHex: idHex, packet: packet, capacity: max(1, config.groupMessageCapacity), byteBudget: config.groupMessageByteBudget)
         case .prekeyBundle:
             // Callers only feed verified bundles here (own bundles at send
             // time, peers' after signature verification), so gossip never
@@ -495,33 +522,6 @@ final class GossipSyncManager {
             }
         }
 
-        if requestedTypes.contains(.fileTransfer) {
-            let files = fileTransfers.allPackets(isFresh: isPacketFresh)
-            for pkt in files {
-                if let since, pkt.timestamp < since { continue }
-                let idBytes = PacketIdUtil.computeId(pkt)
-                if !mightContain(idBytes) {
-                    var toSend = pkt
-                    toSend.ttl = 0
-                    toSend.isRSR = true // Mark as solicited response
-                    delegate?.sendPacket(to: peerID, packet: toSend)
-                }
-            }
-        }
-
-        if requestedTypes.contains(.groupMessage) {
-            let groupPkts = groupMessages.allPackets(isFresh: isPacketFresh)
-            for pkt in groupPkts {
-                if let since, pkt.timestamp < since { continue }
-                let idBytes = PacketIdUtil.computeId(pkt)
-                if !mightContain(idBytes) {
-                    var toSend = pkt
-                    toSend.ttl = 0
-                    toSend.isRSR = true // Mark as solicited response
-                    delegate?.sendPacket(to: peerID, packet: toSend)
-                }
-            }
-        }
         // Like announces, prekey bundles are exempt from the since-cursor:
         // there is at most one per owner (newer replaces older), so the
         // resend cost is bounded and a joining peer must be able to learn
@@ -539,52 +539,39 @@ final class GossipSyncManager {
                 }
             }
         }
-        if requestedTypes.contains(.boardPost) {
-            // The board store already filters to live posts and tombstones;
-            // no freshness window applies (posts sync until their own expiry).
-            let boardPackets = boardPacketsProvider?() ?? []
-            for pkt in boardPackets {
-                if let since, pkt.timestamp < since { continue }
-                let idBytes = PacketIdUtil.computeId(pkt)
-                if !mightContain(idBytes) {
-                    var toSend = pkt
-                    toSend.ttl = 0
-                    toSend.isRSR = true // Mark as solicited response
-                    delegate?.sendPacket(to: peerID, packet: toSend)
-                }
-            }
-        }
     }
 
     // Build REQUEST_SYNC payload using current candidates and GCS params
     private func buildGcsPayload(for types: SyncTypeFlags, fragmentIdFilter: String? = nil) -> Data {
-        var candidates: [BitchatPacket] = []
+        var packetCandidates: [BitchatPacket] = []
         if types.contains(.announce) {
             for (_, pkt) in latestAnnouncementByPeer where isPacketFresh(pkt) {
-                candidates.append(pkt)
+                packetCandidates.append(pkt)
             }
         }
         if types.contains(.message) {
-            candidates.append(contentsOf: messages.allPackets(isFresh: isPacketFresh))
+            packetCandidates.append(contentsOf: messages.allPackets(isFresh: isPacketFresh))
         }
         if types.contains(.fragment) {
-            candidates.append(contentsOf: fragments.allPackets(isFresh: isPacketFresh))
-        }
-        if types.contains(.fileTransfer) {
-            candidates.append(contentsOf: fileTransfers.allPackets(isFresh: isPacketFresh))
-        }
-        if types.contains(.groupMessage) {
-            candidates.append(contentsOf: groupMessages.allPackets(isFresh: isPacketFresh))
+            packetCandidates.append(contentsOf: fragments.allPackets(isFresh: isPacketFresh))
         }
         if types.contains(.prekeyBundle) {
             for (_, pair) in latestPrekeyBundleByPeer where isPacketFresh(pair.packet) {
-                candidates.append(pair.packet)
+                packetCandidates.append(pair.packet)
             }
         }
-        if types.contains(.boardPost) {
-            candidates.append(contentsOf: boardPacketsProvider?() ?? [])
+        var candidates = packetCandidates.map { (id: PacketIdUtil.computeId($0), timestamp: $0.timestamp) }
+        // Refused fragment IDs only fill the room real packets leave: they
+        // never take part in `takeN` nor in the since-cursor, so a neighbor
+        // flooding retired fragments cannot push real ones out of the filter.
+        var refusedIDs: [Data] = []
+        if types.contains(.fragment) {
+            let fragmentType = MessageType.fragment.rawValue
+            refusedIDs = refusedFragments.all { self.isFresh(timestamp: $0, type: fragmentType) }
+                .sorted { $0.timestamp > $1.timestamp }
+                .map(\.id)
         }
-        if candidates.isEmpty {
+        if candidates.isEmpty && refusedIDs.isEmpty {
             let p = GCSFilter.deriveP(targetFpr: config.gcsTargetFpr)
             let req = RequestSyncPacket(p: p, m: 1, data: Data(), types: types, fragmentIdFilter: fragmentIdFilter)
             return req.encode()
@@ -598,22 +585,22 @@ final class GossipSyncManager {
         let cap: Int
         if types == .fragment {
             cap = max(1, config.fragmentCapacity)
-        } else if types == .fileTransfer {
-            cap = max(1, config.fileTransferCapacity)
         } else if types == .prekeyBundle {
             cap = max(1, config.prekeyBundleCapacity)
-        } else if types == .board {
-            cap = max(1, config.boardCapacity)
         } else {
             cap = max(1, config.seenCapacity)
         }
         let takeN = min(candidates.count, min(nMax, cap))
-        if takeN <= 0 {
+        let refusedRoom = max(0, min(nMax, cap) - takeN)
+        let refusedTaken = Array(refusedIDs.prefix(min(refusedRoom, config.refusedFragmentFilterCapacity)))
+        if takeN <= 0 && refusedTaken.isEmpty {
             let req = RequestSyncPacket(p: p, m: 1, data: Data(), types: types, fragmentIdFilter: fragmentIdFilter)
             return req.encode()
         }
         let included = Array(candidates.prefix(takeN))
-        let ids: [Data] = included.map { PacketIdUtil.computeId($0) }
+        // Real packets first: the encoder trims from the tail, so refused IDs
+        // are the first to go when the byte budget is short.
+        let ids: [Data] = included.map { $0.id } + refusedTaken
         let params = GCSFilter.buildFilter(ids: ids, maxBytes: config.gcsMaxBytes, targetFpr: config.gcsTargetFpr)
         // When the filter can't cover every candidate — either the store
         // exceeds `takeN` or the encoder trimmed the tail to fit the byte
@@ -622,8 +609,8 @@ final class GossipSyncManager {
         // covered set is a contiguous newest-prefix and the oldest included
         // timestamp is an exact cursor. Packets older than it are outside the
         // filter but not missing; without the cursor the responder would
-        // re-send that entire tail every round.
-        let covered = params.includedCount
+        // re-send that entire tail every round. Only real packets count here.
+        let covered = min(params.includedCount, included.count)
         let sinceTimestamp: UInt64? = (covered < candidates.count && covered > 0)
             ? included[covered - 1].timestamp
             : nil
@@ -644,8 +631,8 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.removeExpired(isFresh: isPacketFresh)
-        fileTransfers.removeExpired(isFresh: isPacketFresh)
-        groupMessages.removeExpired(isFresh: isPacketFresh)
+        let fragmentType = MessageType.fragment.rawValue
+        refusedFragments.remove { !isFresh(timestamp: $0.timestamp, type: fragmentType) }
         latestPrekeyBundleByPeer = latestPrekeyBundleByPeer.filter { _, pair in
             isPacketFresh(pair.packet)
         }
@@ -731,9 +718,6 @@ final class GossipSyncManager {
         // fragment traffic can't crowd messages out of the filter.
         for index in syncSchedules.indices {
             guard syncSchedules[index].interval > 0 else { continue }
-            // No board source wired up means nothing to offer or store;
-            // skip the round entirely.
-            if syncSchedules[index].types == .board && boardPacketsProvider == nil { continue }
             if syncSchedules[index].lastSent == .distantPast || now.timeIntervalSince(syncSchedules[index].lastSent) >= syncSchedules[index].interval {
                 syncSchedules[index].lastSent = now
                 sendPeriodicSync(for: syncSchedules[index].types)
@@ -817,8 +801,7 @@ final class GossipSyncManager {
             archiveDirty = true
         }
         fragments.remove { PeerID(hexData: $0.senderID) == peerID }
-        fileTransfers.remove { PeerID(hexData: $0.senderID) == peerID }
-        groupMessages.remove { PeerID(hexData: $0.senderID) == peerID }
+        refusedFragments.remove { PeerID(hexData: $0.senderID) == peerID }
     }
 }
 
@@ -840,6 +823,10 @@ extension GossipSyncManager {
         queue.sync {
             latestPrekeyBundleByPeer[peerID] != nil
         }
+    }
+
+    func _refusedFragmentCount() -> Int {
+        queue.sync { refusedFragments.entries.count }
     }
 
     func _messageCount(for peerID: PeerID) -> Int {

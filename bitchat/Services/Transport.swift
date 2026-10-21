@@ -44,12 +44,6 @@ enum TransportEvent: @unchecked Sendable {
     case messageReceived(BitchatMessage)
     case publicMessageReceived(peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?)
     case noisePayloadReceived(peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date)
-    /// Encrypted group broadcast (MessageType 0x25). Opaque here — the group
-    /// coordinator decrypts and authenticates against the roster.
-    case groupMessageReceived(payload: Data, timestamp: Date)
-    /// Public live-voice burst packet (MessageType 0x29), already
-    /// signature-verified against the claimed sender.
-    case publicVoiceFrameReceived(peerID: PeerID, nickname: String, payload: Data, timestamp: Date)
     case peerConnected(PeerID)
     case peerDisconnected(PeerID)
     case peerListUpdated([PeerID])
@@ -57,41 +51,6 @@ enum TransportEvent: @unchecked Sendable {
     case messageDeliveryStatusUpdated(messageID: String, status: DeliveryStatus)
     case bluetoothStateUpdated(CBManagerState)
     case noiseIdentityAvailabilityUpdated(NoiseIdentityAvailability)
-}
-
-/// Downgrade-safe decision for a private-media recipient. Callers ask before
-/// prompting, and BLEService checks again when it consumes any one-shot
-/// legacy consent.
-enum PrivateMediaSendPolicy: Equatable {
-    case encrypted
-    /// A public announce hinted at encrypted media (or a prior authenticated
-    /// pin exists), but this exact Noise session has not yet supplied its
-    /// authenticated peer-state proof. Callers wait boundedly; they must not
-    /// pre-queue encrypted bytes or silently select the legacy path.
-    case awaitingCapabilityProof
-    case legacyRequiresConsent
-    case blockedDowngrade
-}
-
-/// Receiver-only persistence surface for explicit private-media deletion.
-/// Kept separate from `Transport` so sender retry branches can rebase without
-/// inheriting or implementing receiver storage concerns.
-protocol PrivateMediaDeletionPersisting: AnyObject {
-    @MainActor
-    func persistDeletedPrivateMedia(
-        messageIDs: [String],
-        payloadRelativePaths: [String: String],
-        protectedPayloadRelativePaths: Set<String>,
-        completion: @escaping @MainActor (Bool) -> Void
-    )
-
-    /// Gated unlink for a LEGACY (non-stable-ID) incoming payload whose
-    /// bubble was explicitly removed. Implementations delete the file only
-    /// when its path is not pending delivery and not reserved by any receipt
-    /// or in-flight deletion transaction; otherwise the file stays for
-    /// bounded quota cleanup.
-    @MainActor
-    func removeLegacyPrivateMediaPayload(relativePath: String)
 }
 
 protocol TransportEventDelegate: AnyObject {
@@ -260,10 +219,6 @@ extension BitchatDelegate {
             )
         case let .noisePayloadReceived(peerID, type, payload, timestamp):
             didReceiveNoisePayload(from: peerID, type: type, payload: payload, timestamp: timestamp)
-        case let .groupMessageReceived(payload, timestamp):
-            didReceiveGroupMessage(payload: payload, timestamp: timestamp)
-        case let .publicVoiceFrameReceived(peerID, nickname, payload, timestamp):
-            didReceivePublicVoiceFrame(from: peerID, nickname: nickname, payload: payload, timestamp: timestamp)
         case .peerConnected(let peerID):
             didConnectToPeer(peerID)
         case .peerDisconnected(let peerID):
@@ -283,14 +238,11 @@ extension BitchatDelegate {
 }
 
 extension BLEService: Transport {}
-extension BLEService: MeshFileTransferring {}
 extension BLEService: MeshCourierTransporting {}
-extension BLEService: MeshGroupMessaging {}
 extension BLEService: MeshDiagnosing {}
 extension BLEService: MeshVerifying {}
 extension BLEService: MeshPublicArchiving {}
 extension BLEService: BluetoothStateReporting {}
 extension BLEService: PanicResettingTransport {}
-extension BLEService: MeshBridgingTransport {}
 
 extension BLEService: MeshIdentityRecovering {}

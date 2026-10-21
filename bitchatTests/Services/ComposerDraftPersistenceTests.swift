@@ -27,6 +27,63 @@ struct ComposerDraftPersistenceTests {
         await TestHelpers.waitUntil(condition, timeout: TestConstants.settleTimeout)
     }
 
+    @Test func ramOnlyEditsAfterConfirmedPersistentWriteKeepDurableStatus() async throws {
+        struct CleanupFailure: Error, CustomStringConvertible {
+            let primary: Error
+            let cleanup: Error
+            var description: String { "primary: \(primary); independent owned cleanup: \(cleanup)" }
+        }
+        let fixture = try DraftFixture()
+        let repository = ComposerDraftRepository(persistence: fixture.backend(), owner: owner)
+        var primary: Error?
+        var observed: (status: ComposerDraftStatus, pending: Int, mesh: String, location: String,
+                       fallback: String, writesBefore: Int, writesAfter: Int,
+                       ciphertextBefore: Data, ciphertextAfter: Data)?
+        do {
+            try #require(repository.save("synthetic durable sentinel", for: .mesh))
+            await settled(repository)
+            try #require(repository.persistenceStatus == .durable)
+            try #require(repository.pendingCountForTesting == 0)
+            let writes = fixture.control.writeCount
+            try #require(writes > 0)
+            let ciphertext = try Data(contentsOf: fixture.url)
+            try #require(!ciphertext.isEmpty)
+            try #require(repository.load(.mesh) == "synthetic durable sentinel")
+
+            let location = ComposerDraftStore.Key.location(geohash: "synthetic-session-only")
+            let fallback = ComposerDraftStore.Key.privateChat(stableID: "synthetic-session-only")
+            try #require(repository.save("synthetic location RAM", for: location))
+            try #require(repository.save("synthetic fallback RAM", for: fallback))
+            await settled(repository)
+            observed = (repository.persistenceStatus, repository.pendingCountForTesting,
+                        repository.load(.mesh), repository.load(location), repository.load(fallback),
+                        writes, fixture.control.writeCount, ciphertext, try Data(contentsOf: fixture.url))
+        } catch {
+            primary = error
+        }
+        // Reach the existing real generation/IO barrier before removing only this owned directory.
+        repository.suspendForPanic()
+        var cleanup: Error?
+        do {
+            try FileManager.default.removeItem(at: fixture.root)
+        } catch {
+            cleanup = error
+        }
+        if let primary {
+            if let cleanup { throw CleanupFailure(primary: primary, cleanup: cleanup) }
+            throw primary
+        }
+        if let cleanup { throw cleanup }
+        let snapshot = try #require(observed)
+        #expect(snapshot.status == .durable)
+        #expect(snapshot.pending == 0)
+        #expect(snapshot.writesAfter == snapshot.writesBefore)
+        #expect(snapshot.ciphertextAfter == snapshot.ciphertextBefore)
+        #expect(snapshot.mesh == "synthetic durable sentinel")
+        #expect(snapshot.location == "synthetic location RAM")
+        #expect(snapshot.fallback == "synthetic fallback RAM")
+    }
+
     @Test func restartRestoresOnlyMeshAndFullNoiseKeysWithoutPlaintext() async throws {
         let fixture = try DraftFixture(); defer { fixture.remove() }
         let repository = ComposerDraftRepository(persistence: fixture.backend(), owner: owner)
@@ -327,15 +384,20 @@ struct ComposerDraftPersistenceTests {
         var draftAttempts = 0
         let mediaRoot = fixture.root.appendingPathComponent("media")
         try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
-        let operations = PanicRecoveryOperations.live(fileStore: BLEIncomingFileStore(baseDirectory: mediaRoot), defaults: defaults,
+        let operations = PanicRecoveryOperations.live(fileStore: PanicRecoveryFileStore(baseDirectory: mediaRoot), defaults: defaults,
             wipeDrafts: { draftAttempts += 1; throw ComposerDraftFailure.storageUnavailable })
         let intent = operations.begin()
         #expect(throws: (any Error).self) { try operations.wipeMedia(intent) }
         #expect(draftAttempts == 1)
         #expect(try operations.isPending())
-        let invalidRoot = fixture.root.appendingPathComponent("not-directory")
-        try Data([1]).write(to: invalidRoot)
-        let bothFail = PanicRecoveryOperations.live(fileStore: BLEIncomingFileStore(baseDirectory: invalidRoot), defaults: defaults,
+        final class RefusingFileManager: FileManager {
+            override func removeItem(at URL: URL) throws { throw CocoaError(.fileWriteNoPermission) }
+        }
+        let legacyMedia = mediaRoot.appendingPathComponent("files/images/incoming", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyMedia, withIntermediateDirectories: true)
+        let bothFail = PanicRecoveryOperations.live(
+            fileStore: PanicRecoveryFileStore(fileManager: RefusingFileManager(), baseDirectory: mediaRoot),
+            defaults: defaults,
             wipeDrafts: { draftAttempts += 1 })
         #expect(throws: (any Error).self) { try bothFail.wipeMedia(bothFail.begin()) }
         #expect(draftAttempts == 2)

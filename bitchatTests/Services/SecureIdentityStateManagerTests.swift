@@ -471,7 +471,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         manager.forceSave()
 
         let reloaded = SecureIdentityStateManager(keychain)
-        XCTAssertEqual(reloaded.getBlockedNostrPubkeys(), Set([pubkey.lowercased()]))
+        XCTAssertTrue(reloaded.isNostrBlocked(pubkeyHexLowercased: pubkey.lowercased()))
         XCTAssertTrue(reloaded.isNostrBlocked(pubkeyHexLowercased: pubkey))
     }
 
@@ -480,12 +480,12 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         let pubkey = "ABCDEF1234"
 
         manager.setNostrBlocked(pubkey, isBlocked: true)
-        _ = await waitUntil { manager.isNostrBlocked(pubkeyHexLowercased: pubkey) }
+        let primed = await waitUntil { manager.isNostrBlocked(pubkeyHexLowercased: pubkey) }
+        XCTAssertTrue(primed)
 
         manager.setNostrBlocked(pubkey, isBlocked: false)
         let cleared = await waitUntil {
-            !manager.isNostrBlocked(pubkeyHexLowercased: pubkey) &&
-            manager.getBlockedNostrPubkeys().isEmpty
+            !manager.isNostrBlocked(pubkeyHexLowercased: pubkey)
         }
         XCTAssertTrue(cleared)
     }
@@ -499,7 +499,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
 
         XCTAssertTrue(manager.getFavorites().isEmpty)
         XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
-        XCTAssertTrue(manager.getBlockedNostrPubkeys().isEmpty)
+        XCTAssertTrue(manager.isNostrBlocked(pubkeyHexLowercased: "ABCD"), "An unreadable block cache must refuse the peer")
         XCTAssertFalse(manager.isPersistenceAvailable)
         manager.setFavorite("new-peer", isFavorite: true)
         manager.forceSave()
@@ -516,7 +516,8 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         manager.setNostrBlocked("ABCD", isBlocked: true)
         let primed = await waitUntil {
             manager.isFavorite(fingerprint: fingerprint) &&
-            manager.isVerified(fingerprint: fingerprint)
+            manager.isVerified(fingerprint: fingerprint) &&
+            manager.isNostrBlocked(pubkeyHexLowercased: "ABCD")
         }
         XCTAssertTrue(primed)
 
@@ -524,35 +525,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         let cleared = await waitUntil {
             !manager.isFavorite(fingerprint: fingerprint) &&
             !manager.isVerified(fingerprint: fingerprint) &&
-            manager.getBlockedNostrPubkeys().isEmpty
-        }
-        XCTAssertTrue(cleared)
-    }
-
-    func test_privateMediaCapabilityPinPersistsMonotonicallyAndPanicClearRemovesIt() async {
-        let keychain = MockKeychain()
-        let fingerprint = Data(repeating: 0x42, count: 32).sha256Fingerprint()
-        let manager = SecureIdentityStateManager(keychain)
-
-        XCTAssertFalse(manager.hasObservedPrivateMediaCapability(fingerprint: fingerprint))
-        manager.markPrivateMediaCapable(fingerprint: fingerprint)
-        XCTAssertTrue(
-            manager.hasObservedPrivateMediaCapability(fingerprint: fingerprint),
-            "pin insertion must be synchronously visible to the next downgrade decision"
-        )
-
-        // Re-marking is idempotent, and the encrypted cache carries the pin
-        // across launches.
-        manager.markPrivateMediaCapable(fingerprint: fingerprint)
-        manager.forceSave()
-        let reloaded = SecureIdentityStateManager(keychain)
-        XCTAssertTrue(reloaded.hasObservedPrivateMediaCapability(fingerprint: fingerprint))
-
-        // ChatViewModel's panic path calls this same wipe after deleting
-        // keychain data; the in-memory pin must disappear immediately too.
-        reloaded.clearAllIdentityData()
-        let cleared = await waitUntil {
-            !reloaded.hasObservedPrivateMediaCapability(fingerprint: fingerprint)
+            !manager.isNostrBlocked(pubkeyHexLowercased: "ABCD")
         }
         XCTAssertTrue(cleared)
     }

@@ -5,9 +5,6 @@ extension PeerCapabilities {
     /// Each feature adds its bit here when it ships.
     static let localSupported: PeerCapabilities = [
         .vouch,
-        .prekeys,
-        .groups,
-        .privateMedia,
-        .privateMediaReceipts
+        .prekeys
     ]
 }

@@ -4,6 +4,11 @@ import Foundation
 /// QR verification scaffolding: schema, signing, and basic challenge/response helpers.
 final class VerificationService {
     static let shared = VerificationService()
+    private let currentDate: () -> Date
+
+    init(currentDate: @escaping () -> Date = Date.init) {
+        self.currentDate = currentDate
+    }
 
     // Injected running transport (do NOT create new BLEService). Noise
     // identity operations go through the transport's narrow noise* wrappers
@@ -110,10 +115,12 @@ final class VerificationService {
         let noiseKey = transport.noiseStaticPublicKeyData().hexEncodedString()
         let signKey = transport.noiseSigningPublicKeyData().hexEncodedString()
         guard VerificationQR.validHex(noiseKey, bytes: 32), VerificationQR.validHex(signKey, bytes: 32) else { return nil }
-        if let c = Cache.last, c.nick == nickname, c.npub == npub, c.proven == proven, c.noise == noiseKey, c.sign == signKey, Date().timeIntervalSince(c.builtAt) < 60 {
+        let now = currentDate()
+        guard let ts = Int64(exactly: now.timeIntervalSince1970.rounded(.towardZero)) else { return nil }
+        if let c = Cache.last, c.nick == nickname, c.npub == npub, c.proven == proven, c.noise == noiseKey, c.sign == signKey,
+           (0..<60).contains(now.timeIntervalSince(c.builtAt)) {
             return c.value
         }
-        let ts = Int64(Date().timeIntervalSince1970)
         var nonce = Data(count: 16)
         let status = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         guard status == errSecSuccess else { return nil }
@@ -138,7 +145,7 @@ final class VerificationService {
             signed.npubSigHex = proof.hexEncodedString()
         }
         let out = signed.toURLString()
-        Cache.last = (nickname, npub, proven, noiseKey, signKey, Date(), out)
+        Cache.last = (nickname, npub, proven, noiseKey, signKey, now, out)
         return out
     }
 

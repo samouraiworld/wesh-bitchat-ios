@@ -119,28 +119,6 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(request?.content.userInfo["peerID"] as? String, peerID.id)
     }
 
-    func test_weshDropsLocationChannelAlertsAndTheirDeepLinks() {
-        let deliverer = RecordingNotificationRequestDeliverer()
-        let service = NotificationService(
-            isRunningTestsProvider: { false },
-            authorizer: RecordingNotificationAuthorizer(),
-            requestDeliverer: deliverer,
-            allowsLocationChannelNotifications: false
-        )
-
-        service.sendGeohashActivityNotification(geohash: "87yv", bodyPreview: "Someone is here")
-
-        XCTAssertTrue(deliverer.requests.isEmpty)
-    }
-
-    func test_onlyAllowlistedInAppDeepLinksAreHandled() throws {
-        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "wesh://share"))))
-        XCTAssertTrue(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: "WESH://share"))))
-        for rejected in ["wesh://geohash/87yv", "bitchat://share", "https://share", "https://example.org",
-                         "wesh://user@share", "wesh://share:443", "tel:123", "wesh:share"] {
-            XCTAssertFalse(WeshDeepLinks.isInternal(try XCTUnwrap(URL(string: rejected))), rejected)
-        }
-    }
 
     func test_weshSchemeIsRegisteredWithTheSystem() throws {
         // Read the app's Info.plist from source: under SwiftPM, Bundle.main is the test runner.
@@ -165,15 +143,12 @@ final class NotificationServiceTests: XCTestCase {
             requestDeliverer: deliverer
         )
 
-        service.sendGeohashActivityNotification(geohash: "87yv", bodyPreview: "Someone is here")
         service.sendNetworkAvailableNotification(peerCount: 2)
 
-        XCTAssertEqual(deliverer.requests.count, 2)
-        XCTAssertEqual(deliverer.requests[0].content.userInfo["deeplink"] as? String, "wesh://geohash/87yv")
-        XCTAssertTrue(deliverer.requests[0].identifier.hasPrefix("geo-activity-87yv-"))
-        XCTAssertEqual(deliverer.requests[1].identifier, "network-available")
-        XCTAssertEqual(deliverer.requests[1].content.interruptionLevel, .timeSensitive)
-        XCTAssertEqual(deliverer.requests[1].content.body, "2 people around")
+        XCTAssertEqual(deliverer.requests.count, 1)
+        XCTAssertEqual(deliverer.requests[0].identifier, "network-available")
+        XCTAssertEqual(deliverer.requests[0].content.interruptionLevel, .timeSensitive)
+        XCTAssertEqual(deliverer.requests[0].content.body, "2 people around")
     }
 }
 

@@ -493,6 +493,26 @@ struct MessageRouterTests {
     }
 
     @Test @MainActor
+    func sendReadReceipt_neverReportsAMediaPlaceholderRead() async {
+        let peerID = PeerID(str: "0000000000000003")
+        let transport = MockTransport()
+        transport.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [transport])
+        let placeholderID = UnsupportedPrivateMedia.messageID(
+            payload: Data([0x01]), senderPeerID: peerID, recipientPeerID: transport.myPeerID
+        )
+
+        let done = router.sendReadReceipt(
+            ReadReceipt(originalMessageID: placeholderID, readerID: transport.myPeerID, readerNickname: "Me"),
+            to: peerID
+        )
+
+        // Settled, so nothing retries it, and nothing reaches a transport.
+        #expect(done)
+        #expect(transport.sentReadReceipts.isEmpty)
+    }
+
+    @Test @MainActor
     func sendFavoriteNotification_usesConnectedOrReachable() async {
         let peerID = PeerID(str: "0000000000000004")
         let transport = MockTransport()
@@ -794,88 +814,6 @@ struct MessageRouterTests {
         router.courierBecameAvailable(recipient)
         #expect(transport.sentCourierMessages.isEmpty)
     }
-
-    @Test @MainActor
-    func bridgeDepositCarriesOnlyAfterConfirmedSendAndRetriesFailure() async {
-        let recipient = PeerID(str: "00000000000000ba")
-        let recipientKey = Data(repeating: 0xBA, count: 32)
-        let transport = MockTransport()
-        let router = MessageRouter(
-            transports: [transport],
-            courierDirectory: Self.directory(recipient: recipient, recipientKey: recipientKey)
-        )
-        var completions: [@MainActor (Bool) -> Void] = []
-        router.bridgeCourierDeposit = { _, _, _, completion in
-            completions.append(completion)
-        }
-        var carried: [String] = []
-        router.onMessageCarried = { messageID, _ in carried.append(messageID) }
-
-        router.sendPrivate("Hello", to: recipient, recipientNickname: "Peer", messageID: "bridge-ack")
-        #expect(completions.count == 1)
-        #expect(carried.isEmpty)
-
-        // Sweeps while the WebSocket write is pending must not duplicate it.
-        router.retryBridgeCourierDeposits()
-        #expect(completions.count == 1)
-
-        completions.removeFirst()(false)
-        #expect(carried.isEmpty)
-
-        // A failed socket write releases the in-flight slot for a real retry.
-        router.retryBridgeCourierDeposits()
-        #expect(completions.count == 1)
-        completions.removeFirst()(true)
-        #expect(carried == ["bridge-ack"])
-    }
-
-    @Test @MainActor
-    func bridgeDepositsScopeCollidingMessageIDsByRecipient() async {
-        let firstRecipient = PeerID(str: "00000000000000b1")
-        let secondRecipient = PeerID(str: "00000000000000b2")
-        let firstKey = Data(repeating: 0xB1, count: 32)
-        let secondKey = Data(repeating: 0xB2, count: 32)
-        let recipientKeys = [
-            firstRecipient: firstKey,
-            secondRecipient: secondKey
-        ]
-        let router = MessageRouter(
-            transports: [MockTransport()],
-            courierDirectory: CourierDirectory(
-                noiseKey: { recipientKeys[$0] },
-                isTrustedCourier: { _ in false }
-            )
-        )
-        var requestedKeys: [Data] = []
-        var completions: [@MainActor (Bool) -> Void] = []
-        router.bridgeCourierDeposit = { _, _, recipientKey, completion in
-            requestedKeys.append(recipientKey)
-            completions.append(completion)
-        }
-        var carriedPeers: [PeerID] = []
-        router.onMessageCarried = { _, peerID in carriedPeers.append(peerID) }
-
-        router.sendPrivate(
-            "First",
-            to: firstRecipient,
-            recipientNickname: "First",
-            messageID: "bridge-collision"
-        )
-        router.sendPrivate(
-            "Second",
-            to: secondRecipient,
-            recipientNickname: "Second",
-            messageID: "bridge-collision"
-        )
-
-        #expect(completions.count == 2)
-        #expect(Set(requestedKeys) == [firstKey, secondKey])
-
-        completions.forEach { $0(true) }
-        #expect(Set(carriedPeers) == [firstRecipient, secondRecipient])
-    }
-
-    // MARK: - Outbox persistence
 
     @Test @MainActor
     func queuedMessagesSurviveRouterRestart() async {

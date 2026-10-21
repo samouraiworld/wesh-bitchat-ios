@@ -39,6 +39,7 @@ struct ArtiBackend: Sendable {
     var bootstrapProgress: @Sendable () -> Int
     var bootstrapSummary: @Sendable () -> String
     /// One TCP connect to the local SOCKS port; true if it accepted.
+    /// Cancellation must close an in-flight connect before returning.
     var probeSocks: @Sendable (_ port: Int) async -> Bool
 
     static let live = ArtiBackend(
@@ -55,6 +56,57 @@ struct ArtiBackend: Sendable {
         },
         probeSocks: { port in await TorManager.probeLocalSocks(port: port) }
     )
+}
+
+/// Owns one connect attempt, including cancellation before its transport is installed.
+/// The lock serializes transport start with cancellation. It is recursive because a
+/// transport can report an immediate result from its start callback.
+final class SocksProbeAttempt: @unchecked Sendable {
+    private let lock = NSRecursiveLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var cancelTransport: (@Sendable () -> Void)?
+    private var result: Bool?
+
+    func run(start: @escaping @Sendable () -> Void, cancel: @escaping @Sendable () -> Void) async -> Bool {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { pending in
+                install(pending, start: start, cancel: cancel)
+            }
+        } onCancel: {
+            self.complete(false)
+        }
+    }
+
+    private func install(_ pending: CheckedContinuation<Bool, Never>,
+                         start: @Sendable () -> Void, cancel: @escaping @Sendable () -> Void) {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            cancel()
+            pending.resume(returning: result)
+            return
+        }
+        continuation = pending
+        cancelTransport = cancel
+        start()
+        lock.unlock()
+    }
+
+    func complete(_ value: Bool) {
+        lock.lock()
+        guard result == nil else { lock.unlock(); return }
+        result = value
+        let pending = continuation
+        let cancel = cancelTransport
+        continuation = nil
+        cancelTransport = nil
+        // Keep a concurrent cancellation callback from returning before the
+        // winning callback has closed the transport. Both operations are short
+        // and nonblocking; recursive completion observes the stored result.
+        cancel?()
+        lock.unlock()
+        pending?.resume(returning: value)
+    }
 }
 
 /// Arti-based Tor integration for BitChat.
@@ -120,6 +172,9 @@ public final class TorManager: ObservableObject {
     // this, so a loop from a previous attempt cannot run out its deadline and
     // report a stall over state that a newer lifecycle event already owns.
     private var bootstrapGeneration = 0
+    private var readinessProbeTask: Task<Void, Never>?
+    // This task owns both bootstrap polling and the liveness loop it enters.
+    private var bootstrapTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
     // Background until the app says otherwise: a background relaunch (BLE
     // restoration) with Internet on must not start Arti, and only a scene
@@ -266,12 +321,13 @@ public final class TorManager: ObservableObject {
 
         // Start SOCKS readiness probe
         let generation = bootstrapGeneration
-        Task.detached(priority: .userInitiated) { [weak self] in
+        readinessProbeTask?.cancel()
+        readinessProbeTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let ready = await self.waitForSocksReady(timeout: 60.0)
+            let ready = await self.waitForSocksReady(timeout: 60.0, generation: generation)
             await MainActor.run {
                 // A stop or an unexpected exit since this probe began owns the state now.
-                guard generation == self.bootstrapGeneration else { return }
+                guard !Task.isCancelled, generation == self.bootstrapGeneration else { return }
                 self.socksReady = ready
                 if ready {
                     SecureLogger.info("TorManager: SOCKS ready at \(self.socksHost):\(self.socksPort)", category: .session)
@@ -283,55 +339,41 @@ public final class TorManager: ObservableObject {
         }
     }
 
-    private func waitForSocksReady(timeout: TimeInterval) async -> Bool {
+    private func waitForSocksReady(timeout: TimeInterval, generation: Int) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if await backend.probeSocks(socksPort) { return true }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return false }
+            let ready = await backend.probeSocks(socksPort)
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return false }
+            if ready { return true }
+            do { try await Task.sleep(nanoseconds: 250_000_000) }
+            catch { return false }
         }
         return false
     }
 
     nonisolated static func probeLocalSocks(port socksPort: Int) async -> Bool {
         #if canImport(Network)
-        await withCheckedContinuation { cont in
-            let params = NWParameters.tcp
-            let host = NWEndpoint.Host.ipv4(.loopback)
-            guard let port = NWEndpoint.Port(rawValue: UInt16(socksPort)) else {
-                cont.resume(returning: false)
-                return
+        guard let rawPort = UInt16(exactly: socksPort),
+              let port = NWEndpoint.Port(rawValue: rawPort) else { return false }
+        let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: port)
+        let conn = NWConnection(to: endpoint, using: .tcp)
+        let attempt = SocksProbeAttempt()
+        let timeout = DispatchWorkItem { attempt.complete(false) }
+        conn.stateUpdateHandler = { [weak attempt] state in
+            switch state {
+            case .ready: attempt?.complete(true)
+            case .failed, .cancelled: attempt?.complete(false)
+            default: break
             }
-            let endpoint = NWEndpoint.hostPort(host: host, port: port)
-            let conn = NWConnection(to: endpoint, using: params)
-
-            var resumed = false
-            let resumeOnce: (Bool) -> Void = { value in
-                if !resumed {
-                    resumed = true
-                    cont.resume(returning: value)
-                }
-            }
-
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    resumeOnce(true)
-                    conn.cancel()
-                case .failed, .cancelled:
-                    resumeOnce(false)
-                    conn.cancel()
-                default:
-                    break
-                }
-            }
-
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
-                resumeOnce(false)
-                conn.cancel()
-            }
-
-            conn.start(queue: DispatchQueue.global(qos: .utility))
         }
+        return await attempt.run(start: {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0, execute: timeout)
+            conn.start(queue: DispatchQueue.global(qos: .utility))
+        }, cancel: {
+            timeout.cancel()
+            conn.cancel()
+        })
         #else
         return false
         #endif
@@ -339,13 +381,22 @@ public final class TorManager: ObservableObject {
 
     // MARK: - Bootstrap Monitoring
 
+    private func cancelProbeTasks() {
+        readinessProbeTask?.cancel()
+        readinessProbeTask = nil
+        bootstrapTask?.cancel()
+        bootstrapTask = nil
+    }
+
     private func startBootstrapMonitor() {
         guard !bootstrapMonitorStarted else { return }
         bootstrapMonitorStarted = true
         bootstrapGeneration += 1
         let generation = bootstrapGeneration
-        Task.detached(priority: .utility) { [weak self] in
-            await self?.bootstrapPollLoop(generation: generation)
+        bootstrapTask?.cancel()
+        bootstrapTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.bootstrapPollLoop(generation: generation)
         }
     }
 
@@ -353,7 +404,7 @@ public final class TorManager: ObservableObject {
         let deadline = Date().addingTimeInterval(75)
         var didComplete = false
         while Date() < deadline {
-            guard generation == bootstrapGeneration else { return }
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return }
             guard backend.isRunning() else {
                 handleUnexpectedStop(reason: "Arti exited during bootstrap")
                 return
@@ -370,7 +421,8 @@ public final class TorManager: ObservableObject {
                 didComplete = true
                 break
             }
-            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            do { try await Task.sleep(nanoseconds: pollIntervalNanoseconds) }
+            catch { return }
         }
 
         // Running out the deadline is a reportable outcome, not silence. The
@@ -378,7 +430,7 @@ public final class TorManager: ObservableObject {
         // blocked network was indistinguishable from a slow one. A deliberate
         // shutdown mid-bootstrap is not a stall, hence the generation check.
         if !didComplete {
-            guard generation == bootstrapGeneration else { return }
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return }
             self.isStarting = false
             self.bootstrapDidStall = true
             SecureLogger.warning(
@@ -398,16 +450,17 @@ public final class TorManager: ObservableObject {
     /// caller keeps routing to a dead proxy.
     private func livenessLoop(generation: Int) async {
         var failedProbes = 0
-        while generation == bootstrapGeneration {
-            try? await Task.sleep(nanoseconds: livenessIntervalNanoseconds)
-            guard generation == bootstrapGeneration else { return }
+        while !Task.isCancelled, generation == bootstrapGeneration {
+            do { try await Task.sleep(nanoseconds: livenessIntervalNanoseconds) }
+            catch { return }
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return }
             guard backend.isRunning() else {
                 handleUnexpectedStop(reason: "Arti exited")
                 return
             }
             guard socksReady else { continue }
             let socksAlive = await backend.probeSocks(socksPort)
-            guard generation == bootstrapGeneration else { return }
+            guard !Task.isCancelled, generation == bootstrapGeneration else { return }
             failedProbes = socksAlive ? 0 : failedProbes + 1
             if failedProbes >= 2 {
                 handleUnexpectedStop(reason: "SOCKS listener stopped answering")
@@ -419,6 +472,7 @@ public final class TorManager: ObservableObject {
     private func handleUnexpectedStop(reason: String) {
         SecureLogger.error("TorManager: \(reason) without a stop request; Tor is down", category: .session)
         bootstrapGeneration += 1
+        cancelProbeTasks()
         // A runtime whose SOCKS listener is gone is stopped too, so the next
         // start boots a fresh one instead of adopting the broken one.
         if backend.isRunning() { _ = backend.stop() }
@@ -470,6 +524,7 @@ public final class TorManager: ObservableObject {
         SecureLogger.debug("TorManager: goDormantOnBackground() called", category: .session)
         Task { @MainActor in
             self.bootstrapGeneration += 1
+            self.cancelProbeTasks()
             self.isReady = false
             self.socksReady = false
             self.isStarting = false
@@ -480,6 +535,7 @@ public final class TorManager: ObservableObject {
         SecureLogger.debug("TorManager: shutdownCompletely() called", category: .session)
         startPendingAfterShutdown = false
         bootstrapGeneration += 1
+        cancelProbeTasks()
         shutdownsInFlight += 1
         Task.detached { [weak self] in
             guard let self = self else { return }
@@ -521,6 +577,7 @@ public final class TorManager: ObservableObject {
         allowAutoStart = false
         startPendingAfterShutdown = false
         bootstrapGeneration += 1
+        cancelProbeTasks()
         _ = backend.stop()
         let deadline = Date().addingTimeInterval(timeout)
         while backend.isRunning() && Date() < deadline {
@@ -542,6 +599,7 @@ public final class TorManager: ObservableObject {
         await MainActor.run {
             NotificationCenter.default.post(name: .TorWillRestart, object: nil)
             self.bootstrapGeneration += 1
+            self.cancelProbeTasks()
             self.isReady = false
             self.socksReady = false
             self.bootstrapProgress = 0
@@ -627,6 +685,8 @@ extension TorManager {
         allowAutoStart = allow
     }
 
+    #if os(iOS)
     @MainActor
     public func isAutoStartAllowed() -> Bool { allowAutoStart }
+    #endif
 }

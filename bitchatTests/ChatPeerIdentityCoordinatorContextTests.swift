@@ -169,18 +169,9 @@ private final class MockChatPeerIdentityContext: ChatPeerIdentityContext {
         socialIdentitiesByFingerprint[fingerprint]
     }
 
-    // Geohash & Nostr
-    var geoNicknames: [String: String] = [:]
-    var geohashPeople: [GeoPerson] = []
-    private(set) var registeredNostrKeyMappings: [(pubkey: String, peerID: PeerID)] = []
+    // Account Nostr identity
     private(set) var nostrFavoriteNotifications: [(noisePublicKey: Data, isFavorite: Bool)] = []
     var bridgedNostrKeysByNoiseKey: [Data: String] = [:]
-
-    func visibleGeohashPeople() -> [GeoPerson] { geohashPeople }
-
-    func registerNostrKeyMapping(_ pubkey: String, for peerID: PeerID) {
-        registeredNostrKeyMappings.append((pubkey, peerID))
-    }
 
     func bridgedNostrPublicKey(for noiseKey: Data) -> String? {
         bridgedNostrKeysByNoiseKey[noiseKey]
@@ -192,16 +183,11 @@ private final class MockChatPeerIdentityContext: ChatPeerIdentityContext {
 
     // Favorites
     var favoriteRelationshipsByNoiseKey: [Data: FavoritesPersistenceService.FavoriteRelationship] = [:]
-    var favoriteRelationshipsByPeerID: [PeerID: FavoritesPersistenceService.FavoriteRelationship] = [:]
     private(set) var addedFavorites: [(noiseKey: Data, nostrPublicKey: String?, nickname: String)] = []
     private(set) var removedFavorites: [Data] = []
 
     func favoriteRelationship(forNoiseKey noiseKey: Data) -> FavoritesPersistenceService.FavoriteRelationship? {
         favoriteRelationshipsByNoiseKey[noiseKey]
-    }
-
-    func favoriteRelationship(forPeerID peerID: PeerID) -> FavoritesPersistenceService.FavoriteRelationship? {
-        favoriteRelationshipsByPeerID[peerID]
     }
 
     func addFavorite(noiseKey: Data, nostrPublicKey: String?, nickname: String) {
@@ -420,51 +406,6 @@ struct ChatPeerIdentityCoordinatorContextTests {
 
         #expect(coordinator.resolveNickname(for: unknownPeer) == "anonfeed")
         #expect(coordinator.getMyFingerprint() == "my-fingerprint")
-    }
-
-    @Test @MainActor
-    func getPeerIDForNickname_inGeohashChannel_registersNostrMapping() async {
-        let context = MockChatPeerIdentityContext()
-        let coordinator = ChatPeerIdentityCoordinator(context: context)
-        let pubkey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".lowercased()
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruy"))
-        context.geohashPeople = [GeoPerson(id: pubkey, displayName: "alice#6789", lastSeen: Date())]
-        context.geoNicknames[pubkey] = "alice"
-
-        // Suffixed display-name match.
-        let bySuffix = coordinator.getPeerIDForNickname("alice#6789")
-        #expect(bySuffix == PeerID(nostr_: pubkey))
-        // Base-nickname match via geoNicknames.
-        let byBase = coordinator.getPeerIDForNickname("ALICE")
-        #expect(byBase == PeerID(nostr_: pubkey))
-        #expect(context.registeredNostrKeyMappings.count == 2)
-        #expect(context.registeredNostrKeyMappings.allSatisfy { $0.pubkey == pubkey })
-
-        // Mesh channel falls through to the unified peer service.
-        context.activeChannel = .mesh
-        let meshPeer = PeerID(str: "1122334455667788")
-        context.peerIDsByNickname["carol"] = meshPeer
-        #expect(coordinator.getPeerIDForNickname("carol") == meshPeer)
-    }
-
-    @Test @MainActor
-    func getPeerIDForNickname_inGeohashChannel_refusesAmbiguousBaseName() async {
-        let context = MockChatPeerIdentityContext()
-        let coordinator = ChatPeerIdentityCoordinator(context: context)
-        let aliceA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        let aliceB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        context.activeChannel = .location(GeohashChannel(level: .city, geohash: "u4pruy"))
-        context.geohashPeople = [
-            GeoPerson(id: aliceA, displayName: "alice#aaaa", lastSeen: Date()),
-            GeoPerson(id: aliceB, displayName: "alice#bbbb", lastSeen: Date())
-        ]
-        context.geoNicknames[aliceA] = "alice"
-        context.geoNicknames[aliceB] = "alice"
-        context.peerIDsByNickname["alice"] = PeerID(str: "1122334455667788")
-
-        #expect(coordinator.getPeerIDForNickname("alice") == nil)
-        #expect(coordinator.getPeerIDForNickname("alice#aaaa") == PeerID(nostr_: aliceA))
-        #expect(coordinator.getPeerIDForNickname("alice#bbbb") == PeerID(nostr_: aliceB))
     }
 
     @Test @MainActor

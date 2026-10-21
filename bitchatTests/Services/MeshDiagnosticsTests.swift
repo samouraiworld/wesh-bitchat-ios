@@ -232,7 +232,6 @@ private final class DiagnosticsMockContext: CommandContextProvider {
     var activeChannel: ChannelID = .mesh
     var selectedPrivateChatPeer: PeerID?
     var blockedUsers: Set<String> = []
-    let idBridge = NostrIdentityBridge(keychain: MockKeychain())
 
     var nicknameToPeerID: [String: PeerID] = [:]
     private(set) var commandOutputs: [String] = []
@@ -242,19 +241,12 @@ private final class DiagnosticsMockContext: CommandContextProvider {
         nicknameToPeerID[nickname]
     }
 
-    func getVisibleGeoParticipants() -> [CommandGeoParticipant] { [] }
-    func nostrPubkeyForDisplayName(_ displayName: String) -> String? { nil }
     func startPrivateChat(with peerID: PeerID) {}
     func sendPrivateMessage(_ content: String, to peerID: PeerID) {}
     func clearCurrentPublicTimeline() {}
     func clearPrivateChat(_ peerID: PeerID) {}
     func sendPublicRaw(_ content: String) {}
     func sendPublicMessage(_ content: String) {}
-    func groupCreate(named name: String) -> CommandResult { .handled }
-    func groupInvite(nickname: String) -> CommandResult { .handled }
-    func groupRemove(nickname: String) -> CommandResult { .handled }
-    func groupLeave() -> CommandResult { .handled }
-    func groupList() -> CommandResult { .handled }
     func addLocalPrivateSystemMessage(_ content: String, to peerID: PeerID) {}
     func addPublicSystemMessage(_ content: String) {}
     func toggleFavorite(peerID: PeerID) {}

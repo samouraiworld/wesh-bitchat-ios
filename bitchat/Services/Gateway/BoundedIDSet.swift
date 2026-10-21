@@ -7,8 +7,7 @@
 //
 
 /// Insertion-ordered string set with a fixed capacity; the oldest entry is
-/// evicted when full. Shared by the gateway and bridge loop-prevention
-/// caches.
+/// evicted when full. Used to deduplicate opened ordinary courier messages.
 struct BoundedIDSet {
     private var members: Set<String> = []
     private var order: [String] = []
@@ -16,10 +15,6 @@ struct BoundedIDSet {
 
     init(capacity: Int) {
         self.capacity = capacity
-    }
-
-    func contains(_ id: String) -> Bool {
-        members.contains(id)
     }
 
     /// Returns false when the ID was already present.

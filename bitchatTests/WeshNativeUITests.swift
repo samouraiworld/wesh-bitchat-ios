@@ -80,7 +80,7 @@ struct WeshNativeUITests {
         #expect(feedback.consume(fourth) == nil)
     }
 
-    @Test func disappearedConversationCannotFocusItsOldResultOrImportedDraft() throws {
+    @Test func disappearedConversationCannotFocusItsOldResult() throws {
         var feedback = WeshComposerFeedbackState()
         feedback.appear()
         feedback.showAction("Synthetic result")
@@ -92,24 +92,14 @@ struct WeshNativeUITests {
         #expect(feedback.consume(oldResult) == nil)
         feedback.appear()
         #expect(feedback.readyFocus == nil)
-        feedback.showImportedDraft("Synthetic imported draft", focusComposer: true)
-        let oldImport = try #require(feedback.readyFocus)
-        feedback.disappear()
-        feedback.appear()
-        feedback.showImportedDraft("Synthetic imported draft", focusComposer: true)
-        let currentImport = try #require(feedback.readyFocus)
-        #expect(feedback.consume(oldImport) == nil)
-        #expect(feedback.consume(currentImport) == .composer)
-        #expect(feedback.consume(currentImport) == nil)
-        feedback.showImportedDraft("Synthetic import before editing", focusComposer: true)
-        let editedImport = try #require(feedback.readyFocus)
-        feedback.edited(rejection: nil)
-        #expect(feedback.consume(editedImport) == nil)
-        feedback.showImportedDraft("Synthetic dismissed review", focusComposer: false)
-        #expect(feedback.readyFocus == nil)
+        feedback.showAction("Synthetic result after reopening")
+        let current = try #require(feedback.readyFocus)
+        #expect(feedback.consume(oldResult) == nil)
+        #expect(feedback.consume(current) == .feedback)
+        #expect(feedback.consume(current) == nil)
     }
 
-    @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "groups", "outbox"]) @MainActor
+    @Test(arguments: ["gossip", "courier", "bridge", "prekeys", "board", "outbox"]) @MainActor
     func panicFileStoresRejectUnlinkFailureAndAllowVerifiedRetry(kind: String) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("checked-wipe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -128,16 +118,13 @@ struct WeshNativeUITests {
             let store = CourierStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "bridge":
-            let store = BridgeDropDedupStore(fileURL: url, wipeFileManager: files)
+            let store = RetiredBridgeDropStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "prekeys":
             let store = PrekeyBundleStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         case "board":
-            let store = BoardStore(fileURL: url, wipeFileManager: files)
-            wipe = { store.wipe() }
-        case "groups":
-            let store = GroupStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
+            let store = RetiredBoardStore(fileURL: url, wipeFileManager: files)
             wipe = { store.wipe() }
         default:
             let store = MessageOutboxStore(keychain: MockKeychain(), fileURL: url, wipeFileManager: files)
@@ -182,7 +169,7 @@ struct WeshNativeUITests {
         #expect(current.load() == [fresh])
     }
 
-    @Test(arguments: ["courier", "bridge", "archive", "prekeys", "board", "share", "groups", "outbox"]) @MainActor
+    @Test(arguments: ["courier", "bridge", "archive", "prekeys", "board", "geography", "share", "groups", "outbox", "sightings"]) @MainActor
     func everyPersistentStoreRefusalBlocksGlobalCommitAndAllStoresAreStillAttempted(failing: String) throws {
         var failed = true
         var attempts: [String] = []
@@ -190,7 +177,8 @@ struct WeshNativeUITests {
         let wipes = PanicPersistentStoreWipes(
             courier: { wipe("courier") }, bridge: { wipe("bridge") },
             publicArchive: { wipe("archive") }, prekeys: { wipe("prekeys") },
-            board: { wipe("board") }, sharedContent: { wipe("share") }
+            board: { wipe("board") }, geography: { wipe("geography") }, sightings: { wipe("sightings") },
+            legacyGroups: { wipe("groups") }, sharedContent: { wipe("share") }
         )
         let keychain = MockKeychain()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("global-checked-wipe-\(UUID().uuidString)", isDirectory: true)
@@ -200,7 +188,6 @@ struct WeshNativeUITests {
         try Data("synthetic persisted metadata".utf8).write(to: url)
         let files = WeshWipeFileManager()
         files.refuseRemoval = true
-        let group = failing == "groups" ? GroupStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
         let outbox = failing == "outbox" ? MessageOutboxStore(keychain: keychain, fileURL: url, wipeFileManager: files) : nil
         let transport = MockTransport()
         var committed = 0
@@ -210,10 +197,10 @@ struct WeshNativeUITests {
         let vm = ChatViewModel(keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: MockIdentityManager(keychain), transport: transport, outboxStore: outbox,
             panicRecoveryOperations: operations, weshPrivatePolicyEnabled: true,
-            panicPersistentStoreWipes: wipes, groupStore: group)
+            panicPersistentStoreWipes: wipes)
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
-        #expect(attempts == ["courier", "bridge", "archive", "prekeys", "board", "share"])
+        #expect(attempts == ["geography", "courier", "bridge", "archive", "sightings", "groups", "prekeys", "board", "share"])
         #expect(committed == 0 && vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts)
         #expect(vm.weshMeetingNote.isSuspended)
@@ -223,7 +210,7 @@ struct WeshNativeUITests {
         #expect(vm.panicClearAllData())
         #expect(committed == 1 && !vm.panicRecoveryBlocked)
         #expect(transport.startServicesCallCount == starts + 1)
-        #expect(attempts.count == 6)
+        #expect(attempts.count == 9)
     }
 
     @Test @MainActor func meetingNoteWipeRemovesEveryPersistedFieldAndRejectsOldEditorEvents() throws {
@@ -711,7 +698,7 @@ struct WeshNativeUITests {
         }
     }
 
-    @Test @MainActor func unavailableIdentityCacheRefusesImportAndRecoversOnForeground() {
+    @Test @MainActor func unavailableIdentityCacheRefusesPrivateSendingAndRecoversOnForeground() {
         let previousContacts = WeshQRTrust.shared.contacts
         let key = Data(repeating: 0x76, count: 32)
         let peer = PeerID(hexData: key)
@@ -730,12 +717,10 @@ struct WeshNativeUITests {
         let vm = ChatViewModel(keychain: MockKeychain(),
             idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
             identityManager: identity, transport: MockTransport(), weshPrivatePolicyEnabled: true)
-        #expect(!vm.canImportWeshSharedContent(to: peer))
         #expect(!vm.canSendWeshPrivate(to: peer))
         storage.simulatedReadError = nil
         vm.handleDidBecomeActive()
         #expect(identity.isPersistenceAvailable)
-        #expect(vm.canImportWeshSharedContent(to: peer))
     }
 
     @Test func timelineUsesCalendarDaysAcrossMidnightAndDaylightSaving() throws {
@@ -809,21 +794,6 @@ struct WeshNativeUITests {
         vm.bluetoothState = .poweredOn
         vm.sendMeshWave()
         #expect(transport.sentMessages.count == 1)
-    }
-
-    @Test @MainActor func sharedDraftRequiresExactCurrentUnblockedEnrollment() {
-        let key = Data(repeating: 41, count: 32)
-        let otherKey = Data(repeating: 42, count: 32)
-        let peer = PeerID(hexData: key)
-        let other = PeerID(hexData: otherKey)
-        let contacts = [WeshQRTrust.Contact(noiseKeyHex: key.hexEncodedString(), nickname: "Contact test")]
-        let enrolled: Set<String> = [key.sha256Fingerprint(), otherKey.sha256Fingerprint()]
-        #expect(WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer.toShort(), contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: other, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: [], qrFingerprints: enrolled, blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: [], blockedFingerprints: []))
-        #expect(!WeshQRTrust.canPrepareDraft(to: peer, contacts: contacts, qrFingerprints: enrolled, blockedFingerprints: [key.sha256Fingerprint()]))
     }
 
     private var vector: VerificationService.VerificationQR {
@@ -936,6 +906,66 @@ struct WeshNativeUITests {
         }
     }
 
+    /// The media tree an older build wrote, if any: a private file must not
+    /// add anything to it. Only read, never written, by these tests.
+    private func legacyMediaListing() -> [String]? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let files = base.appendingPathComponent("files", isDirectory: true)
+        let items = FileManager.default.enumerator(at: files, includingPropertiesForKeys: nil)?
+            .compactMap { ($0 as? URL)?.path }
+        return items?.sorted()
+    }
+
+    @Test @MainActor func privateFileFromANonEnrolledSenderLeavesNoTrace() async throws {
+        WeshInboundRequests.shared.clear()
+        defer { WeshInboundRequests.shared.clear() }
+        try await withVerifiedPrivateFixture { fixture in
+            #expect(WeshQRTrust.shared.remove(sessionKey: fixture.key))
+            // The chat is open: an admitted line would earn a READ receipt here.
+            fixture.vm.selectedPrivateChatPeer = fixture.shortID
+            let before = legacyMediaListing()
+            let payload = Data([0x01, 0x00, 0x09]) + Data("photo.jpg".utf8) + Data([0x04, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xD8])
+
+            fixture.vm.didReceiveTransportEvent(.noisePayloadReceived(
+                peerID: fixture.shortID, type: .privateFile, payload: payload, timestamp: Date()
+            ))
+
+            #expect(fixture.vm.privateMessages(for: fixture.shortID).isEmpty)
+            #expect(fixture.vm.privateMessages(for: fixture.peer).isEmpty)
+            #expect(WeshInboundRequests.shared.requests.isEmpty)
+            #expect(fixture.transport.sentDeliveryAcks.isEmpty)
+            #expect(fixture.transport.sentReadReceipts.isEmpty)
+            #expect(legacyMediaListing() == before)
+        }
+    }
+
+    @Test @MainActor func privateFileFromAQRContactIsExactlyOnePlaceholderAndNoFile() async throws {
+        WeshInboundRequests.shared.clear()
+        defer { WeshInboundRequests.shared.clear() }
+        try await withVerifiedPrivateFixture { fixture in
+            let before = legacyMediaListing()
+            let payload = Data([0x01, 0x00, 0x09]) + Data("photo.jpg".utf8) + Data([0x04, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xD8])
+
+            // A BitChat sender retries an unacknowledged file with the same bytes.
+            for _ in 0..<2 {
+                fixture.vm.didReceiveTransportEvent(.noisePayloadReceived(
+                    peerID: fixture.shortID, type: .privateFile, payload: payload, timestamp: Date()
+                ))
+            }
+
+            let lines = (fixture.vm.privateMessages(for: fixture.shortID) + fixture.vm.privateMessages(for: fixture.peer))
+                .filter { $0.content == WeshIncomingMediaPolicy.placeholder }
+            // Mirrored alias copies share the one ID.
+            #expect(Set(lines.map(\.id)).count == 1)
+            #expect(WeshInboundRequests.shared.requests.isEmpty)
+            // Not acknowledged as delivered: the sender never sees it arrive.
+            #expect(fixture.transport.sentDeliveryAcks.isEmpty)
+            #expect(legacyMediaListing() == before)
+        }
+    }
+
     @Test @MainActor func reportingAPublicAuthorBlocksAndHidesOnlyThatIdentityLocally() async throws {
         try await withVerifiedPrivateFixture { fixture in
             let other = PeerID(str: "0102030405060708")
@@ -974,7 +1004,7 @@ struct WeshNativeUITests {
         }
         #expect(requests.add(message("a", "[image] photo.jpg"), from: key))
         #expect(!requests.add(message("a"), from: key))
-        #expect(requests.requests.first?.messages.first?.content == "Média non pris en charge")
+        #expect(requests.requests.first?.messages.first?.content == WeshIncomingMediaPolicy.placeholder)
         for index in 0..<(WeshInboundRequests.maxMessagesPerRequest + 5) { requests.add(message("m\(index)"), from: key) }
         #expect(requests.requests.first?.messages.count == WeshInboundRequests.maxMessagesPerRequest)
         for index in 1..<WeshInboundRequests.maxRequests { requests.add(message("x"), from: Data(repeating: UInt8(index), count: 32)) }
@@ -1074,8 +1104,11 @@ struct WeshNativeUITests {
     }
 
     @Test func legacyMediaReferencesRenderAsPlaceholder() {
-        #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == "Média non pris en charge")
-        #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == "Média non pris en charge")
+        let placeholder = WeshIncomingMediaPolicy.placeholder
+        #expect(!placeholder.isEmpty && placeholder != "pave.media.unsupported")
+        #expect(WeshIncomingMediaPolicy.displayText("[voice] note.m4a") == placeholder)
+        #expect(WeshIncomingMediaPolicy.displayText("[image] photo.jpg") == placeholder)
+        #expect(WeshIncomingMediaPolicy.displayText("[file] doc.pdf") == placeholder)
         #expect(WeshIncomingMediaPolicy.displayText("Bonjour [image] ") == "Bonjour [image] ")
         #expect(WeshLinks.terms.absoluteString == "https://wesh.samourai.app/conditions")
     }
@@ -1115,14 +1148,18 @@ struct WeshNativeUITests {
         #expect(!reloaded.remove(sessionKey: first))
     }
 
-    @Test func receiptsDoNotConflateQueuedCarriedAndDelivered() {
-        #expect(WeshDelivery.publicLabel(.notSentYet) == "En attente de diffusion")
-        #expect(WeshDelivery.publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
-        #expect(WeshDelivery.publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
-        #expect(WeshDelivery.label(.notSentYet) != WeshDelivery.label(.sent))
-        #expect(WeshDelivery.label(.sent).contains("non confirmée"))
-        #expect(WeshDelivery.label(.carried).contains("non confirmée"))
-        #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
-        #expect(WeshDelivery.label(.read(by: "Nora", at: Date())) == "Lu")
+    @Test func receiptsDoNotConflateQueuedCarriedAndDelivered() throws {
+        let path = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+        let publicLabel: (DeliveryStatus) -> String = { WeshDelivery.publicLabel($0, bundle: bundle, locale: Locale(identifier: "fr")) }
+        let label: (DeliveryStatus) -> String = { WeshDelivery.label($0, bundle: bundle, locale: Locale(identifier: "fr")) }
+        #expect(publicLabel(.notSentYet) == "En attente de diffusion")
+        #expect(publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
+        #expect(publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
+        #expect(label(.notSentYet) != label(.sent))
+        #expect(label(.sent).contains("non confirmée"))
+        #expect(label(.carried).contains("non confirmée"))
+        #expect(label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
+        #expect(label(.read(by: "Nora", at: Date())) == "Lu")
     }
 }

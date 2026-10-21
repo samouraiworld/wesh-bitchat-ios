@@ -63,7 +63,6 @@ protocol ChatVerificationContext: AnyObject {
     var locallyOwnedNpubs: Set<String>? { get }
     func hasEstablishedNoiseSession(with peerID: PeerID) -> Bool
     func triggerHandshake(with peerID: PeerID)
-    func privateMediaPeerDidAuthenticate(_ peerID: PeerID)
     /// Retries only private messages previously transmitted through a secure
     /// session and still pending an ack. Both ephemeral and stable aliases
     /// are supplied because either can own the outbox entry.
@@ -137,10 +136,6 @@ extension ChatViewModel: ChatVerificationContext {
 
     var locallyOwnedNpubs: Set<String>? { try? idBridge.locallyOwnedNpubs() }
 
-    func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {
-        mediaTransferCoordinator.peerDidAuthenticate(peerID.toShort())
-    }
-
     func retrySecurePrivateMessagesAfterAuthentication(for peerIDAliases: [PeerID]) {
         messageRouter.retrySecurePrivateMessagesAfterAuthentication(for: peerIDAliases)
     }
@@ -164,7 +159,6 @@ extension ChatViewModel: ChatVerificationContext {
 extension ChatVerificationContext {
     var isIdentityStateAvailable: Bool { true }
     var hasPendingIdentityStateChanges: Bool { false }
-    func privateMediaPeerDidAuthenticate(_ peerID: PeerID) {}
 }
 
 @MainActor
@@ -256,7 +250,7 @@ final class ChatVerificationCoordinator {
     /// names my key, not the code on screen, so trust still comes only from my own scan.
     func scannedMyCode(noiseKey: Data, since: Date) -> Bool {
         guard noiseKey.count == 32, let challengeAt = scannedMyCodeAt[noiseKey.sha256Fingerprint()] else { return false }
-        return challengeAt >= since && now().timeIntervalSince(challengeAt) <= Self.scannedMyCodeLifetime
+        return challengeAt >= since && (0...Self.scannedMyCodeLifetime).contains(now().timeIntervalSince(challengeAt))
     }
 
     /// No older than one displayed code: a QR is accepted for five minutes.
@@ -316,7 +310,6 @@ final class ChatVerificationCoordinator {
                     guard let self else { return }
 
                     SecureLogger.debug("🔐 Authenticated: \(peerID)", category: .security)
-                    self.context.privateMediaPeerDidAuthenticate(peerID)
 
                     if self.context.isVerifiedFingerprint(fingerprint) {
                         self.context.setEncryptionStatus(.noiseVerified, for: peerID)

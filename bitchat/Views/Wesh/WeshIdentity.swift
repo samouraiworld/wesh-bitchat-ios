@@ -410,28 +410,9 @@ final class WeshQRTrust: ObservableObject {
         if let requestedKey, requestedKey != sessionKey { return false }
         return qrFingerprints.contains(sessionKey.sha256Fingerprint())
     }
-
-    /// Preparing a draft may happen offline, but must still target a full,
-    /// currently enrolled identity. This never grants permission to transmit.
-    static func canPrepareDraft(to peerID: PeerID, contacts: [Contact],
-                                qrFingerprints: Set<String>, blockedFingerprints: Set<String>) -> Bool {
-        guard let key = peerID.noiseKey, key.count == 32,
-              contacts.contains(where: { $0.peerID == peerID }) else { return false }
-        let fingerprint = key.sha256Fingerprint()
-        return qrFingerprints.contains(fingerprint) && !blockedFingerprints.contains(fingerprint)
-    }
 }
 
 extension ChatViewModel {
-    @MainActor
-    func canImportWeshSharedContent(to peerID: PeerID) -> Bool {
-        guard identityManager.isPersistenceAvailable,
-              !identityManager.hasPendingPersistenceChanges else { return false }
-        return WeshQRTrust.canPrepareDraft(to: peerID, contacts: WeshQRTrust.shared.contacts,
-                                   qrFingerprints: WeshQRTrust.shared.fingerprints,
-                                   blockedFingerprints: identityManager.getBlockedFingerprints())
-    }
-
     @MainActor
     func canSendWeshPrivate(to peerID: PeerID) -> Bool {
         // Transport availability is shared; public disclosure is checked only

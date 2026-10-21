@@ -18,8 +18,6 @@
   ],
   "_units": "operations per second, matching each benchmark's PERF line",
   "_reference_local_numbers_2026_06": {
-    "nostrInbound.fresh": 2132,
-    "nostrInbound.duplicate": 2558907,
     "bleInbound.roundTripAndDedup": 38063,
     "gcs.buildAndDecode": 776,
     "delivery.incrementalUpdate": 172615,
@@ -35,8 +33,6 @@
     "store.steadyStateAppend": 53976
   },
   "floors": {
-    "nostrInbound.fresh": 450,
-    "nostrInbound.duplicate": 250000,
     "bleInbound.roundTripAndDedup": 9500,
     "gcs.buildAndDecode": 190,
     "delivery.incrementalUpdate": 43000,

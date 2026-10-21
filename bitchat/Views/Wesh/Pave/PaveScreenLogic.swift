@@ -68,14 +68,34 @@ struct PaveQRRefreshClock: Equatable {
 
     let issuedAt: Date
 
-    func isExpired(at now: Date) -> Bool {
-        now.timeIntervalSince(issuedAt) >= Self.lifetime
+    static func refresh(makePayload: () -> String, currentDate: () -> Date)
+        -> (payload: String, sampledAt: Date, clock: Self?) {
+        let payload = makePayload()
+        let sampledAt = currentDate()
+        return (payload, sampledAt, forDisplayedPayload(payload, at: sampledAt))
     }
 
-    /// Whole minutes left, rounded up, never below one while the code is shown.
+    /// Reads the issuance of our displayed payload for its countdown only;
+    /// this does not authenticate or enroll a scanned contact.
+    static func forDisplayedPayload(_ payload: String, at now: Date) -> Self? {
+        guard now.timeIntervalSince1970.isFinite,
+              let url = URL(string: payload),
+              let qr = VerificationService.VerificationQR.fromURL(url) else { return nil }
+        let issued = Date(timeIntervalSince1970: TimeInterval(qr.ts))
+        guard now.timeIntervalSince(issued) >= 0 else { return nil }
+        return Self(issuedAt: issued)
+    }
+
+    func isExpired(at now: Date) -> Bool {
+        let age = now.timeIntervalSince(issuedAt)
+        return !age.isFinite || age < 0 || age >= Self.lifetime
+    }
+
+    /// Whole minutes left, rounded up, bounded by the code's five-minute lifetime.
     func remainingMinutes(at now: Date) -> Int {
-        let remaining = Self.lifetime - now.timeIntervalSince(issuedAt)
-        return max(1, Int((remaining / 60).rounded(.up)))
+        let age = now.timeIntervalSince(issuedAt)
+        guard age.isFinite, age >= 0, age < Self.lifetime else { return 1 }
+        return max(1, Int(((Self.lifetime - age) / 60).rounded(.up)))
     }
 }
 

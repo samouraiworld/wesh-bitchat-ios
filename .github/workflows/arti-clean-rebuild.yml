@@ -1,0 +1,42 @@
+name: Arti Independent Clean Rebuild
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  comparison-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check synthetic comparison failures
+        run: python3 -m unittest discover -s scripts/tests -p test_arti_clean_rebuild.py
+
+  clean-rebuild:
+    needs: comparison-contracts
+    runs-on: xcode-27
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Rebuild five architectures without restored build caches
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_arti_clean_rebuild.py \
+            --checkout "$GITHUB_WORKSPACE" \
+            --work "$RUNNER_TEMP/arti-clean-rebuild" \
+            --report "$RUNNER_TEMP/arti-clean-rebuild-result.json"
+      - name: Retain only the successful hash comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: arti-clean-rebuild-comparison
+          path: ${{ runner.temp }}/arti-clean-rebuild-result.json
+          if-no-files-found: error
+          retention-days: 14

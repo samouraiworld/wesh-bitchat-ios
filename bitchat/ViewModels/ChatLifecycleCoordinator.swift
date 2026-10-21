@@ -26,8 +26,6 @@ protocol ChatLifecycleContext: AnyObject {
     var sentReadReceipts: Set<String> { get }
     var nickname: String { get }
     var myPeerID: PeerID { get }
-    var activeChannel: ChannelID { get }
-    var nostrKeyMapping: [PeerID: String] { get }
     /// Records that a read receipt is being sent for `messageID`.
     /// Returns `false` when one was already recorded — the caller must skip sending.
     @discardableResult
@@ -54,10 +52,8 @@ protocol ChatLifecycleContext: AnyObject {
     func routePrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String)
     @discardableResult
     func routeReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) -> Bool
-    func sendGeohashReadReceipt(_ messageID: String, toRecipientHex recipientHex: String, from identity: NostrIdentity)
 
     // MARK: Nostr & geohash
-    func deriveNostrIdentity(forGeohash geohash: String) throws -> NostrIdentity
 
     // MARK: Favorites (shared with `ChatPrivateConversationContext`)
     /// The persisted favorite relationship for the peer's Noise static key, if any.
@@ -176,34 +172,8 @@ final class ChatLifecycleCoordinator {
     func markPrivateMessagesAsRead(from peerID: PeerID) {
         context.markChatAsRead(from: peerID)
 
-        // Group chats are keyed under a virtual group_ peerID; no member IS the
-        // conversation peer, so the receipt loops below (which gate on
-        // senderPeerID == peerID) must never emit a read/delivered receipt for
-        // one. This guard makes that explicit so a future refactor of the
-        // receipt matching can't silently start leaking receipts into groups.
-        guard !peerID.isGroup else { return }
-
-        if peerID.isGeoDM,
-           let recipientHex = context.nostrKeyMapping[peerID],
-           case .location(let channel) = context.activeChannel,
-           let identity = try? context.deriveNostrIdentity(forGeohash: channel.geohash) {
-            let messages = context.privateMessages(for: peerID)
-            for message in messages where message.senderPeerID == peerID && !message.isRelay {
-                guard !context.sentReadReceipts.contains(message.id) else { continue }
-
-                SecureLogger.debug(
-                    "GeoDM: sending READ for mid=\(message.id.prefix(8))… to=\(recipientHex.prefix(8))…",
-                    category: .session
-                )
-                context.sendGeohashReadReceipt(
-                    message.id,
-                    toRecipientHex: recipientHex,
-                    from: identity
-                )
-                context.markReadReceiptSent(message.id)
-            }
-            return
-        }
+        // Historical virtual recipients cannot initiate a new geographic send.
+        guard !peerID.isGeoDM, !peerID.isGeoChat else { return }
 
         var noiseKeyHex: PeerID?
 

@@ -42,6 +42,8 @@ protocol ChatTransportEventContext: AnyObject {
     func checkForMentions(_ message: BitchatMessage)
     func sendHapticFeedback(for message: BitchatMessage)
     func parseMentions(from content: String) -> [String]
+    /// The private-message admission rule (Wesh: a QR-enrolled contact).
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool
 
     // MARK: Peer identity & sessions
     func isPeerBlocked(_ peerID: PeerID) -> Bool
@@ -77,12 +79,6 @@ protocol ChatTransportEventContext: AnyObject {
     func handleVerifyChallengePayload(from peerID: PeerID, payload: Data)
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data)
 
-    // MARK: Live voice (push-to-talk)
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date)
-
-    // MARK: Group payloads (creator-signed state over Noise)
-    func handleGroupInvitePayload(from peerID: PeerID, payload: Data)
-    func handleGroupKeyUpdatePayload(from peerID: PeerID, payload: Data)
     func handleVouchPayload(from peerID: PeerID, payload: Data)
 }
 
@@ -152,18 +148,6 @@ extension ChatViewModel: ChatTransportEventContext {
 
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data) {
         verificationCoordinator.handleVerifyResponsePayload(from: peerID, payload: payload)
-    }
-
-    // `handleVoiceFramePayload(from:payload:timestamp:)` lives in
-    // ChatViewModel+PrivateChat.swift next to the rest of the live-voice
-    // surface.
-
-    func handleGroupInvitePayload(from peerID: PeerID, payload: Data) {
-        groupCoordinator.handleGroupInvitePayload(from: peerID, payload: payload)
-    }
-
-    func handleGroupKeyUpdatePayload(from peerID: PeerID, payload: Data) {
-        groupCoordinator.handleGroupKeyUpdatePayload(from: peerID, payload: payload)
     }
 
     func handleVouchPayload(from peerID: PeerID, payload: Data) {
@@ -496,23 +480,45 @@ private extension ChatTransportEventCoordinator {
         case .verifyResponse:
             context.handleVerifyResponsePayload(from: peerID, payload: payload)
 
-        case .groupInvite:
-            context.handleGroupInvitePayload(from: peerID, payload: payload)
-
-        case .groupKeyUpdate:
-            context.handleGroupKeyUpdatePayload(from: peerID, payload: payload)
+        case .groupInvite, .groupKeyUpdate:
+            // Wesh has no groups; the type values stay reserved for BitChat
+            // peers, whose invites and key updates are dropped unread.
+            break
 
         case .vouch:
             context.handleVouchPayload(from: peerID, payload: payload)
 
         case .voiceFrame:
-            context.handleVoiceFramePayload(from: peerID, payload: payload, timestamp: timestamp)
+            // Wesh has no live voice; the type value stays reserved for
+            // BitChat peers, whose voice frames are dropped unread.
+            break
 
-        case .privateFile, .authenticatedPeerState:
-            // BLEService validates and persists decrypted private files before
-            // emitting a normal `.messageReceived` event, and consumes peer
-            // state inside the transport. Neither payload crosses this
-            // UI-facing typed-payload fallback.
+        case .privateFile:
+            // Wesh has no media. A BitChat private file from an admitted
+            // contact becomes one placeholder line, handled like a private
+            // message but never acknowledged as delivered; nothing of the file
+            // is kept. From anyone else it leaves no trace.
+            guard !context.isPeerBlocked(peerID), context.admitsPrivateSender(peerID) else { return }
+            let message = BitchatMessage(
+                id: UnsupportedPrivateMedia.messageID(
+                    payload: payload,
+                    senderPeerID: peerID,
+                    recipientPeerID: context.myPeerID
+                ),
+                sender: context.unifiedPeer(for: peerID)?.nickname ?? "Unknown",
+                content: WeshIncomingMediaPolicy.placeholder,
+                timestamp: timestamp,
+                isRelay: false,
+                originalSender: nil,
+                isPrivate: true,
+                recipientNickname: context.nickname,
+                senderPeerID: peerID,
+                deliveryStatus: .delivered(to: context.nickname, at: timestamp)
+            )
+            context.handlePrivateMessage(message)
+
+        case .authenticatedPeerState:
+            // Consumed inside the transport; it never reaches this fallback.
             break
         }
     }

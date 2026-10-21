@@ -63,9 +63,7 @@ struct NostrRelayManagerDependencies {
     var activationAllowed: () -> Bool
     var userTorEnabled: () -> Bool
     var hasMutualFavorites: () -> Bool
-    var hasLocationPermission: () -> Bool
     var mutualFavoritesPublisher: AnyPublisher<Set<Data>, Never>
-    var locationPermissionPublisher: AnyPublisher<LocationChannelManager.PermissionState, Never>
     var torEnforced: () -> Bool
     var torIsReady: () -> Bool
     var torIsForeground: () -> Bool
@@ -82,12 +80,6 @@ struct NostrRelayManagerDependencies {
     /// Relays added by hand, merged with the built-in set. Injectable so tests
     /// do not have to write to shared preferences.
     var customRelays: () -> [String] = { NostrRelaySettings.customRelays() }
-    /// Whether a location channel is currently open. Mirrors the third arm of
-    /// `NetworkActivationService`'s gate: teleporting into a geohash needs no
-    /// location permission, and without this the relays would stay filtered out
-    /// for someone who denied location and has no mutual favorites.
-    var isInLocationChannel: () -> Bool = { false }
-    var selectedChannelPublisher: AnyPublisher<ChannelID, Never> = Empty().eraseToAnyPublisher()
     /// Wesh Internet mode: when set, these are the only relays ever contacted
     /// (built-in, custom and geohash relays are ignored), they need no
     /// favorite/location gate (`activationAllowed` is the toggle), and Tor is
@@ -102,9 +94,7 @@ private extension NostrRelayManagerDependencies {
             activationAllowed: { NetworkActivationService.shared.activationAllowed },
             userTorEnabled: { NetworkActivationService.shared.userTorEnabled },
             hasMutualFavorites: { !FavoritesPersistenceService.shared.mutualFavorites.isEmpty },
-            hasLocationPermission: { LocationChannelManager.shared.permissionState == .authorized },
             mutualFavoritesPublisher: FavoritesPersistenceService.shared.$mutualFavorites.eraseToAnyPublisher(),
-            locationPermissionPublisher: LocationChannelManager.shared.$permissionState.eraseToAnyPublisher(),
             torEnforced: { TorManager.shared.torEnforced },
             torIsReady: { TorManager.shared.isReady },
             torIsForeground: { TorManager.shared.isForeground() },
@@ -122,11 +112,6 @@ private extension NostrRelayManagerDependencies {
             },
             now: Date.init,
             jitterUnit: { Double.random(in: 0..<1) },
-            isInLocationChannel: {
-                if case .location = LocationChannelManager.shared.selectedChannel { return true }
-                return false
-            },
-            selectedChannelPublisher: LocationChannelManager.shared.$selectedChannel.eraseToAnyPublisher(),
             weshPinnedRelays: WeshInternetPolicy.pinnedRelays
         )
     }
@@ -202,7 +187,6 @@ final class NostrRelayManager: ObservableObject {
     private let dependencies: NostrRelayManagerDependencies
     private var allowDefaultRelays: Bool = false
     private var hasMutualFavorites: Bool = false
-    private var hasLocationPermission: Bool = false
     private var connections: [String: NostrRelayConnectionProtocol] = [:]
     private var subscriptions: [String: Set<String>] = [:] // relay URL -> active subscription IDs
     // Not-yet-flushed REQs per relay, bounded by a per-relay cap (oldest by
@@ -331,7 +315,6 @@ final class NostrRelayManager: ObservableObject {
     internal init(dependencies: NostrRelayManagerDependencies) {
         self.dependencies = dependencies
         hasMutualFavorites = dependencies.hasMutualFavorites()
-        hasLocationPermission = dependencies.hasLocationPermission()
         reloadDefaultRelays()
         applyDefaultRelayPolicy(force: true)
         // Deterministic JSON shape for outbound requests
@@ -342,22 +325,6 @@ final class NostrRelayManager: ObservableObject {
                 guard let self = self else { return }
                 self.hasMutualFavorites = !favorites.isEmpty
                 self.applyDefaultRelayPolicy()
-            }
-            .store(in: &cancellables)
-        dependencies.locationPermissionPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                guard let self = self else { return }
-                let authorized = (state == .authorized)
-                if authorized == self.hasLocationPermission { return }
-                self.hasLocationPermission = authorized
-                self.applyDefaultRelayPolicy()
-            }
-            .store(in: &cancellables)
-        dependencies.selectedChannelPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.applyDefaultRelayPolicy()
             }
             .store(in: &cancellables)
         // Adding or removing a relay by hand changes the target set, so
@@ -814,7 +781,7 @@ final class NostrRelayManager: ObservableObject {
 
     private func applyDefaultRelayPolicy(force: Bool = false) {
         let shouldAllow = dependencies.weshPinnedRelays != nil
-            || hasMutualFavorites || hasLocationPermission || dependencies.isInLocationChannel()
+            || hasMutualFavorites
         if !force && shouldAllow == allowDefaultRelays { return }
         allowDefaultRelays = shouldAllow
         if shouldAllow {
@@ -1275,7 +1242,6 @@ final class NostrRelayManager: ObservableObject {
                 // (no per-frame main hop).
                 self.inboundRouter.yield(InboundFrame(message: message), to: relayUrl)
 
-
                 // Continue receiving
                 Task { @MainActor in
                     guard self.connections[relayUrl] === task else { return }
@@ -1452,13 +1418,6 @@ final class NostrRelayManager: ObservableObject {
         }
     }
 
-    /// Whether any of `relayUrls` currently holds a live connection. Lets
-    /// subscribers distinguish "loaded, empty" from "never reached a relay"
-    /// when an EOSE fallback fires.
-    func isAnyRelayConnected(among relayUrls: [String]) -> Bool {
-        let targets = Set(relayUrls)
-        return relays.contains { targets.contains($0.url) && $0.isConnected }
-    }
 
     /// Marks the REQ as delivered to `relayUrl`: EOSE completion now waits on
     /// this relay instead of the never-connected remainder.
@@ -1885,58 +1844,7 @@ struct NostrFilter: Encodable {
         return filter
     }
 
-    // For location channels: geohash-scoped ephemeral events (kind 20000) and presence (kind 20001)
-    static func geohashEphemeral(_ geohash: String, since: Date? = nil, limit: Int = 1000) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [20000, 20001]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["g": [geohash]]
-        filter.limit = limit
-        return filter
-    }
 
-    // For location notes: persistent text notes (kind 1) tagged with geohash
-    static func geohashNotes(_ geohash: String, since: Date? = nil, limit: Int = 200) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [1]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["g": [geohash]]
-        filter.limit = limit
-        return filter
-    }
-
-    // For location notes with neighbors: subscribe to multiple geohashes (center + neighbors)
-    static func geohashNotes(_ geohashes: [String], since: Date? = nil, limit: Int = 200) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [1]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["g": geohashes]
-        filter.limit = limit
-        return filter
-    }
-
-    // For the mesh bridge: rendezvous messages (kind 20000) and presence
-    // (kind 20001) tagged `#r` with one or more cells (own + neighbors).
-    static func bridgeRendezvous(_ cells: [String], since: Date? = nil, limit: Int = 200) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [20000, 20001]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["r": cells]
-        filter.limit = limit
-        return filter
-    }
-
-    // For courier drops: sealed envelopes (kind 1401) parked under rotating
-    // recipient tags (`#x`, hex). Callers pass every candidate tag (adjacent
-    // UTC days x recipients) in one filter.
-    static func courierDrops(recipientTagsHex: [String], since: Date? = nil, limit: Int = 100) -> NostrFilter {
-        var filter = NostrFilter()
-        filter.kinds = [NostrProtocol.EventKind.courierDrop.rawValue]
-        filter.since = since?.timeIntervalSince1970.toInt()
-        filter.tagFilters = ["x": recipientTagsHex]
-        filter.limit = limit
-        return filter
-    }
 }
 
 // Dynamic coding key for tag filters

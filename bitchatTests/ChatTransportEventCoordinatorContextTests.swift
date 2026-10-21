@@ -100,6 +100,13 @@ private final class MockChatTransportEventContext: ChatTransportEventContext {
         content.contains("@me") ? ["me"] : []
     }
 
+    /// Wesh admission: nil admits everyone (upstream behaviour).
+    var admittedPrivateSenders: Set<PeerID>?
+
+    func admitsPrivateSender(_ peerID: PeerID) -> Bool {
+        admittedPrivateSenders?.contains(peerID) ?? true
+    }
+
     // Peer identity & sessions
     var blockedPeers: Set<PeerID> = []
     var peersByID: [PeerID: BitchatPeer] = [:]
@@ -163,29 +170,10 @@ private final class MockChatTransportEventContext: ChatTransportEventContext {
         verifyResponsePayloads.append((peerID, payload))
     }
 
-    // Group payloads
-    private(set) var groupInvitePayloads: [(peerID: PeerID, payload: Data)] = []
-    private(set) var groupKeyUpdatePayloads: [(peerID: PeerID, payload: Data)] = []
-
-    func handleGroupInvitePayload(from peerID: PeerID, payload: Data) {
-        groupInvitePayloads.append((peerID, payload))
-    }
-
-    func handleGroupKeyUpdatePayload(from peerID: PeerID, payload: Data) {
-        groupKeyUpdatePayloads.append((peerID, payload))
-    }
-
     private(set) var vouchPayloads: [(peerID: PeerID, payload: Data)] = []
 
     func handleVouchPayload(from peerID: PeerID, payload: Data) {
         vouchPayloads.append((peerID, payload))
-    }
-
-    // Live voice payloads
-    private(set) var voiceFramePayloads: [(peerID: PeerID, payload: Data, timestamp: Date)] = []
-
-    func handleVoiceFramePayload(from peerID: PeerID, payload: Data, timestamp: Date) {
-        voiceFramePayloads.append((peerID, payload, timestamp))
     }
 }
 
@@ -245,9 +233,8 @@ struct ChatTransportEventCoordinatorContextTests {
         #expect(context.meshDeliveryAcks.isEmpty)
 
         // Private goes to the private handler, public to the public handler;
-        // both get mention checks and haptics. Stable-media ACK authorization
-        // belongs to BLEFileTransferHandler after its durable commit and this
-        // synchronous acceptance result, not to the generic UI coordinator.
+        // both get mention checks and haptics. The generic UI coordinator
+        // never acknowledges delivery for them.
         let stableMediaID = "media-\(String(repeating: "a", count: 32))"
         coordinator.didReceiveMessage(makeMessage(
             id: stableMediaID,
@@ -479,5 +466,110 @@ struct ChatTransportEventCoordinatorContextTests {
         await drainMainActorTasks()
         #expect(context.handledPrivateMessages.count == 1)
         #expect(context.meshDeliveryAcks.count == 1)
+    }
+
+    @Test @MainActor
+    func groupPayloadsFromBitChatPeersReachNoHandler() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+
+        for type in [NoisePayloadType.groupInvite, .groupKeyUpdate] {
+            coordinator.didReceiveNoisePayload(from: peerID, type: type, payload: Data([0x01, 0x02]), timestamp: Date())
+        }
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.verifyChallengePayloads.isEmpty)
+        #expect(context.verifyResponsePayloads.isEmpty)
+        #expect(context.vouchPayloads.isEmpty)
+    }
+
+    @Test @MainActor
+    func voiceFramePayloadsFromBitChatPeersReachNoHandler() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+
+        coordinator.didReceiveNoisePayload(
+            from: peerID,
+            type: .voiceFrame,
+            payload: Data(repeating: 0x71, count: 64),
+            timestamp: Date()
+        )
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.verifyChallengePayloads.isEmpty)
+        #expect(context.verifyResponsePayloads.isEmpty)
+        #expect(context.vouchPayloads.isEmpty)
+    }
+
+    @Test @MainActor
+    func privateFileFromANonAdmittedSenderLeavesNoTrace() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let stranger = PeerID(str: "99aabbccddeeff00")
+        let blockedContact = PeerID(str: "1122334455667788")
+        context.admittedPrivateSenders = [blockedContact]
+        context.blockedPeers = [blockedContact]
+
+        for (peerID, type) in [(stranger, NoisePayloadType.privateFile), (blockedContact, .privateFile),
+                               (stranger, .authenticatedPeerState)] {
+            coordinator.didReceiveNoisePayload(from: peerID, type: type, payload: Data([0x01, 0x00, 0x01, 0x61]), timestamp: Date())
+        }
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.notifyUIChangedCount == 0)
+    }
+
+    @Test @MainActor
+    func privateFileFromAnAdmittedContactIsOnePlaceholderWithoutDeliveryAck() async {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.admittedPrivateSenders = [peerID]
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+        let payload = Data([0x04, 0x00, 0x00, 0x00, 0x03, 0xFF, 0xD8, 0xFF])
+
+        // A sender retry carries the same bytes: it maps to the same line.
+        for _ in 0..<2 {
+            coordinator.didReceiveNoisePayload(from: peerID, type: .privateFile, payload: payload, timestamp: Date())
+        }
+        await drainMainActorTasks()
+
+        let expectedID = UnsupportedPrivateMedia.messageID(
+            payload: payload,
+            senderPeerID: peerID,
+            recipientPeerID: context.myPeerID
+        )
+        #expect(context.handledPrivateMessages.map(\.id) == [expectedID, expectedID])
+        let line = context.handledPrivateMessages.first
+        #expect(line?.content == WeshIncomingMediaPolicy.placeholder)
+        #expect(line?.sender == "alice")
+        #expect(line?.isPrivate == true)
+        #expect(line?.senderPeerID == peerID)
+        #expect(context.meshDeliveryAcks.isEmpty)
     }
 }

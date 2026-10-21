@@ -8,52 +8,17 @@ enum TransportConfig {
     static let messageTTLDefault: UInt8 = 7                 // Default TTL for mesh flooding
     static let bleMaxInFlightAssemblies: Int = 128          // Cap concurrent fragment assemblies
     static let bleHighDegreeThreshold: Int = 6              // For adaptive TTL/probabilistic relays
-    static let bleMaxConcurrentTransfers: Int = 2           // Limit simultaneous large media sends
     // Clock skew tolerated on received packet timestamps. Live packets must
     // sit within ± this of local time; sync replies may be arbitrarily old
     // but never further ahead than this, and the gossip store applies the
     // same future bound so nothing future-dated is stored, served or restored.
     static let bleMaxTimestampSkewMs: UInt64 = 120_000
-    // Bounded wait for the session-authenticated capability proof used by
-    // private-media migration. Expiry never auto-sends clear bytes; it only
-    // resolves to the existing one-shot consent or downgrade-blocked path.
-    static let privateMediaCapabilityProofTimeoutSeconds: TimeInterval = 5
-    static let privateMediaCapabilityProofPendingPeerCap: Int = 64
-    static let privateMediaCapabilityProofWaitersPerPeerCap: Int = 16
-    /// Accepted private-media receipts and explicit-deletion tombstones each
-    /// receive this independent capacity.
-    static let privateMediaReceivedLedgerCapacity: Int = 4_096
-    /// A bounded retry horizon prevents stable receipt state from growing into
-    /// permanent application history.
-    static let privateMediaReceivedLedgerTTLSeconds: TimeInterval =
-        7 * 24 * 60 * 60
     static let bleFragmentRelayMinDelayMs: Int = 8          // Faster forwarding for media fragments
     static let bleFragmentRelayMaxDelayMs: Int = 25         // Upper jitter bound for fragment relays
     // Fragment relay TTL in sparse graphs; matches messageTTLDefault so media
     // reaches as far as text. Dense graphs clamp harder in RelayController.
     static let bleFragmentRelayTtlCap: UInt8 = 7
     static let bleFragmentRelayTtlCapDense: UInt8 = 5       // Contain fragment floods in dense graphs
-
-    // Live voice (push-to-talk)
-    // Burst-content budget per voice packet. Sized so the Noise ciphertext
-    // (content + 1 type byte + 16 tag bytes) stays within MessagePadding's
-    // 256-byte bucket and the whole directed packet (16 header + 8 sender +
-    // 8 recipient + 256 payload = 288 bytes) rides one BLE frame — live audio
-    // must never enter the fragment scheduler, which caps concurrent
-    // transfers at 2 and would let voice starve file sends.
-    static let pttMaxBurstContentBytes: Int = 210
-    static let pttJitterBufferSeconds: TimeInterval = 0.35  // buffered audio before live playback starts
-    static let pttJitterDeadlineSeconds: TimeInterval = 0.5 // start anyway after this wall-clock wait
-    static let pttBurstEndTimeoutSeconds: TimeInterval = 3.0 // no frames -> burst considered ended
-    static let pttMaxConcurrentAssemblies: Int = 8          // concurrent inbound bursts cap
-    static let pttMaxBurstBytes: Int = 384 * 1024           // 120s at ~2KB/s + generous slack
-    static let pttFinishedBurstRegistrySeconds: TimeInterval = 600 // window to absorb the finalized note
-    // Inbound flood guard: a real burst arrives at ~2KB/s; allow 3x plus a
-    // small settling allowance before dropping a sender's frames.
-    static let pttInboundMaxBytesPerSecond: Int = 6_000
-    // Public bursts are live-only traffic: frames older than this are relay
-    // stragglers or replays, not audio anyone should start hearing.
-    static let pttPublicFrameMaxAgeSeconds: TimeInterval = 30
 
     // Mesh diagnostics (/ping)
     static let meshPingTimeoutSeconds: TimeInterval = 10    // Give up on a probe after this window
@@ -64,9 +29,7 @@ enum TransportConfig {
     static let privateChatCap: Int = 1337
     static let meshTimelineCap: Int = 1337
     static let geoTimelineCap: Int = 1337
-    static let geoNicknameParticipantsCap: Int = 1337
     static let contentLRUCap: Int = 2000
-    static let geoSamplingEventLRUCap: Int = 2000
 
     // Timers
     static let networkResetGraceSeconds: TimeInterval = 600 // 10 minutes
@@ -116,9 +79,9 @@ enum TransportConfig {
     static let nostrInboundPerRelayBufferCap: Int = 256
     // Hard per-frame byte bound, applied as URLSessionWebSocketTask
     // .maximumMessageSize (oversized frames fail the receive instead of
-    // buffering). BitChat's legitimate Nostr traffic is small: geohash chat /
-    // presence events (kind 20000/20001), kind-1 notes, and NIP-17
-    // gift-wrapped DMs carrying text payloads or receipts are all a few KiB,
+    // buffering). BitChat's legitimate Nostr traffic is small: NIP-17
+    // gift-wrapped private messages carrying text payloads or receipts are
+    // a few KiB,
     // and most public relays reject events beyond ~64–256 KiB anyway. 512 KiB
     // leaves an order-of-magnitude margin over anything we produce or expect
     // while halving the URLSession default (1 MiB), so a hostile relay's
@@ -146,15 +109,12 @@ enum TransportConfig {
     static let uiSenderRateBucketMaxEntries: Int = 2000
     static let uiContentRateBucketMaxEntries: Int = 2000
     static let uiRateBucketIdleTTL: TimeInterval = 10 * 60
-    // Cap teleported-participant markers so remote events cannot grow the set.
-    static let geoTeleportedParticipantsCap: Int = 1337
 
     // UI sleeps/delays
     static let uiStartupInitialDelaySeconds: TimeInterval = 1.0
     static let uiStartupPhaseDurationSeconds: TimeInterval = 2.0
     static let uiBatchDispatchStaggerSeconds: TimeInterval = 0.15
     static let uiAnimationMediumSeconds: TimeInterval = 0.2
-    static let uiRecentCutoffFiveMinutesSeconds: TimeInterval = 5 * 60
     static let uiMeshEmptyConfirmationSeconds: TimeInterval = 30.0
 
     // BLE maintenance & thresholds
@@ -201,38 +161,15 @@ enum TransportConfig {
     static let bleConnectedAnnounceJitterDense: TimeInterval = 8.0
     static let bleConnectedAnnounceJitterSparse: TimeInterval = 4.0
 
-    // Location
-    static let locationDistanceFilterMeters: Double = 1000
-    // Live (channel sheet open) distance threshold for meaningful updates
-    static let locationDistanceFilterLiveMeters: Double = 10.0
-    static let locationLiveRefreshInterval: TimeInterval = 5.0
-
-    // Notifications (geohash)
-    static let uiGeoNotifyCooldownSeconds: TimeInterval = 60.0
-    static let uiGeoNotifySnippetMaxLen: Int = 80
-
-    // Nostr geohash
-    static let nostrGeohashInitialLookbackSeconds: TimeInterval = 3600
-    static let nostrGeohashInitialLimit: Int = 200
-    static let nostrGeoRelayCount: Int = 5
-    static let nostrGeohashSampleLookbackSeconds: TimeInterval = 300
-    static let nostrGeohashSampleLimit: Int = 100
+    // Account Nostr inbox
     static let nostrDMSubscribeLookbackSeconds: TimeInterval = 86400
     // Tolerated clock skew for the client-side rumor-timestamp window on
     // inbound Nostr DMs (senders stamp the inner rumor with real time; only
     // the outer gift wrap is randomized per NIP-17).
     static let nostrDMMaxClockSkewSeconds: TimeInterval = 900
-    // A sampled chat message this recent means "a conversation is happening
-    // there" for the empty-timeline nearby-activity hint.
-    static let uiGeohashChatActivityWindowSeconds: TimeInterval = 900
     // Startup delay before reading the gossip archive for "heard here
     // earlier" echoes; covers the archive's async disk restore.
     static let uiArchivedEchoLoadDelaySeconds: TimeInterval = 1.5
-    // Dead drops: location notes left via /drop expire after this long.
-    static let locationDropExpirySeconds: TimeInterval = 24 * 60 * 60
-    // Poll cadence while geo notes wait for a relay connection (Tor warming
-    // up); re-subscribes as soon as one comes up.
-    static let uiGeoNotesConnectivityRetrySeconds: TimeInterval = 3.0
 
     // Message deduplication
     static let messageDedupMaxAgeSeconds: TimeInterval = 300
@@ -255,7 +192,7 @@ enum TransportConfig {
     static let nostrTorReadyMaxWaitAttempts: Int = 3
     static let nostrPendingSendQueueCap: Int = 200
     // Sample interval for the send-queue overflow warning (first + every Nth
-    // dropped event). Drops are ephemeral presence/geo traffic — log-only.
+    // dropped event).
     static let nostrPendingSendDropLogInterval: Int = 10
     // Pending (not-yet-flushed) REQs are bounded per relay: oldest-by-insertion
     // eviction at the cap, plus an age sweep on connect attempts. Durable
@@ -265,17 +202,11 @@ enum TransportConfig {
     // Fallback deadline for treating a subscription's initial fetch as complete
     // when a relay never sends EOSE (generous to cover Tor circuit setup).
     static let nostrSubscriptionEOSEFallbackSeconds: TimeInterval = 10.0
-    // A bridge drop is durable only after NIP-01 `OK`. Relays that omit OK must
+    // A confirmed send requires NIP-01 `OK`. Relays that omit OK must
     // not pin the router's in-flight state indefinitely.
     static let nostrConfirmedSendAckTimeoutSeconds: TimeInterval = 10.0
     // After this long, a relay marked permanently failed gets another chance.
     static let nostrRelayFailureCooldownSeconds: TimeInterval = 600.0
-
-    // Geo relay directory
-    static let geoRelayFetchIntervalSeconds: TimeInterval = 60 * 60 * 24
-    static let geoRelayRefreshCheckIntervalSeconds: TimeInterval = 60 * 60
-    static let geoRelayRetryInitialSeconds: TimeInterval = 60
-    static let geoRelayRetryMaxSeconds: TimeInterval = 60 * 60
 
     // BLE operational delays
     static let bleInitialAnnounceDelaySeconds: TimeInterval = 0.6
@@ -384,9 +315,7 @@ enum TransportConfig {
     static let syncStalePeerCleanupIntervalSeconds: TimeInterval = 60.0
     static let syncStalePeerTimeoutSeconds: TimeInterval = 60.0
     static let syncFragmentCapacity: Int = 600
-    static let syncFileTransferCapacity: Int = 200
     static let syncFragmentIntervalSeconds: TimeInterval = 30.0
-    static let syncFileTransferIntervalSeconds: TimeInterval = 60.0
     static let syncMessageIntervalSeconds: TimeInterval = 15.0
     static let syncResponseRateLimitMaxResponses: Int = 8
     static let syncResponseRateLimitWindowSeconds: TimeInterval = 30.0

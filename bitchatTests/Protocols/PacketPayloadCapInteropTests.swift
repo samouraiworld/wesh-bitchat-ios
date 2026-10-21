@@ -56,8 +56,7 @@ struct PacketPayloadCapInteropTests {
                 packet: packet,
                 pad: false,
                 maxChunk: chunkSize,
-                directedPeer: nil,
-                transferId: nil
+                directedPeer: nil
             )
             let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
                 for: request,
@@ -87,13 +86,13 @@ struct PacketPayloadCapInteropTests {
     @Test func largestControlAndEnvelopePayloadsStillDecode() throws {
         let cases: [(type: MessageType, payload: Data, compresses: Bool)] = [
             (.announce, try maxAnnounce(), true),
-            (.boardPost, maxBoardPost(), true),
+            // Frozen maximum legacy TLV size; the app no longer owns its codec.
+            (.boardPost, Data(repeating: 0x41, count: 848), true),
             (.nostrCarrier, try maxNostrCarrier(), true),
             (.requestSync, maxRequestSync(), false),
             (.courierEnvelope, try maxCourierEnvelope(), false),
-            (.groupMessage, try maxGroupMessage(), false),
             (.prekeyBundle, try maxPrekeyBundle(), false),
-            (.voiceFrame, try maxVoiceFrame(), false)
+            (.voiceFrame, maxVoiceFrame(), false)
             // announceV2's largest payload is checked in BitFoundation's
             // PacketPayloadLimitsTests: nothing in the app emits it yet, and a
             // reference here would make it look used to the dead-code scan.
@@ -111,12 +110,11 @@ struct PacketPayloadCapInteropTests {
     }
 
     @Test func largeFileTransfersStillDecode() throws {
-        // A 1 MiB image whose bytes compress well: the largest legitimate
-        // inflation a broadcast file can ask for.
-        var content = Data([0xFF, 0xD8, 0xFF, 0xE0])
-        content.append(Data(count: FileTransferLimits.maxPayloadBytes - content.count))
-        let file = BitchatFilePacket(fileName: "photo.jpg", fileSize: nil, mimeType: "image/jpeg", content: content)
-        let payload = try #require(file.encode())
+        // A BitChat peer's 1 MiB file whose bytes compress well: the largest
+        // legitimate inflation 0x22 can ask for. Wesh drops the decoded
+        // packet unread, but decoding must stay bounded by the media cap.
+        var payload = Data([0xFF, 0xD8, 0xFF, 0xE0])
+        payload.append(Data(count: FileTransferLimits.maxPayloadBytes - payload.count))
         let packet = makePacket(type: .fileTransfer, payload: payload, version: 2)
         #expect(try roundTripIsCompressed(packet))
 
@@ -138,28 +136,18 @@ struct PacketPayloadCapInteropTests {
         ).encode())
     }
 
-    private func maxBoardPost() -> Data {
-        BoardWire.post(BoardPostPacket(
-            postID: Data(repeating: 0x31, count: BoardWireConstants.postIDLength),
-            geohash: "9q8yyk8yuv12",
-            content: String(repeating: "x", count: BoardWireConstants.contentMaxBytes),
-            authorSigningKey: Data(repeating: 0x32, count: BoardWireConstants.signingKeyLength),
-            authorNickname: String(repeating: "n", count: BoardWireConstants.nicknameMaxBytes),
-            createdAt: 1_740_000_000_000,
-            expiresAt: 1_740_000_000_000 + BoardWireConstants.maxLifetimeMs,
-            flags: BoardPostPacket.urgentFlag,
-            signature: signature
-        )).encode()
-    }
-
     private func maxNostrCarrier() throws -> Data {
         let prefix = Data(#"{"content":""#.utf8)
         let suffix = Data(#""}"#.utf8)
         var json = prefix
-        json.append(Data(repeating: 0x61, count: NostrCarrierPacket.maxEventJSONBytes - prefix.count - suffix.count))
+        json.append(Data(repeating: 0x61, count: 16 * 1024 - prefix.count - suffix.count))
         json.append(suffix)
-        let carrier = try #require(NostrCarrierPacket(direction: .fromGateway, geohash: "9q8yyk8yuv12", eventJSON: json))
-        return try #require(carrier.encode())
+        // Frozen retired payload; keeping the wire-size contract does not restore
+        // a production carrier codec or make the type eligible for BLE ingress.
+        func tlv(_ type: UInt8, _ value: Data) -> Data {
+            Data([type, UInt8(value.count >> 8), UInt8(value.count & 255)]) + value
+        }
+        return tlv(1, Data([2])) + tlv(2, Data("000000000000".utf8)) + tlv(3, json)
     }
 
     private func maxRequestSync() -> Data {
@@ -170,7 +158,7 @@ struct PacketPayloadCapInteropTests {
             p: 7,
             m: 1 << 20,
             data: Data((0..<1_024).map { UInt8(truncatingIfNeeded: $0 &* 37) }),
-            types: [.publicMessages, .fragment, .fileTransfer, .groupMessage, .prekeyBundle, .board],
+            types: [.publicMessages, .fragment, .fileTransfer, .groupMessage, .prekeyBundle],
             sinceTimestamp: 1_740_000_000_000,
             fragmentIdFilter: RequestSyncPacket.encodeFragmentIdFilter(fragmentIDs)
         ).encode()
@@ -186,20 +174,6 @@ struct PacketPayloadCapInteropTests {
         ).encode())
     }
 
-    private func maxGroupMessage() throws -> Data {
-        try GroupCrypto.sealMessage(
-            content: String(repeating: "g", count: InputValidator.Limits.maxMessageLength),
-            messageID: UUID().uuidString,
-            senderNickname: String(repeating: "n", count: 50),
-            senderSigningKey: Data(repeating: 0x51, count: 32),
-            timestampMs: 1_740_000_000_000,
-            groupID: Data(repeating: 0x52, count: BitchatGroup.groupIDLength),
-            epoch: 1,
-            key: Data(repeating: 0x53, count: BitchatGroup.keyLength),
-            sign: { [signature] _ in signature }
-        )
-    }
-
     private func maxPrekeyBundle() throws -> Data {
         try #require(PrekeyBundle(
             noiseStaticPublicKey: Data(repeating: 0x61, count: PrekeyBundle.keyLength),
@@ -211,11 +185,11 @@ struct PacketPayloadCapInteropTests {
         ).encode())
     }
 
-    private func maxVoiceFrame() throws -> Data {
-        // 11-byte header + 2-byte length + frame = the 210-byte burst budget.
-        let frame = randomBytes(TransportConfig.pttMaxBurstContentBytes - 13)
-        let burst = try #require(VoiceBurstPacket(burstID: Data(repeating: 0x71, count: 8), seq: 1, kind: .frames([frame])))
-        return burst.encode()
+    private func maxVoiceFrame() -> Data {
+        // Wesh no longer builds live-voice bursts, but BitChat peers still
+        // send them: keep the 210-byte burst budget as raw bytes so the
+        // decode-time cap on 0x29 stays covered.
+        randomBytes(210)
     }
 
     // MARK: - Helpers

@@ -1,0 +1,22 @@
+name: Offline Third-Party Notices
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  notices:
+    name: Check offline notice inventory and terms
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python3 scripts/third_party_notices.py check
+      - run: python3 -m unittest discover -s scripts/tests -p test_third_party_notices.py

@@ -81,16 +81,17 @@ enum NoisePayloadType: UInt8 {
     // Private groups (0x04/0x05 reserved by other features)
     case groupInvite = 0x06         // Creator-signed group state (invite)
     case groupKeyUpdate = 0x07      // Creator-signed group state (key rotation / roster update)
-    // Live voice (push-to-talk)
-    case voiceFrame = 0x08          // One live voice-burst packet (see VoiceBurstPacket)
-    // Finalized private media. `0x20` is the value already deployed by the
-    // Android client. The complete BitchatFilePacket is encrypted inside
-    // Noise before the outer noiseEncrypted packet is fragmented.
+    // BitChat live voice. Wesh has no live voice: the value stays reserved
+    // so a BitChat peer's frame decodes to a known type and is dropped unread.
+    case voiceFrame = 0x08
+    // BitChat private media (a file TLV inside Noise). Wesh sends none; one
+    // from an admitted contact is shown as a placeholder line and its bytes
+    // are dropped. The value stays reserved for compatibility.
     case privateFile = 0x20
     // Versioned peer state authenticated by the surrounding Noise session.
     // This is intentionally distinct from the public announce: announce
-    // capabilities are discovery hints, while this payload proves possession
-    // of the advertised Noise static key before downgrade state is pinned.
+    // capabilities are discovery hints, while this payload binds the peer's
+    // announcement signing key to its Noise static key.
     case authenticatedPeerState = 0x21
     // Verification (QR-based OOB binding)
     case verifyChallenge = 0x10     // Verification challenge
@@ -156,12 +157,6 @@ protocol BitchatDelegate: AnyObject {
     // Low-level events for better separation of concerns
     func didReceiveNoisePayload(from peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date)
 
-    // Encrypted group broadcast (opaque envelope; decrypted by the group coordinator)
-    func didReceiveGroupMessage(payload: Data, timestamp: Date)
-
-    // Public live-voice burst packet (signature-verified by the transport)
-    func didReceivePublicVoiceFrame(from peerID: PeerID, nickname: String, payload: Data, timestamp: Date)
-
     // Bluetooth state updates for user notifications
     func didUpdateBluetoothState(_ state: CBManagerState)
     func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?)
@@ -178,14 +173,6 @@ extension BitchatDelegate {
     }
 
     func didReceiveNoisePayload(from peerID: PeerID, type: NoisePayloadType, payload: Data, timestamp: Date) {
-        // Default empty implementation
-    }
-
-    func didReceiveGroupMessage(payload: Data, timestamp: Date) {
-        // Default empty implementation
-    }
-
-    func didReceivePublicVoiceFrame(from peerID: PeerID, nickname: String, payload: Data, timestamp: Date) {
         // Default empty implementation
     }
 

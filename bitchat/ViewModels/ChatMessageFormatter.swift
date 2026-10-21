@@ -8,7 +8,6 @@ final class ChatMessageFormatter {
 
     private unowned let viewModel: ChatViewModel
     private let meshPalette = MinimalDistancePalette(config: .mesh)
-    private let nostrPalette = MinimalDistancePalette(config: .nostr)
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -16,29 +15,7 @@ final class ChatMessageFormatter {
 
     func formatMessageAsText(_ message: BitchatMessage, colorScheme: ColorScheme, theme: AppTheme = .matrix) -> AttributedString {
         let design = theme.bodyFontDesign
-        let isSelf: Bool = {
-            if let spid = message.senderPeerID {
-                if case .location(let channel) = viewModel.activeChannel, spid.isGeoChat {
-                    let myGeo: NostrIdentity? = {
-                        if let cached = viewModel.cachedGeohashIdentity, cached.geohash == channel.geohash {
-                            return cached.identity
-                        }
-                        if let identity = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash) {
-                            viewModel.cachedGeohashIdentity = (channel.geohash, identity)
-                            return identity
-                        }
-                        return nil
-                    }()
-                    if let myGeo {
-                        return spid == PeerID(nostr: myGeo.publicKeyHex)
-                    }
-                }
-                return spid == viewModel.meshService.myPeerID
-            }
-            if message.sender == viewModel.nickname { return true }
-            if message.sender.hasPrefix(viewModel.nickname + "#") { return true }
-            return false
-        }()
+        let isSelf = isSelfMessage(message)
 
         let isDark = colorScheme == .dark
         let isVerifiedSender = !isSelf && isVerifiedSender(of: message)
@@ -215,13 +192,7 @@ final class ChatMessageFormatter {
                     let matchText = String(content[swiftRange])
                     if type == "mention" {
                         let (mentionBase, mentionSuffix) = matchText.splitSuffix()
-                        let mySuffix: String? = {
-                            if case .location(let channel) = viewModel.activeChannel,
-                               let identity = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash) {
-                                return String(identity.publicKeyHex.suffix(4))
-                            }
-                            return String(viewModel.meshService.myPeerID.id.prefix(4))
-                        }()
+                        let mySuffix: String? = String(viewModel.meshService.myPeerID.id.prefix(4))
                         let isMentionToMe: Bool = {
                             if mentionBase == viewModel.nickname {
                                 if let mySuffix, !mentionSuffix.isEmpty {
@@ -249,38 +220,11 @@ final class ChatMessageFormatter {
                             result.append(AttributedString(mentionSuffix).mergingAttributes(lightStyle))
                         }
                     } else if type == "hashtag" {
-                        let token = String(matchText.dropFirst()).lowercased()
-                        let allowed = Set("0123456789bcdefghjkmnpqrstuvwxyz")
-                        let isGeohash = (2...12).contains(token.count) && token.allSatisfy { allowed.contains($0) }
-                        let attachedToMentionToken: Bool = {
-                            if swiftRange.lowerBound > content.startIndex {
-                                var index = content.index(before: swiftRange.lowerBound)
-                                while true {
-                                    let character = content[index]
-                                    if character.isWhitespace || character.isNewline { break }
-                                    if character == "@" { return true }
-                                    if index == content.startIndex { break }
-                                    index = content.index(before: index)
-                                }
-                            }
-                            return false
-                        }()
-                        let standalone: Bool = {
-                            if swiftRange.lowerBound == content.startIndex { return true }
-                            let previous = content.index(before: swiftRange.lowerBound)
-                            return content[previous].isWhitespace || content[previous].isNewline
-                        }()
-
                         var tagStyle = AttributeContainer()
                         tagStyle.font = isSelf
                             ? .bitchatSystem(size: 14, weight: .bold, design: design)
                             : .bitchatSystem(size: 14, design: design)
                         tagStyle.foregroundColor = baseColor
-                        if isGeohash && !attachedToMentionToken && standalone,
-                           let url = URL(string: "bitchat://geohash/\(token)") {
-                            tagStyle.link = url
-                            tagStyle.underlineStyle = .single
-                        }
                         result.append(AttributedString(matchText).mergingAttributes(tagStyle))
                     } else if type == "cashu" || type == "lightning" || type == "bolt11" || type == "lnurl" {
                         var spacer = AttributeContainer()
@@ -350,18 +294,7 @@ final class ChatMessageFormatter {
 
     func formatMessageHeader(_ message: BitchatMessage, colorScheme: ColorScheme, theme: AppTheme = .matrix) -> AttributedString {
         let design = theme.bodyFontDesign
-        let isSelf: Bool = {
-            if let spid = message.senderPeerID {
-                if case .location(let channel) = viewModel.activeChannel, spid.id.hasPrefix("nostr:"),
-                   let myGeo = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash) {
-                    return spid == PeerID(nostr: myGeo.publicKeyHex)
-                }
-                return spid == viewModel.meshService.myPeerID
-            }
-            if message.sender == viewModel.nickname { return true }
-            if message.sender.hasPrefix(viewModel.nickname + "#") { return true }
-            return false
-        }()
+        let isSelf = isSelfMessage(message)
 
         let isDark = colorScheme == .dark
         let baseColor: Color = isSelf ? .orange : peerColor(for: message, isDark: isDark)
@@ -399,27 +332,10 @@ final class ChatMessageFormatter {
     }
 
     func isSelfMessage(_ message: BitchatMessage) -> Bool {
-        if let spid = message.senderPeerID {
-            if case .location(let channel) = viewModel.activeChannel, spid.isGeoChat {
-                let myGeo: NostrIdentity? = {
-                    if let cached = viewModel.cachedGeohashIdentity, cached.geohash == channel.geohash {
-                        return cached.identity
-                    }
-                    if let identity = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash) {
-                        viewModel.cachedGeohashIdentity = (channel.geohash, identity)
-                        return identity
-                    }
-                    return nil
-                }()
-                if let myGeo {
-                    return spid == PeerID(nostr: myGeo.publicKeyHex)
-                }
-            }
-            return spid == viewModel.meshService.myPeerID
+        if let sender = message.senderPeerID {
+            return sender == viewModel.meshService.myPeerID
         }
-        if message.sender == viewModel.nickname { return true }
-        if message.sender.hasPrefix(viewModel.nickname + "#") { return true }
-        return false
+        return message.sender == viewModel.nickname || message.sender.hasPrefix(viewModel.nickname + "#")
     }
 
     func senderColor(for message: BitchatMessage, isDark: Bool) -> Color {
@@ -459,7 +375,7 @@ private extension ChatMessageFormatter {
         if let spid = message.senderPeerID {
             if spid.isGeoChat || spid.isGeoDM {
                 let full = viewModel.nostrKeyMapping[spid]?.lowercased() ?? spid.bare.lowercased()
-                return getNostrPaletteColor(for: full, isDark: isDark)
+                return Color(peerSeed: "nostr:" + full, isDark: isDark)
             } else if spid.id.count == 16 {
                 return getPeerPaletteColor(for: spid, isDark: isDark)
             } else {
@@ -497,33 +413,4 @@ private extension ChatMessageFormatter {
         return seeds
     }
 
-    func getNostrPaletteColor(for pubkeyHexLowercased: String, isDark: Bool) -> Color {
-        let myHex = currentGeohashIdentityHex()
-        if let myHex, pubkeyHexLowercased == myHex {
-            return .orange
-        }
-
-        nostrPalette.ensurePalette(for: currentNostrPaletteSeeds(excluding: myHex))
-        if let color = nostrPalette.color(for: pubkeyHexLowercased, isDark: isDark) {
-            return color
-        }
-        return Color(peerSeed: "nostr:" + pubkeyHexLowercased, isDark: isDark)
-    }
-
-    func currentNostrPaletteSeeds(excluding myHex: String?) -> [String: String] {
-        var seeds: [String: String] = [:]
-        let excluded = myHex ?? ""
-        for person in viewModel.visibleGeohashPeople() where person.id != excluded {
-            seeds[person.id] = "nostr:" + person.id
-        }
-        return seeds
-    }
-
-    func currentGeohashIdentityHex() -> String? {
-        if case .location(let channel) = viewModel.activeChannel,
-           let identity = try? viewModel.idBridge.deriveIdentity(forGeohash: channel.geohash) {
-            return identity.publicKeyHex.lowercased()
-        }
-        return nil
-    }
 }

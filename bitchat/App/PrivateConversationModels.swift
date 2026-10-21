@@ -113,19 +113,16 @@ final class PrivateConversationModel: ObservableObject {
 
     private let chatViewModel: ChatViewModel
     private let conversations: ConversationStore
-    private let locationChannelsModel: LocationChannelsModel
     private let peerIdentityStore: PeerIdentityStore
     private var cancellables = Set<AnyCancellable>()
 
     init(
         chatViewModel: ChatViewModel,
         conversations: ConversationStore,
-        locationChannelsModel: LocationChannelsModel? = nil,
         peerIdentityStore: PeerIdentityStore? = nil
     ) {
         self.chatViewModel = chatViewModel
         self.conversations = conversations
-        self.locationChannelsModel = locationChannelsModel ?? LocationChannelsModel()
         self.peerIdentityStore = peerIdentityStore ?? chatViewModel.peerIdentityStore
         let initialPeerID = conversations.selectedPrivatePeerID
         self.selectedPeerID = initialPeerID
@@ -175,13 +172,6 @@ final class PrivateConversationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        chatViewModel.groupStore.$groups
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshSelectedConversation()
-            }
-            .store(in: &cancellables)
-
         NotificationCenter.default.publisher(for: Notification.Name("peerStatusUpdated"))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -189,12 +179,6 @@ final class PrivateConversationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        locationChannelsModel.$selectedChannel
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshSelectedConversation()
-            }
-            .store(in: &cancellables)
     }
 
     private func refreshSelectedConversation() {
@@ -205,33 +189,12 @@ final class PrivateConversationModel: ObservableObject {
     }
 
     private func makeHeaderState(for conversationPeerID: PeerID) -> PrivateConversationHeaderState {
-        // Group chats: the "peer" is the whole crew. Name + member count in
-        // the header; availability reads as mesh since group traffic floods
-        // the local mesh, and the per-peer encryption badge does not apply.
-        if conversationPeerID.isGroup {
-            let displayName: String
-            if let group = chatViewModel.groupStore.group(for: conversationPeerID) {
-                displayName = "#\(group.name) (\(group.members.count))"
-            } else {
-                displayName = String(localized: "common.unknown", comment: "Fallback label for unknown peer")
-            }
-            return PrivateConversationHeaderState(
-                headerPeerID: conversationPeerID,
-                displayName: displayName,
-                availability: .meshReachable,
-                encryptionStatus: nil
-            )
-        }
-
         let headerPeerID = chatViewModel.getShortIDForNoiseKey(conversationPeerID)
         let peer = chatViewModel.getPeer(byID: headerPeerID)
-        let displayName = resolveDisplayName(for: conversationPeerID, headerPeerID: headerPeerID, peer: peer)
-        // Geo DMs are always routed through BitChat private envelopes over
-        // Nostr; their nostr_ keys never resolve to a reachable mesh peer, so
-        // resolveAvailability would report .offline. Report .nostrAvailable
-        // so the header shows the globe instead of a misleading "offline" tag.
+        let displayName = resolveDisplayName(headerPeerID: headerPeerID, peer: peer)
+        // Historical virtual recipients have no live geographic route.
         let availability = conversationPeerID.isGeoDM
-            ? .nostrAvailable
+            ? .offline
             : resolveAvailability(for: headerPeerID, peer: peer)
         let encryptionStatus: EncryptionStatus? = conversationPeerID.isGeoDM
             ? nil
@@ -246,13 +209,9 @@ final class PrivateConversationModel: ObservableObject {
     }
 
     private func resolveDisplayName(
-        for conversationPeerID: PeerID,
         headerPeerID: PeerID,
         peer: BitchatPeer?
     ) -> String {
-        if conversationPeerID.isGeoDM, case .location(let channel) = locationChannelsModel.selectedChannel {
-            return "#\(channel.geohash)/@\(chatViewModel.geohashDisplayName(for: conversationPeerID))"
-        }
         // Local alias wins over a live peer row's announced nickname.
         if headerPeerID.id.count == 16 {
             let candidates = chatViewModel.identityManager.getCryptoIdentitiesByPeerIDPrefix(headerPeerID)

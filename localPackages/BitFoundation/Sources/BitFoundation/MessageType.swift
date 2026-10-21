@@ -23,7 +23,11 @@ public enum MessageType: UInt8 {
 
     // Fragmentation (simplified)
     case fragment = 0x20        // Single fragment type for large messages
-    case fileTransfer = 0x22    // Binary file/audio/image payloads
+    // BitChat file/audio/image payloads. Wesh sends none and never stores or
+    // shows one. A file for another peer, whole or fragmented, is relayed as
+    // before; a broadcast one or one for us is dropped without relaying. The
+    // value stays reserved.
+    case fileTransfer = 0x22
     case boardPost = 0x23       // Signed geohash bulletin-board post or tombstone
     case prekeyBundle = 0x24    // Signed batch of one-time prekeys (gossiped)
     case groupMessage = 0x25    // Group-encrypted broadcast (cleartext group ID, ChaChaPoly body)
@@ -32,12 +36,13 @@ public enum MessageType: UInt8 {
     case ping = 0x26            // Directed echo request (nonce + origin TTL)
     case pong = 0x27            // Directed echo reply (echoed nonce + origin TTL)
 
-    // Gateway mode: signed Nostr event ferried between a mesh-only peer and
-    // an internet gateway peer.
+    // Retired Gateway/Bridge carrier. Never sent, accepted or relayed; keep
+    // the wire value reserved for compatibility.
     case nostrCarrier = 0x28
 
-    // Live voice: one signed push-to-talk burst packet (ephemeral broadcast,
-    // never gossip-synced). Private bursts ride noiseEncrypted instead.
+    // BitChat live voice: one signed push-to-talk burst packet (ephemeral
+    // broadcast, never gossip-synced). Wesh sends none and drops received
+    // ones without relaying; the value stays reserved for compatibility.
     case voiceFrame = 0x29
 
     /// Identity-free presence for rotating peer IDs. Carries an epoch, a fixed

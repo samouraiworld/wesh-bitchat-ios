@@ -15,24 +15,20 @@ public struct PeerCapabilities: OptionSet, Equatable, Hashable, Sendable {
 
     public static let prekeys = PeerCapabilities(rawValue: 1 << 0)
     public static let wifiBulk = PeerCapabilities(rawValue: 1 << 1)
+    // Retired gateway bit: reserved for wire compatibility, never advertised.
     public static let gateway = PeerCapabilities(rawValue: 1 << 2)
+    // periphery:ignore - BitChat groups: never advertised, kept so the wire bit is never reused
     public static let groups = PeerCapabilities(rawValue: 1 << 3)
     public static let board = PeerCapabilities(rawValue: 1 << 4)
     public static let vouch = PeerCapabilities(rawValue: 1 << 5)
     public static let meshDiagnostics = PeerCapabilities(rawValue: 1 << 6)
-    /// Bridges the local mesh channel to the geohash-cell rendezvous on Nostr
-    /// (uplink/downlink carriers for mesh-only peers). Advertised alongside
-    /// a `bridgeGeohash` TLV carrying the rendezvous cell.
+    /// Retired bridge bit: reserved for wire compatibility, never advertised.
     public static let bridge = PeerCapabilities(rawValue: 1 << 7)
-    /// Finalized direct-message media encrypted as Noise payload `0x20`
-    /// before outer BLE fragmentation. Peers that omit this bit require the
-    /// signed directed raw-file migration fallback.
+    // Finalized direct-message media encrypted as Noise payload `0x20`
+    // before outer BLE fragmentation (BitChat). Wesh never advertises it.
     public static let privateMedia = PeerCapabilities(rawValue: 1 << 8)
-    /// Stable private-media IDs are durably deduplicated by the receiver and
-    /// correlated delivery/read receipts permit bounded automatic resend.
-    ///
-    /// Bit 8 remains the encrypted-media compatibility contract. Bit 9 only
-    /// enables sender-side automatic retry after exact-session proof.
+    // Durable private-media deduplication and receipts (BitChat). Wesh
+    // never advertises it.
     public static let privateMediaReceipts =
         PeerCapabilities(rawValue: 1 << 9)
     /// Reserved for test builds that briefly advertised non-destructive Noise

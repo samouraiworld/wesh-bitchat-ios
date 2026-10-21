@@ -1,0 +1,24 @@
+name: Arti Native Contracts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native-contracts:
+    name: Test native SOCKS and runtime ownership
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install the audited Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Run locked native unit tests
+        run: >-
+          cargo +1.96.0 test --locked
+          --manifest-path localPackages/Arti/Cargo.toml
+          -p arti-bitchat --lib --jobs 2

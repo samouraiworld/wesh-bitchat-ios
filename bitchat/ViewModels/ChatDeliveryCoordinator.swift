@@ -46,11 +46,6 @@ protocol ChatDeliveryContext: AnyObject {
     /// router-side clear only: it is safe without a conversation lookup
     /// because the router scopes removal to the acking peer's own queues.
     func markMessageDelivered(_ messageID: String, from peerIDs: Set<PeerID>)
-    /// Releases the media reconnect retry for a private transfer. Unlike the
-    /// router clear above this is keyed only by the stable media message ID,
-    /// so callers must first bind the receipt to one of our outgoing
-    /// conversations for the acking peer.
-    func confirmPrivateMediaDelivery(_ messageID: String)
     /// Returns true only when `messageID` is one of our outgoing messages in
     /// at least one of the authenticated peer's direct-conversation aliases.
     func isOutgoingPrivateMessage(_ messageID: String, toAny peerIDs: Set<PeerID>) -> Bool
@@ -89,19 +84,10 @@ extension ChatViewModel: ChatDeliveryContext {
 
     func markMessageDelivered(_ messageID: String) {
         messageRouter.markDelivered(messageID)
-        mediaTransferCoordinator.confirmPrivateMediaDelivery(
-            messageID: messageID
-        )
     }
 
     func markMessageDelivered(_ messageID: String, from peerIDs: Set<PeerID>) {
         messageRouter.markDelivered(messageID, from: peerIDs)
-    }
-
-    func confirmPrivateMediaDelivery(_ messageID: String) {
-        mediaTransferCoordinator.confirmPrivateMediaDelivery(
-            messageID: messageID
-        )
     }
 
     func isOutgoingPrivateMessage(_ messageID: String, toAny peerIDs: Set<PeerID>) -> Bool {
@@ -176,7 +162,7 @@ final class ChatDeliveryCoordinator {
     /// retry state is always released for the acking peer's own aliases
     /// (`markMessageDelivered(_:from:)` is peer-scoped on the router side, so
     /// a receipt can only terminalize messages queued for that peer). Only the
-    /// UI status transition and the media-retry release are gated on the
+    /// UI status transition is gated on the
     /// in-memory conversation holding the message as one of ours: after a
     /// force-quit → relaunch the durable outbox is restored
     /// while the conversation may not be, and discarding the ack there would
@@ -207,10 +193,6 @@ final class ChatDeliveryCoordinator {
               ) else {
             return false
         }
-        // The receipt is now bound to one of our outgoing conversations for
-        // the acking peer; only then release the media reconnect retry, whose
-        // stable message ID is not peer-scoped.
-        context.confirmPrivateMediaDelivery(messageID)
         context.notifyUIChanged()
         return true
     }

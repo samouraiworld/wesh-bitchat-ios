@@ -36,49 +36,12 @@ protocol PanicResettingTransport: AnyObject {
     func resetIdentityForPanic(currentNickname: String, restartServices: Bool)
 }
 
-/// File and private-media transfer over a mesh transport, including the
-/// capability-proof policy that gates encrypted private media.
-protocol MeshFileTransferring: AnyObject {
-    func sendFileBroadcast(_ packet: BitchatFilePacket, transferId: String)
-    func sendFilePrivate(
-        _ packet: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String,
-        allowLegacyFallback: Bool
-    )
-    /// Automatic whole-file retry is admitted only while this exact Noise
-    /// generation authenticates bit 9. It must never queue across a session
-    /// replacement or enter the signed raw legacy path.
-    func sendFilePrivateReceiptRetry(
-        _ packet: BitchatFilePacket,
-        to peerID: PeerID,
-        transferId: String
-    )
-    func cancelTransfer(_ transferId: String)
-    func privateMediaSendPolicy(to peerID: PeerID) -> PrivateMediaSendPolicy
-    /// The exact current Noise generation that authenticated both encrypted
-    /// private media (bit 8) and durable receipts/retry (bit 9).
-    func authenticatedPrivateMediaReceiptSessionGeneration(to peerID: PeerID) -> UUID?
-    func resolvePrivateMediaSendPolicy(
-        to peerID: PeerID,
-        completion: @escaping @MainActor (PrivateMediaSendPolicy) -> Void
-    )
-}
-
 /// Courier store-and-forward: seal a message to the recipient's static
 /// key and hand it to connected couriers for physical delivery while the
 /// recipient is offline. Returns false when the transport cannot courier.
 protocol MeshCourierTransporting: AnyObject {
     @discardableResult
     func sendCourierMessage(_ content: String, messageID: String, recipientNoiseKey: Data, via couriers: [PeerID]) -> Bool
-}
-
-/// Private groups: creator-signed state travels 1:1 over Noise sessions;
-/// group messages flood like public broadcasts.
-protocol MeshGroupMessaging: AnyObject {
-    func sendGroupInvite(_ statePayload: Data, to peerID: PeerID)
-    func sendGroupKeyUpdate(_ statePayload: Data, to peerID: PeerID)
-    func broadcastGroupMessage(_ envelope: Data)
 }
 
 /// Mesh diagnostics (/ping, /trace).
@@ -108,37 +71,4 @@ protocol MeshPublicArchiving: AnyObject {
     func purgeArchivedPublicMessages(from peerID: PeerID)
     /// Erases the whole carried public-message archive, on disk included.
     func purgeAllArchivedPublicMessages()
-}
-
-/// Internet-gateway and geohash-bridge wiring surface (BLE mesh today).
-/// Everything the gateway/bridge/courier services need from the mesh
-/// transport, so their bootstrap wiring never touches the concrete class.
-protocol MeshBridgingTransport: AnyObject {
-    // Runtime-advertised capability bits
-    func setLocalCapability(_ capability: PeerCapabilities, enabled: Bool)
-    func setLocalBridgeGeohash(_ cell: String?)
-    func advertisedBridgeGeohash() -> String?
-
-    // Peers currently advertising bridging roles
-    func reachableGatewayPeers() -> [PeerID]
-    func reachableBridgePeers() -> [PeerID]
-
-    // Gateway carrier packets (mesh <-> Nostr uplink/downlink)
-    @discardableResult
-    func sendNostrCarrier(_ payload: Data, to gatewayPeer: PeerID) -> Bool
-    func broadcastNostrCarrier(_ payload: Data)
-    /// Sink for received carrier packets (set once by app wiring; called on
-    /// the main actor after transport-level checks).
-    var onNostrCarrierPacket: (@MainActor (_ payload: Data, _ from: PeerID, _ directedToUs: Bool) -> Void)? { get set }
-
-    // Bridge courier drops (sealed envelopes carried across the bridge)
-    func sealBridgeCourierEnvelope(_ content: String, messageID: String, recipientNoiseKey: Data) -> CourierEnvelope?
-    @discardableResult
-    func openBridgedCourierEnvelope(_ envelope: CourierEnvelope) -> Bool
-    @discardableResult
-    func deliverBridgedEnvelope(_ envelope: CourierEnvelope, to peerID: PeerID) -> Bool
-    func myNoiseStaticPublicKey() -> Data
-    func verifiedPeersWithNoiseKeys() -> [(peerID: PeerID, noiseKey: Data)]
-    /// Fired (off-main) when a signature-verified announce is processed.
-    var onVerifiedPeerAnnounce: ((_ peerID: PeerID) -> Void)? { get set }
 }

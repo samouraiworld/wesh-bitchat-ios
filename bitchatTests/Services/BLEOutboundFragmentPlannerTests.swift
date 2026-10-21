@@ -12,8 +12,7 @@ struct BLEOutboundFragmentPlannerTests {
             packet: packet,
             pad: false,
             maxChunk: 128,
-            directedPeer: nil,
-            transferId: nil
+            directedPeer: nil
         )
 
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
@@ -45,8 +44,7 @@ struct BLEOutboundFragmentPlannerTests {
             packet: packet,
             pad: false,
             maxChunk: 96,
-            directedPeer: directedPeer,
-            transferId: nil
+            directedPeer: directedPeer
         )
 
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
@@ -71,8 +69,7 @@ struct BLEOutboundFragmentPlannerTests {
             packet: packet,
             pad: false,
             maxChunk: nil,
-            directedPeer: nil,
-            transferId: nil
+            directedPeer: nil
         )
 
         let plan = try #require(BLEOutboundFragmentPlanner.makePlan(
@@ -96,8 +93,7 @@ struct BLEOutboundFragmentPlannerTests {
             packet: packet,
             pad: false,
             maxChunk: nil,
-            directedPeer: nil,
-            transferId: nil
+            directedPeer: nil
         )
 
         #expect(BLEOutboundFragmentPlanner.makePlan(
@@ -106,73 +102,6 @@ struct BLEOutboundFragmentPlannerTests {
             bleMaxMTU: 512,
             fragmentID: Data(repeating: 0x00, count: 7)
         ) == nil)
-    }
-
-    @Test("routed signed private media v1 accepts 256 fragments and rejects 257", arguments: [MessageType.fileTransfer.rawValue, MessageType.noiseEncrypted.rawValue])
-    func privateMediaCrossPlatformFragmentBoundary(type: UInt8) throws {
-        let maxPayload = makePayload(count: 160 * 1024, seed: 0xFACE_CAFE)
-        let recipient = PeerID(str: "8877665544332211")
-        let route = [Data(hexString: "1020304050607080")!, Data(hexString: "8090706050403020")!]
-        let signature = Data(repeating: 0x5A, count: 64)
-
-        func plan(payloadCount: Int) throws -> BLEOutboundFragmentPlan {
-            let packet = BitchatPacket(
-                type: type,
-                senderID: Data(hexString: "0011223344556677") ?? Data(),
-                recipientID: Data(hexString: "8877665544332211"),
-                timestamp: 0x0102030405,
-                payload: Data(maxPayload.prefix(payloadCount)),
-                signature: signature,
-                ttl: 3,
-                version: 2,
-                route: route
-            )
-            return try #require(BLEOutboundFragmentPlanner.makePlan(
-                for: BLEOutboundFragmentTransferRequest(
-                    packet: packet,
-                    pad: BLEOutboundPacketPolicy.padsBLEFrame(for: type),
-                    maxChunk: nil,
-                    directedPeer: recipient,
-                    transferId: "boundary"
-                ),
-                defaultChunkSize: TransportConfig.bleDefaultFragmentSize,
-                bleMaxMTU: 512,
-                fragmentID: Data(repeating: 0xD4, count: 8)
-            ))
-        }
-
-        func firstPlan(withAtLeast target: Int) throws -> BLEOutboundFragmentPlan {
-            var low = 1
-            var high = maxPayload.count
-            while low < high {
-                let mid = low + (high - low) / 2
-                if try plan(payloadCount: mid).totalFragments >= target {
-                    high = mid
-                } else {
-                    low = mid + 1
-                }
-            }
-            return try plan(payloadCount: low)
-        }
-
-        let at256 = try firstPlan(withAtLeast: 256)
-        let at257 = try firstPlan(withAtLeast: 257)
-
-        #expect(at256.totalFragments == 256)
-        #expect(BLEOutboundFragmentPlanner.isPrivateMediaV1Compatible(at256))
-        #expect(at257.totalFragments == 257)
-        #expect(!BLEOutboundFragmentPlanner.isPrivateMediaV1Compatible(at257))
-        for plan in [at256, at257] {
-            let headers = try plan.fragmentPackets.map { try #require(BLEFragmentHeader(packet: $0)) }
-            let reassembled = headers.reduce(into: Data()) { $0.append($1.fragmentData) }
-            let decoded = try #require(BinaryProtocol.decode(reassembled))
-            #expect(decoded.type == type)
-            #expect(decoded.recipientID == Data(hexString: recipient.id))
-            #expect(decoded.signature == signature)
-            #expect(decoded.route == route)
-            #expect(headers.allSatisfy { $0.originalType == type })
-            #expect(plan.fragmentPackets.allSatisfy { $0.route == route && $0.recipientID == decoded.recipientID })
-        }
     }
 
     private func makePacket(

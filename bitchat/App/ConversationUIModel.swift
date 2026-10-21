@@ -9,33 +9,16 @@ final class ConversationUIModel: ObservableObject {
     @Published private(set) var selectedAutocompleteIndex = 0
     @Published private(set) var currentNickname: String
     @Published private(set) var isBatchingPublic = false
-    @Published private(set) var canSendMediaInCurrentContext = true
-    @Published private(set) var legacyPrivateMediaConsentRequest: LegacyPrivateMediaConsentRequest?
-    /// Who is talking live in the public mesh channel right now (floor
-    /// courtesy: the composer mic tints "busy" while someone holds the floor).
-    @Published private(set) var activeLiveVoiceTalker: String?
 
     private let chatViewModel: ChatViewModel
-    private let privateConversationModel: PrivateConversationModel
-    private let conversations: ConversationStore
-    private var activeChannel: ChannelID
-    private var cancellables = Set<AnyCancellable>()
 
-    init(
-        chatViewModel: ChatViewModel,
-        privateConversationModel: PrivateConversationModel,
-        conversations: ConversationStore
-    ) {
+    init(chatViewModel: ChatViewModel) {
         self.chatViewModel = chatViewModel
-        self.privateConversationModel = privateConversationModel
-        self.conversations = conversations
-        self.activeChannel = conversations.activeChannel
         self.currentNickname = chatViewModel.nickname
         self.isBatchingPublic = chatViewModel.isBatchingPublic
         self.showAutocomplete = chatViewModel.showAutocomplete
         self.autocompleteSuggestions = chatViewModel.autocompleteSuggestions
         self.selectedAutocompleteIndex = chatViewModel.selectedAutocompleteIndex
-        self.canSendMediaInCurrentContext = chatViewModel.canSendMediaInCurrentContext
 
         bind()
     }
@@ -47,10 +30,9 @@ final class ConversationUIModel: ObservableObject {
     func block(peerID: PeerID?, displayName: String?) {
         guard let displayName else { return }
 
-        if let peerID, peerID.isGeoChat,
-           let full = chatViewModel.fullNostrHex(forSenderPeerID: peerID) {
-            chatViewModel.blockGeohashUser(pubkeyHexLowercased: full, displayName: displayName)
-        } else if let peerID, !peerID.isGeoDM, !peerID.isGeoChat {
+        if let peerID {
+            // Retired geographic identities cannot fall back to nickname moderation.
+            guard !peerID.isGeoDM, !peerID.isGeoChat else { return }
             // Mesh: block the peer's stable Noise identity resolved from the
             // tapped peerID rather than re-resolving a display-name string.
             chatViewModel.blockMeshPeer(peerID: peerID, displayName: displayName)
@@ -79,44 +61,5 @@ final class ConversationUIModel: ObservableObject {
         chatViewModel.$isBatchingPublic
             .receive(on: DispatchQueue.main)
             .assign(to: &$isBatchingPublic)
-
-        chatViewModel.$activePublicVoiceTalker
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$activeLiveVoiceTalker)
-
-        chatViewModel.$legacyPrivateMediaConsentRequest
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$legacyPrivateMediaConsentRequest)
-
-        conversations.$activeChannel
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] channel in
-                self?.activeChannel = channel
-                self?.refreshComputedState()
-            }
-            .store(in: &cancellables)
-
-        privateConversationModel.$selectedPeerID
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshComputedState()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func refreshComputedState() {
-        if let selectedPeerID = privateConversationModel.selectedPeerID {
-            // Media transfer is not wired for groups in v1; keep it off so the
-            // composer can't strand a media placeholder that never sends.
-            canSendMediaInCurrentContext = !(selectedPeerID.isGeoDM || selectedPeerID.isGeoChat || selectedPeerID.isGroup)
-            return
-        }
-
-        switch activeChannel {
-        case .mesh:
-            canSendMediaInCurrentContext = true
-        case .location:
-            canSendMediaInCurrentContext = false
-        }
     }
 }

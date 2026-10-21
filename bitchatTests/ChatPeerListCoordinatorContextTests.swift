@@ -55,12 +55,16 @@ private final class MockChatPeerListContext: ChatPeerListContext {
     var activeMeshPeerCountValue = 0
     private(set) var registeredEphemeralSessions: [PeerID] = []
     private(set) var updateEncryptionStatusForPeersCount = 0
+    var onEncryptionStatusUpdated: (() -> Void)?
 
     func isPeerConnected(_ peerID: PeerID) -> Bool { connectedMeshPeers.contains(peerID) }
     func isPeerReachable(_ peerID: PeerID) -> Bool { reachableMeshPeers.contains(peerID) }
     func activeMeshPeerCount() -> Int { activeMeshPeerCountValue }
     func registerEphemeralSession(peerID: PeerID) { registeredEphemeralSessions.append(peerID) }
-    func updateEncryptionStatusForPeers() { updateEncryptionStatusForPeersCount += 1 }
+    func updateEncryptionStatusForPeers() {
+        updateEncryptionStatusForPeersCount += 1
+        onEncryptionStatusUpdated?()
+    }
 
     // Notifications
     private(set) var networkAvailableNotifications: [Int] = []
@@ -69,12 +73,6 @@ private final class MockChatPeerListContext: ChatPeerListContext {
         networkAvailableNotifications.append(peerCount)
     }
 
-    // Sightings
-    private(set) var recordedSightings: [[PeerID]] = []
-
-    func recordMeshSightings(peerIDs: [PeerID]) {
-        recordedSightings.append(peerIDs)
-    }
 }
 
 // MARK: - Helpers
@@ -103,6 +101,32 @@ private func makeMessage(id: String, senderPeerID: PeerID? = nil) -> BitchatMess
 /// Exercises `ChatPeerListCoordinator` against `MockChatPeerListContext` with
 /// no `ChatViewModel`.
 struct ChatPeerListCoordinatorContextTests {
+
+    @Test @MainActor
+    func queuedPeerListUpdatePreservesLivePeerAvailability() async {
+        let context = MockChatPeerListContext()
+        let coordinator = ChatPeerListCoordinator(context: context, notificationCooldownSeconds: 0)
+        let connectedPeer = PeerID(str: "0011223344556677")
+        let reachablePeer = PeerID(str: "8899aabbccddeeff")
+        let inactivePeer = PeerID(str: "1020304050607080")
+        context.connectedMeshPeers = [connectedPeer]
+        context.reachableMeshPeers = [reachablePeer]
+        context.activeMeshPeerCountValue = 2
+
+        // Resume only after the actual queued MainActor update has reached
+        // its encryption-status callback, which follows network availability.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            context.onEncryptionStatusUpdated = { continuation.resume() }
+            coordinator.didUpdatePeerList([connectedPeer, reachablePeer, inactivePeer])
+        }
+        context.onEncryptionStatusUpdated = nil
+
+        #expect(context.isConnected)
+        #expect(context.networkAvailableNotifications == [2])
+        #expect(context.activeMeshPeerCount() == 2)
+        #expect(context.registeredEphemeralSessions == [connectedPeer, reachablePeer, inactivePeer])
+        #expect(context.updateEncryptionStatusForPeersCount == 1)
+    }
 
     @Test @MainActor
     func synchronousPeerListUpdate_appliesBeforeReturning() {

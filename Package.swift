@@ -45,7 +45,8 @@ let package = Package(
                 .process("Localizable.xcstrings"),
                 .process("Views/Wesh/Pave/Pave.xcstrings"),
                 // Pavé Fluo poster face (OFL), registered at runtime; its licence ships beside it.
-                .copy("Views/Wesh/Pave/Fonts")
+                .copy("Views/Wesh/Pave/Fonts"),
+                .copy("Views/Wesh/Pave/Notices")
             ]
         ),
         .testTarget(

@@ -23,18 +23,15 @@ final class AppRuntime: ObservableObject {
     let privateConversationModel: PrivateConversationModel
     let verificationModel: VerificationModel
     let conversationUIModel: ConversationUIModel
-    let locationChannelsModel: LocationChannelsModel
     let peerListModel: PeerListModel
     let appChromeModel: AppChromeModel
-    let boardAlertsModel: BoardAlertsModel
-    let sharedContentImportModel: SharedContentImportModel
     let composerDrafts = ComposerDraftStore.repository
 
     private var cancellables = Set<AnyCancellable>()
     private var started = false
+    var hasStarted: Bool { started }
     private var weshInternetStarted = false
     private var lastNostrRelayConnectedState = false
-    private var didHandleInitialNostrConnection = false
 
     #if os(iOS)
     private var didHandleInitialActive = false
@@ -48,8 +45,6 @@ final class AppRuntime: ObservableObject {
     ) {
         let conversations = ConversationStore()
         let peerIdentityStore = PeerIdentityStore()
-        let locationPresenceStore = LocationPresenceStore()
-        let locationManager = LocationChannelManager.shared
         self.conversations = conversations
         let resolvedSharedContentStore: SharedContentStore?
         if let sharedContentStore {
@@ -71,17 +66,13 @@ final class AppRuntime: ObservableObject {
             identityManager: SecureIdentityStateManager(keychain),
             conversations: conversations,
             peerIdentityStore: peerIdentityStore,
-            locationPresenceStore: locationPresenceStore,
-            locationManager: locationManager,
             panicPersistentStoreWipes: persistentWipes
         )
         self.publicChatModel = PublicChatModel(conversations: conversations)
         self.privateInboxModel = PrivateInboxModel(conversations: conversations)
-        self.locationChannelsModel = LocationChannelsModel(manager: locationManager)
         self.privateConversationModel = PrivateConversationModel(
             chatViewModel: self.chatViewModel,
             conversations: conversations,
-            locationChannelsModel: self.locationChannelsModel,
             peerIdentityStore: peerIdentityStore
         )
         self.verificationModel = VerificationModel(
@@ -89,47 +80,16 @@ final class AppRuntime: ObservableObject {
             privateConversationModel: self.privateConversationModel,
             peerIdentityStore: peerIdentityStore
         )
-        self.conversationUIModel = ConversationUIModel(
-            chatViewModel: self.chatViewModel,
-            privateConversationModel: self.privateConversationModel,
-            conversations: conversations
-        )
+        self.conversationUIModel = ConversationUIModel(chatViewModel: self.chatViewModel)
         self.peerListModel = PeerListModel(
             chatViewModel: self.chatViewModel,
             conversations: conversations,
-            locationChannelsModel: self.locationChannelsModel,
-            peerIdentityStore: peerIdentityStore,
-            locationPresenceStore: locationPresenceStore
+            peerIdentityStore: peerIdentityStore
         )
-        let sharedContentImportModel = SharedContentImportModel(store: resolvedSharedContentStore)
-        self.sharedContentImportModel = sharedContentImportModel
         self.appChromeModel = AppChromeModel(
             chatViewModel: self.chatViewModel,
-            privateInboxModel: self.privateInboxModel,
-            onPanicWipe: { sharedContentImportModel.discardAll() }
+            privateInboxModel: self.privateInboxModel
         )
-        let chatViewModel = self.chatViewModel
-        self.boardAlertsModel = BoardAlertsModel(
-            arrivals: BoardStore.shared.postArrivals.eraseToAnyPublisher(),
-            wipes: BoardStore.shared.didWipe.eraseToAnyPublisher(),
-            dependencies: BoardAlertsModel.Dependencies(
-                isOwnPost: { post in
-                    let key = chatViewModel.meshService.noiseSigningPublicKeyData()
-                    return !key.isEmpty && key == post.authorSigningKey
-                },
-                emitSystemLine: { content, geohash in
-                    if geohash.isEmpty {
-                        chatViewModel.addMeshOnlySystemMessage(content)
-                    } else {
-                        chatViewModel.addGeohashSystemMessage(content, geohash: geohash)
-                    }
-                }
-            )
-        )
-        // Wesh Internet mode talks to its pinned relays only: no geo relay directory.
-        if !WeshMode.isActive && chatViewModel.networkActivationAllowed && NetworkActivationService.shared.userInternetEnabled {
-            GeoRelayDirectory.shared.prefetchIfNeeded()
-        }
         configureComposerDrafts()
         bindRuntimeObservers()
         NotificationDelegate.shared.runtime = self
@@ -164,17 +124,29 @@ final class AppRuntime: ObservableObject {
         .store(in: &cancellables)
     }
 
+    func panicEraseAction(report: @escaping (Bool) -> Void = { _ in }) -> () -> Bool {
+        makePanicEraseAction(
+            erase: { self.appChromeModel.panicClearAllData() },
+            report: report,
+            needsBootstrap: { !self.chatViewModel.bootstrapConfigured },
+            bootstrap: { self.chatViewModel.configureBootstrapIfNeeded() },
+            needsRuntimeStart: { !self.hasStarted },
+            startRuntime: { self.start() }
+        )
+    }
+
+    func retryStartupRetirement() {
+        guard chatViewModel.retryStartupRetirement() else { return }
+        start()
+    }
+
     func start() {
         guard chatViewModel.networkActivationAllowed else { return }
-        guard !started else {
-            checkForSharedContent()
-            return
-        }
+        guard !started else { return }
 
         started = true
         NotificationDelegate.shared.runtime = self
         VerificationService.shared.configure(with: chatViewModel.meshService)
-        announceInitialTorStatusIfNeeded()
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
@@ -191,44 +163,30 @@ final class AppRuntime: ObservableObject {
         if WeshMode.isActive {
             // Until the welcome and its terms are accepted (again, after an update), nothing goes online.
             if WeshWelcome.isDone() { startWeshInternet() } else { WeshInternetMode.shared.clearArtiWhileOff() }
-        } else if NetworkActivationService.shared.userInternetEnabled {
-            GeohashPresenceService.shared.start()
         }
-        checkForSharedContent()
-        performMediaMaintenance()
+        performBackupMaintenance()
 
         record(.launched)
         record(.startupCompleted)
     }
 
-    /// Drops media that has outlived the retention window, then applies the
-    /// explicit protection class to files that older builds wrote without
-    /// one. Expiry runs first so the migration never touches files the
-    /// sweep is about to delete. Detached because `AppRuntime` is
-    /// main-actor and both passes go file by file through the media tree;
-    /// best-effort, nothing at launch depends on their results. Files older
-    /// builds left in backups are excluded first.
-    private func performMediaMaintenance() {
+    /// Preserves backup exclusion for existing files. Checked legacy-media deletion
+    /// runs in the preflight before transport admission, independently of this sweep.
+    /// This best-effort task is skipped under tests, which share the host's file tree.
+    private func performBackupMaintenance() {
+        guard !TestEnvironment.isRunningTests else { return }
         Task.detached(priority: .utility) {
             #if os(iOS)
-            if !TestEnvironment.isRunningTests {
-                LocalFileProtection.excludeApplicationSupportFromBackup()
-            }
+            LocalFileProtection.excludeApplicationSupportFromBackup()
             #endif
-            let store = BLEIncomingFileStore()
-            store.expireAgedMedia()
-            store.migrateFileProtectionIfNeeded()
         }
     }
 
     func handleOpenURL(_ url: URL) {
         record(.openedURL(url.absoluteString))
 
-        // Only the scheme registered with the OS; `bitchat://verify` QR
-        // payloads are parsed in-app and never arrive here.
-        if WeshDeepLinks.isInternal(url), url.host == "share" {
-            checkForSharedContent()
-        }
+        // The retired share route has no import action. Identity QR payloads
+        // are still parsed in-app, independently of OS URL registration.
     }
 
     func handleDidBecomeActiveNotification() {
@@ -236,7 +194,6 @@ final class AppRuntime: ObservableObject {
         chatViewModel.handleDidBecomeActive()
         configureComposerDrafts()
         composerDrafts.retry()
-        checkForSharedContent()
     }
 
     #if os(macOS)
@@ -244,7 +201,6 @@ final class AppRuntime: ObservableObject {
         guard chatViewModel.networkActivationAllowed else { return }
         record(.scenePhaseChanged(.active))
         chatViewModel.handleDidBecomeActive()
-        checkForSharedContent()
     }
     #endif
 
@@ -258,7 +214,6 @@ final class AppRuntime: ObservableObject {
             WeshInternetMode.shared.appDidEnterBackground()
             TorManager.shared.setAppForeground(false)
             TorManager.shared.goDormantOnBackground()
-            chatViewModel.endGeohashSampling()
             NostrRelayManager.shared.disconnect()
             didEnterBackground = true
 
@@ -294,7 +249,6 @@ final class AppRuntime: ObservableObject {
             chatViewModel.handleDidBecomeActive()
             configureComposerDrafts()
             composerDrafts.retry()
-            checkForSharedContent()
 
         case .inactive:
             record(.scenePhaseChanged(.inactive))
@@ -326,14 +280,6 @@ final class AppRuntime: ObservableObject {
             record(.notificationOpened(peerID: peerID))
             chatViewModel.startPrivateChat(with: peerID)
         }
-
-        // A notification payload never reaches the OS URL router: only an
-        // allowlisted in-app link is handled, here.
-        if let deepLink = userInfo["deeplink"] as? String, let url = URL(string: deepLink),
-           WeshDeepLinks.isInternal(url) {
-            record(.deepLinkOpened(deepLink))
-            handleOpenURL(url)
-        }
     }
 
     func presentationOptions(
@@ -345,14 +291,6 @@ final class AppRuntime: ObservableObject {
                 return []
             }
             return [.banner, .sound]
-        }
-
-        if identifier.hasPrefix("geo-activity-"),
-           let deepLink = userInfo["deeplink"] as? String,
-           let geohash = deepLink.components(separatedBy: "/").last,
-           case .location(let channel) = locationChannelsModel.selectedChannel,
-           channel.geohash == geohash {
-            return []
         }
 
         return [.banner, .sound]
@@ -438,25 +376,6 @@ private extension AppRuntime {
         #endif
     }
 
-    func checkForSharedContent() {
-        let previousID = sharedContentImportModel.offer?.id
-        guard let payload = sharedContentImportModel.refresh(
-            destination: currentSharedContentDestination
-        ) else { return }
-
-        if previousID != payload.id {
-            record(.sharedContentReadyForReview(payload.kind))
-        }
-    }
-
-    var currentSharedContentDestination: SharedContentDestination {
-        SharedContentDestination.resolve(
-            selectedPrivatePeerID: privateConversationModel.selectedPeerID,
-            privateDisplayName: privateConversationModel.selectedHeaderState?.displayName,
-            activeChannel: locationChannelsModel.selectedChannel
-        )
-    }
-
     func handleNostrRelayConnectionChanged(_ isConnected: Bool) {
         record(.nostrRelayConnectionChanged(isConnected))
 
@@ -467,50 +386,18 @@ private extension AppRuntime {
               started,
               becameConnected else { return }
 
-        let isInitialConnection = !didHandleInitialNostrConnection
-        didHandleInitialNostrConnection = true
-
         if !chatViewModel.nostrHandlersSetup {
             chatViewModel.setupNostrMessageHandling()
             chatViewModel.nostrHandlersSetup = true
         }
 
-        guard !isInitialConnection else { return }
-
-        chatViewModel.resubscribeCurrentGeohash()
-        chatViewModel.geoChannelCoordinator?.refreshSampling()
-    }
-
-    func announceInitialTorStatusIfNeeded() {
-        if TorManager.shared.torEnforced &&
-            !chatViewModel.torStatusAnnounced &&
-            TorManager.shared.isAutoStartAllowed() {
-            chatViewModel.torStatusAnnounced = true
-            chatViewModel.addGeohashOnlySystemMessage(
-                String(localized: "system.tor.starting", comment: "System message when Tor is starting")
-            )
-        } else if !TorManager.shared.torEnforced && !chatViewModel.torStatusAnnounced {
-            chatViewModel.torStatusAnnounced = true
-            chatViewModel.addGeohashOnlySystemMessage(
-                String(localized: "system.tor.dev_bypass", comment: "System message when Tor bypass is enabled in development")
-            )
-        }
     }
 
     func handleScreenshotCaptured() {
-        let isLocationChannelActive: Bool = {
-            if case .location = chatViewModel.activeChannel { return true }
-            return false
-        }()
 
         switch Self.resolveScreenshotResponse(
-            isLocationChannelsSheetPresented: appChromeModel.isLocationChannelsSheetPresented,
-            isAppInfoPresented: appChromeModel.isAppInfoPresented,
-            hasPrivateChatOpen: chatViewModel.selectedPrivateChatPeer != nil,
-            isLocationChannelActive: isLocationChannelActive
+            isAppInfoPresented: appChromeModel.isAppInfoPresented
         ) {
-        case .warnLocally:
-            appChromeModel.triggerScreenshotPrivacyWarning()
         case .ignore:
             break
         case .forwardToChat:
@@ -528,49 +415,12 @@ private extension AppRuntime {
 // MARK: - Screenshot routing
 
 extension AppRuntime {
-    /// What a screenshot triggers. Nothing on this table sends anything to
-    /// a public channel (see `ChatLifecycleCoordinator.handleScreenshotCaptured`).
     enum ScreenshotCaptureResponse: Equatable {
-        /// Show the local location-privacy alert; nothing is sent anywhere.
-        case warnLocally
-        /// Do nothing. App Info holds no conversation or location content.
         case ignore
-        /// Hand to the chat layer: a DM notice goes to the peer when a
-        /// secure session exists; public timelines stay silent. Mesh
-        /// deliberately gets no local alert either — a mesh screenshot
-        /// reveals no place and triggers no send, so there is nothing to
-        /// warn about, and alerting on every screenshot would train people
-        /// to dismiss the one alert that matters (the location one).
         case forwardToChat
     }
 
-    /// Pure decision table so the screenshot routing is testable without a
-    /// runtime.
-    nonisolated static func resolveScreenshotResponse(
-        isLocationChannelsSheetPresented: Bool,
-        isAppInfoPresented: Bool,
-        hasPrivateChatOpen: Bool,
-        isLocationChannelActive: Bool
-    ) -> ScreenshotCaptureResponse {
-        if isLocationChannelsSheetPresented { return .warnLocally }
-        if isAppInfoPresented { return .ignore }
-        // A geohash timeline screenshot still reveals a place — warn the
-        // person taking it, locally, with the same alert the channel sheet
-        // uses.
-        if !hasPrivateChatOpen, isLocationChannelActive { return .warnLocally }
-        return .forwardToChat
-    }
-}
-
-/// Links the app accepts from the OS or from its own notification payloads.
-enum WeshDeepLinks {
-    static let scheme = "wesh"
-    static let hosts: Set<String> = ["share"]
-
-    static func isInternal(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == scheme, let host = url.host?.lowercased(), hosts.contains(host) else {
-            return false
-        }
-        return url.user == nil && url.password == nil && url.port == nil
+    nonisolated static func resolveScreenshotResponse(isAppInfoPresented: Bool) -> ScreenshotCaptureResponse {
+        isAppInfoPresented ? .ignore : .forwardToChat
     }
 }

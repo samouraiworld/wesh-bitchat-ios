@@ -56,22 +56,6 @@ struct BridgeWireFormatTests {
         #expect(decoded.bridgeGeohash == nil)
     }
 
-    // MARK: - Carrier directions
-
-    @Test func bridgeCarrierDirectionsRoundTrip() throws {
-        for direction in [NostrCarrierPacket.Direction.toBridge, .fromBridge] {
-            let packet = try #require(NostrCarrierPacket(
-                direction: direction,
-                geohash: "u4pruy",
-                eventJSON: Data("{\"id\":\"x\"}".utf8)
-            ))
-            let encoded = try #require(packet.encode())
-            let decoded = try #require(NostrCarrierPacket.decode(encoded))
-            #expect(decoded.direction == direction)
-            #expect(decoded.geohash == "u4pruy")
-        }
-    }
-
     // MARK: - BitchatMessage bridged flag
     // (Binary round-trip lives in BitFoundation's own tests —
     // `toBinaryPayload` is internal to the package.)
@@ -155,47 +139,5 @@ struct MeshMessageIdentityTests {
         // Must match `BLEService.sendMessage`'s UInt64(seconds * 1000).
         #expect(MeshMessageIdentity.millisecondTimestamp(Date(timeIntervalSince1970: 1_000.9996)) == 1_000_999)
         #expect(MeshMessageIdentity.millisecondTimestamp(Date(timeIntervalSince1970: 1_000)) == 1_000_000)
-    }
-}
-
-@Suite("Courier store bridge publish")
-struct CourierStoreBridgePublishTests {
-    private func makeStore(now: @escaping () -> Date = Date.init) -> CourierStore {
-        CourierStore(persistsToDisk: false, now: now)
-    }
-
-    private func makeEnvelope(now: Date = Date()) -> CourierEnvelope {
-        CourierEnvelope(
-            recipientTag: Data(repeating: 3, count: 16),
-            expiry: UInt64((now.timeIntervalSince1970 + 3600) * 1000),
-            ciphertext: Data(repeating: 9, count: 64),
-            copies: 4
-        )
-    }
-
-    @Test func bridgePublishIsNonDestructiveAndCooledDown() {
-        var currentDate = Date()
-        let store = makeStore(now: { currentDate })
-        #expect(store.deposit(makeEnvelope(now: currentDate), from: Data(repeating: 5, count: 32)))
-
-        let first = store.envelopesForBridgePublish(cooldown: 600)
-        #expect(first.count == 1)
-        // The relay copy is carry-only regardless of stored spray budget.
-        #expect(first.first?.copies == 1)
-        // (Non-destructiveness is proven below: the same envelope is
-        // eligible again after the cooldown. `carriedCount` publishes
-        // asynchronously, so it is not asserted here.)
-
-        // Merely offering the envelope does not start the cooldown; a relay
-        // rejection/timeout must remain immediately retryable.
-        #expect(store.envelopesForBridgePublish(cooldown: 600).count == 1)
-        store.markBridgePublished(first[0])
-
-        // A confirmed publish starts the cooldown.
-        #expect(store.envelopesForBridgePublish(cooldown: 600).isEmpty)
-
-        // After cooldown: eligible again.
-        currentDate = currentDate.addingTimeInterval(601)
-        #expect(store.envelopesForBridgePublish(cooldown: 600).count == 1)
     }
 }

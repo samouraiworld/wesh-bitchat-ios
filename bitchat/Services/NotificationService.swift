@@ -117,9 +117,6 @@ final class NotificationService {
         static var mentionTitle: String {
             String(localized: "notification.redacted.mention.title", defaultValue: "🫵 You were mentioned", comment: "Lock-screen notification title telling someone they were mentioned when message previews are hidden; deliberately omits who mentioned them")
         }
-        static var geohashActivityTitle: String {
-            String(localized: "notification.redacted.geohash.title", defaultValue: "📍 new activity nearby", comment: "Lock-screen notification title for activity in a location channel when message previews are hidden; deliberately omits the geohash")
-        }
         static var body: String {
             String(localized: "notification.redacted.body", defaultValue: "Open Wesh to read", comment: "Lock-screen notification body shown in place of the message text when message previews are hidden")
         }
@@ -138,7 +135,6 @@ final class NotificationService {
 
     private let isRunningTestsProvider: () -> Bool
     /// Wesh V1 has no location channels: their alerts and deep links are dropped.
-    private let allowsLocationChannelNotifications: Bool
     private let authorizer: NotificationAuthorizing
     private let requestDeliverer: NotificationRequestDelivering
     private let categoryRegistrar: NotificationCategoryRegistering
@@ -150,7 +146,6 @@ final class NotificationService {
     }
 
     private init() {
-        self.allowsLocationChannelNotifications = false
         self.hidePreviewsProvider = { NotificationPrivacySettings.hideMessagePreviews }
         self.isRunningTestsProvider = {
             let env = ProcessInfo.processInfo.environment
@@ -181,9 +176,7 @@ final class NotificationService {
         categoryRegistrar: NotificationCategoryRegistering = NoopNotificationCategoryRegistrar(),
         remover: NotificationRemoving = NoopNotificationRemover(),
         hidePreviewsProvider: @escaping () -> Bool = { NotificationPrivacySettings.hideMessagePreviews },
-        allowsLocationChannelNotifications: Bool = true
     ) {
-        self.allowsLocationChannelNotifications = allowsLocationChannelNotifications
         self.isRunningTestsProvider = isRunningTestsProvider
         self.authorizer = authorizer
         self.requestDeliverer = requestDeliverer
@@ -281,19 +274,6 @@ final class NotificationService {
         // The sender's name stays out of the payload: it is not needed to route.
         let userInfo = ["peerID": peerID.id]
 
-        sendLocalNotification(title: title, body: body, identifier: identifier, userInfo: userInfo)
-    }
-
-    // Geohash public chat notification with deep link to a specific geohash
-    func sendGeohashActivityNotification(geohash: String, titlePrefix: String = "#", bodyPreview: String) {
-        guard allowsLocationChannelNotifications else { return }
-        // The geohash itself is location data, so hiding previews withholds it
-        // from the alert while leaving the deep link intact for the tap.
-        let title = hidePreviews ? Redacted.geohashActivityTitle : "\(titlePrefix)\(geohash)"
-        let body = hidePreviews ? Redacted.body : bodyPreview
-        let identifier = "geo-activity-\(geohash)-\(Date().timeIntervalSince1970)"
-        let deeplink = "wesh://geohash/\(geohash)"
-        let userInfo: [String: Any] = ["deeplink": deeplink]
         sendLocalNotification(title: title, body: body, identifier: identifier, userInfo: userInfo)
     }
 
