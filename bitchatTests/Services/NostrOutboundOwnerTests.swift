@@ -542,7 +542,7 @@ private final class Fixture: @unchecked Sendable {
             }
             ledger.track(handle)
             creators.update { $0 += 1 }
-            if holdReturn && returnGate.wait(timeout: .now() + 5) != .success {
+            if holdReturn && returnGate.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned Task creator handle-return barrier timed out") }
             }
             return handle
@@ -663,7 +663,8 @@ private func requireFixture(_ condition: Bool, _ message: String) throws {
 private func eventually(fileID: StaticString = #fileID, line: UInt = #line,
                         _ condition: () -> Bool) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
+    // A hang guard, not a latency budget: starved CI queues took over 5 s.
+    let deadline = clock.now.advanced(by: .seconds(TestConstants.settleTimeout))
     while !condition() {
         if clock.now >= deadline { throw FixtureError("owned completion/readiness guard expired at \(fileID):\(line)") }
         // Cancellation cannot skip the owned-fixture release/reap protocol. This is a readiness guard.
