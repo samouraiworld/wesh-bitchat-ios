@@ -88,6 +88,10 @@ protocol Transport: AnyObject {
     // Connectivity and peers
     func isPeerConnected(_ peerID: PeerID) -> Bool
     func isPeerReachable(_ peerID: PeerID) -> Bool
+    /// Whether unacknowledged resends count toward the outbox attempt cap. False for Internet:
+    /// a contact whose QR carries an npub may never turn Internet on, so silence there is normal
+    /// and the 24h outbox TTL bounds the copy instead.
+    var unackedSendsAreBounded: Bool { get }
     /// Whether a send to this peer is likely to leave the device promptly.
     /// Distinct from reachability: Nostr claims any favorite with a known
     /// npub as reachable even with no relay connection, where a send only
@@ -182,6 +186,8 @@ extension Transport {
         onPeerAuthenticated: @escaping (PeerID, String) -> Void,
         onHandshakeRequired: @escaping (PeerID) -> Void
     ) {}
+
+    var unackedSendsAreBounded: Bool { true }
 
     func sendMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
         sendMessage(content, mentions: mentions)

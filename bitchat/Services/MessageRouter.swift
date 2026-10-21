@@ -737,8 +737,9 @@ final class MessageRouter {
                 // Reachability without a connection is a freshness heuristic,
                 // so the send can silently go nowhere: send but keep retaining
                 // until an ack clears it, bounded by attempt count for peers
-                // that never ack.
-                guard message.sendAttempts < Self.maxSendAttempts else {
+                // that never ack (Internet: by the 24h TTL only, see
+                // `Transport.unackedSendsAreBounded`).
+                guard !transport.unackedSendsAreBounded || message.sendAttempts < Self.maxSendAttempts else {
                     SecureLogger.warning("📤 Dropping unacked PM for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))… after \(message.sendAttempts) attempts", category: .session)
                     if removeQueuedMessage(message.messageID, for: peerID) {
                         dropMessage(message.messageID, for: peerID)
@@ -749,7 +750,9 @@ final class MessageRouter {
                 SecureLogger.debug("Outbox -> \(type(of: transport)) (reachable) for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…", category: .session)
                 transport.sendPrivateMessage(message.content, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
-                outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
+                if transport.unackedSendsAreBounded {
+                    outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
+                }
             }
         }
 

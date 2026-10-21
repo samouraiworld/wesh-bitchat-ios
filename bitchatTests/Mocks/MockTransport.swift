@@ -71,6 +71,7 @@ final class MockTransport: Transport, MeshIdentityRecovering,
 
     var connectedPeers: Set<PeerID> = []
     var reachablePeers: Set<PeerID> = []
+    var unackedSendsAreBounded = true
     /// Peers with an established secure session. `nil` mirrors the protocol
     /// default (prompt delivery), so connected peers stay "secure" for tests
     /// that never care about the distinction.

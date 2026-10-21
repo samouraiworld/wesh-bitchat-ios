@@ -288,6 +288,8 @@ final class NostrTransport: Transport, @unchecked Sendable {
     func emergencyDisconnectAll() { /* no-op */ }
 
     func isPeerConnected(_ peerID: PeerID) -> Bool { false }
+
+    var unackedSendsAreBounded: Bool { false }
     
     func isPeerReachable(_ peerID: PeerID) -> Bool {
         // Callers address peers by either the short 16-hex ID or the full

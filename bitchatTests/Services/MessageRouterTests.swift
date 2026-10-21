@@ -689,6 +689,32 @@ struct MessageRouterTests {
         #expect(transport.sentPrivateMessages.count == 11)
     }
 
+    /// An Internet send to a contact whose QR carries an npub but who never turned Internet on
+    /// cannot be told from silence. Those flushes must not burn the attempt cap and drop the
+    /// message before the two phones meet over Bluetooth; the 24h outbox TTL bounds it instead.
+    @Test @MainActor
+    func flushOutbox_internetSendsWithoutAckNeverDropTheRetainedCopy() async {
+        let peerID = PeerID(str: "00000000000000ae")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+
+        let router = MessageRouter(transports: [internet])
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "in1")
+        for _ in 0..<10 {
+            router.flushOutbox(for: peerID)
+        }
+        #expect(dropped.isEmpty)
+        #expect(internet.sentPrivateMessages.count == 11)
+
+        router.markDelivered("in1")
+        router.flushOutbox(for: peerID)
+        #expect(internet.sentPrivateMessages.count == 11)
+    }
+
     @Test @MainActor
     func authenticationRetry_capsActualSecureTransmissions() async {
         let peerID = PeerID(str: "00000000000000ad")
