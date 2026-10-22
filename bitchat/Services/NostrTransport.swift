@@ -331,7 +331,7 @@ final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Senda
 
     func canDeliverPromptly(to peerID: PeerID) -> Bool {
         // A known npub makes a peer "reachable", but with no relay
-        // connection a send only joins the local queue. Answering honestly
+        // connection a send is not published until a later retry. Answering honestly
         // here lets the router hand a sealed copy to a courier in parallel
         // instead of waiting for internet that may never come.
         isPeerReachable(peerID) && queue.sync { relaysConnected }

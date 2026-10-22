@@ -269,8 +269,9 @@ final class MessageRouter {
             enqueue(message, for: peerID)
             transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
             if !transport.unackedSendsAreBounded { scheduleInternetRetry(messageID, for: peerID) }
-            // "Reachable" without prompt delivery means the send only joined
-            // a queue (Nostr with relays down): also hand a sealed copy to
+            // "Reachable" without prompt delivery means the send cannot be
+            // published now (Nostr with relays down; it is retried on the
+            // backoff): also hand a sealed copy to
             // any connected couriers rather than waiting for internet that
             // may never come. Double delivery is harmless — receivers dedup
             // by message ID, and delivered/read acks never downgrade.
