@@ -172,13 +172,6 @@ final class PrivateConversationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: Notification.Name("peerStatusUpdated"))
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshSelectedConversation()
-            }
-            .store(in: &cancellables)
-
     }
 
     private func refreshSelectedConversation() {

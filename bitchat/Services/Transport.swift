@@ -138,14 +138,6 @@ protocol Transport: AnyObject {
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool)
     func sendBroadcastAnnounce()
     func sendDeliveryAck(for messageID: String, to peerID: PeerID)
-    /// Capabilities the peer advertised in its last verified announce;
-    /// empty for peers that predate the capabilities TLV.
-    func peerCapabilities(_ peerID: PeerID) -> PeerCapabilities
-    /// Appends a peer-authenticated observer. Unlike
-    /// `installNoiseSessionCallbacks` this never touches the (single-slot)
-    /// handshake-required callback, so secondary features can observe
-    /// session establishment without disturbing the primary registration.
-    func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void)
 }
 
 /// A carried public mesh message from the store-and-forward window, decoded
@@ -190,9 +182,6 @@ extension Transport {
         onPeerAuthenticated: @escaping (PeerID, String) -> Void,
         onHandshakeRequired: @escaping (PeerID) -> Void
     ) {}
-
-    func peerCapabilities(_ peerID: PeerID) -> PeerCapabilities { [] }
-    func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void) {}
 
     func sendMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
         sendMessage(content, mentions: mentions)

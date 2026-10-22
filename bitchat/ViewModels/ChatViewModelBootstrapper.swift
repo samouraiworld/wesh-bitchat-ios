@@ -301,12 +301,5 @@ private extension ChatViewModelBootstrapper {
             name: .favoriteStatusChanged,
             object: nil
         )
-
-        NotificationCenter.default.addObserver(
-            viewModel,
-            selector: #selector(ChatViewModel.handlePeerStatusUpdate(_:)),
-            name: Notification.Name("peerStatusUpdated"),
-            object: nil
-        )
     }
 }

@@ -116,4 +116,11 @@ struct BLENoiseReconnectPolicyTests {
             !PeerCapabilities.localSupported.contains(.privateMediaReceipts)
         )
     }
+
+    @Test("Retired vouch bit is not advertised")
+    func retiredVouchBitIsNotAdvertised() {
+        // Verification comes only from the user's own QR scan: no peer is
+        // invited to send vouches, and the bit stays reserved on the wire.
+        #expect(!PeerCapabilities.localSupported.contains(.vouch))
+    }
 }
