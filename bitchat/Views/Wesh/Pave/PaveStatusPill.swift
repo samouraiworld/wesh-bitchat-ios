@@ -76,9 +76,10 @@ enum PaveContactInternetBadge: Equatable {
 
     /// Nil while Internet is off: then every message goes over Bluetooth and either badge is noise.
     /// « Joignable » follows the route itself, so a binding under review (conflict, proof warning)
-    /// is never shown as reachable; it gets no badge until the user resolves it.
-    init?(contact: WeshQRTrust.Contact, internet: PaveInternetStatus) {
-        guard internet.isEnabled else { return nil }
+    /// is never shown as reachable; it gets no badge until the user resolves it. A blocked contact
+    /// gets none either: the route never writes to it.
+    init?(contact: WeshQRTrust.Contact, internet: PaveInternetStatus, blocked: Bool = false) {
+        guard internet.isEnabled, !blocked else { return nil }
         if WeshInternetRoute.deliveryNpub(for: contact) != nil {
             self = .reachable
         } else if contact.requiresRescanForInternet {

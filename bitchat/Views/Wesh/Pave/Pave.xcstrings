@@ -813,13 +813,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scan their QR code again to message them over the Internet."
+            "value" : "Scan their QR again to message over the Internet."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rescannez son QR code pour lui écrire par Internet."
+            "value" : "Rescannez son QR pour échanger par Internet."
           }
         }
       }

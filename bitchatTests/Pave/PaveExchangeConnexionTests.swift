@@ -236,6 +236,13 @@ struct PaveContactInternetBadgeTests {
         }
     }
 
+    @Test func aBlockedContactIsNeverShownAsReachable() {
+        let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
+        let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
+        #expect(PaveContactInternetBadge(contact: enrolled, internet: .connected, blocked: true) == nil)
+        #expect(PaveContactInternetBadge(contact: legacy, internet: .connected, blocked: true) == nil)
+    }
+
     @Test func noBadgeWhileInternetIsOff() {
         let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
         let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")

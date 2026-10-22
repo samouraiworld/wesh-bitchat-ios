@@ -1355,7 +1355,7 @@ private struct WeshContactDetails: View {
     /// The stored record, so a rescan while this page is open updates the badge.
     private var internetBadge: PaveContactInternetBadge? {
         let current = trust.contacts.first { $0.id == contact.id } ?? contact
-        return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus)
+        return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus, blocked: blocked)
     }
 
     var body: some View {
