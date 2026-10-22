@@ -161,10 +161,105 @@ struct PaveInternetSwitchTests {
 
     @Test func statesMapToWhatTheSheetShows() {
         #expect(PaveInternetStatus(.off) == .off)
-        #expect(PaveInternetStatus(.connecting(torProgress: 40)) == .connecting)
-        #expect(PaveInternetStatus(.on) == .connected(relayCount: nil))
+        #expect(PaveInternetStatus(.connecting(torProgress: 40)) == .connecting(torProgress: 40))
+        #expect(PaveInternetStatus(.on) == .connected)
         #expect(PaveInternetStatus(.paused) == .paused)
         #expect(PaveInternetStatus(.error(.torBlocked)) == .failed)
+        #expect(PaveInternetStatus(.error(.routeFault)) == .failed)
+    }
+}
+
+@Suite("Pavé Internet status copy")
+struct PaveInternetStatusCopyTests {
+    private func resources(_ language: String) throws -> Bundle {
+        let path = try #require(PaveCopy.bundle.path(forResource: language, ofType: "lproj"))
+        return try #require(Bundle(path: path))
+    }
+
+    @Test func frenchLabelsAreTheSpecPill() throws {
+        let bundle = try resources("fr")
+        let locale = Locale(identifier: "fr_FR")
+        func label(_ status: PaveInternetStatus) -> String { status.label(bundle: bundle, locale: locale) }
+        #expect(label(.off) == "Bluetooth seulement")
+        #expect(label(.connecting(torProgress: 42)) == "Connexion à Tor… 42\u{00A0}%")
+        #expect(label(.connected) == "Internet actif")
+        #expect(label(.paused) == "Internet en pause")
+        #expect(label(.failed) == "Internet indisponible — Réessayer")
+    }
+
+    @Test func englishLabelsMatchTheFrenchOnes() throws {
+        let bundle = try resources("en")
+        let locale = Locale(identifier: "en_US")
+        func label(_ status: PaveInternetStatus) -> String { status.label(bundle: bundle, locale: locale) }
+        #expect(label(.off) == "Bluetooth only")
+        #expect(label(.connecting(torProgress: 7)) == "Connecting to Tor… 7%")
+        #expect(label(.connected) == "Internet on")
+        #expect(label(.paused) == "Internet paused")
+        #expect(label(.failed) == "Internet unavailable — Try again")
+    }
+
+    @Test func theTorPercentageIsTheRealOneAndStaysInRange() throws {
+        let bundle = try resources("fr")
+        let locale = Locale(identifier: "fr_FR")
+        let mode = WeshInternetState.connecting(torProgress: 63)
+        #expect(PaveInternetStatus(mode).label(bundle: bundle, locale: locale) == "Connexion à Tor… 63\u{00A0}%")
+        #expect(PaveInternetStatus.connecting(torProgress: 0).label(bundle: bundle, locale: locale) == "Connexion à Tor… 0\u{00A0}%")
+        #expect(PaveInternetStatus.connecting(torProgress: 140).label(bundle: bundle, locale: locale) == "Connexion à Tor… 100\u{00A0}%")
+        #expect(PaveInternetStatus.connecting(torProgress: -5).label(bundle: bundle, locale: locale) == "Connexion à Tor… 0\u{00A0}%")
+    }
+
+    @Test func onlyAFailureRetriesAndTheHomePillWaitsForInternetMode() {
+        let all: [PaveInternetStatus] = [.off, .connecting(torProgress: 10), .connected, .paused, .failed]
+        #expect(all.filter(\.offersRetry) == [.failed])
+        #expect(all.filter { !$0.showsHomePill } == [.off])
+    }
+
+    @Test @MainActor func aTouchOnTheFailedStatusRetries() {
+        let stub = PaveInternetModeStub(internetStatus: .failed, disclosureAccepted: true)
+        stub.retryInternet()
+        #expect(stub.internetStatus == .connecting(torProgress: 0))
+    }
+}
+
+@Suite("Pavé contact Internet badge")
+struct PaveContactInternetBadgeTests {
+    private typealias Contact = WeshQRTrust.Contact
+    private let noise = String(repeating: "a1", count: 32)
+    private let npub = "npub1r799vmpq2ceaq2gfgara9cv0gns9ny7a57jl3r6fvpuzqhm9devsg53zcr"
+
+    @Test func enrolledContactsAreReachableAndLegacyOnesNeedARescan() {
+        let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
+        let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
+        for status in [PaveInternetStatus.connecting(torProgress: 30), .connected, .paused, .failed] {
+            #expect(PaveContactInternetBadge(contact: enrolled, internet: status) == .reachable)
+            #expect(PaveContactInternetBadge(contact: legacy, internet: status) == .rescanRequired)
+        }
+    }
+
+    @Test func noBadgeWhileInternetIsOff() {
+        let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
+        let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
+        #expect(PaveContactInternetBadge(contact: enrolled, internet: .off) == nil)
+        #expect(PaveContactInternetBadge(contact: legacy, internet: .off) == nil)
+    }
+
+    @Test func aBindingUnderReviewIsNeverShownAsReachable() {
+        let conflict = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubConflict: true)
+        let warning = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true, npubProofWarning: true)
+        let malformed = Contact(noiseKeyHex: noise, nickname: "Nora", npub: "npub1")
+        for contact in [conflict, warning, malformed] {
+            #expect(PaveContactInternetBadge(contact: contact, internet: .connected) == nil)
+        }
+    }
+
+    @Test func badgeCopyInFrenchAndEnglish() throws {
+        let fr = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj").flatMap(Bundle.init(path:)))
+        let en = try #require(PaveCopy.bundle.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:)))
+        let french = Locale(identifier: "fr_FR"), english = Locale(identifier: "en_US")
+        #expect(PaveContactInternetBadge.reachable.label(bundle: fr, locale: french) == "Joignable par Internet")
+        #expect(PaveContactInternetBadge.rescanRequired.label(bundle: fr, locale: french) == "Rescan requis")
+        #expect(PaveContactInternetBadge.reachable.label(bundle: en, locale: english) == "Reachable over the Internet")
+        #expect(PaveContactInternetBadge.rescanRequired.label(bundle: en, locale: english) == "Rescan required")
     }
 }
 

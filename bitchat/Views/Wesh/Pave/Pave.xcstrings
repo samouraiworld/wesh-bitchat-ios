@@ -790,6 +790,57 @@
         }
       }
     },
+    "pave.contact.internetReachable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reachable over the Internet"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Joignable par Internet"
+          }
+        }
+      }
+    },
+    "pave.contact.rescanHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan their QR code again to message them over the Internet."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rescannez son QR code pour lui écrire par Internet."
+          }
+        }
+      }
+    },
+    "pave.contact.rescanRequired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rescan required"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rescan requis"
+          }
+        }
+      }
+    },
     "pave.delivery.failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2007,54 +2058,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connected through Tor"
+            "value" : "Internet on"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connecté via Tor"
-          }
-        }
-      }
-    },
-    "pave.internet.connectedRelays" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Connected through Tor · %lld relay"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Connected through Tor · %lld relays"
-                }
-              }
-            }
-          }
-        },
-        "fr" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Connecté via Tor · %lld relais"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Connecté via Tor · %lld relais"
-                }
-              }
-            }
+            "value" : "Internet actif"
           }
         }
       }
@@ -2065,13 +2075,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connecting through Tor…"
+            "value" : "Connecting to Tor… %lld%%"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connexion via Tor…"
+            "value" : "Connexion à Tor… %lld %%"
           }
         }
       }
@@ -2099,13 +2109,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cannot connect · everything goes over Bluetooth"
+            "value" : "Internet unavailable — Try again"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connexion impossible · tout passe par Bluetooth"
+            "value" : "Internet indisponible — Réessayer"
           }
         }
       }
@@ -2116,13 +2126,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Off · everything goes over Bluetooth"
+            "value" : "Bluetooth only"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Désactivé · tout passe par Bluetooth"
+            "value" : "Bluetooth seulement"
           }
         }
       }
@@ -2133,13 +2143,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Paused · resumes when you return"
+            "value" : "Internet paused"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "En pause · reprend au retour dans l'app"
+            "value" : "Internet en pause"
           }
         }
       }
@@ -3249,60 +3259,19 @@
         }
       }
     },
-    "pave.status.inRange" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld phone in range"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld phones in range"
-                }
-              }
-            }
-          }
-        },
-        "fr" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld téléphone à portée"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld téléphones à portée"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "pave.status.internet" : {
+    "pave.status.retryHint" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Via Internet · %lld in range"
+            "value" : "Tries to connect to the Internet again."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Via Internet · %lld à portée"
+            "value" : "Relance la connexion à Internet."
           }
         }
       }
