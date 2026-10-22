@@ -94,12 +94,8 @@ struct PanicNetworkLifecycle {
     /// so the panic transaction does not commit.
     let stop: @MainActor () -> Bool
     let restart: @MainActor () -> Void
-    let closeInstalledNostrRoots: @MainActor (NostrOutboundPanicBinding) -> NostrOutboundOwner.RootCloseOutcome
 
-    static let noop = PanicNetworkLifecycle(
-        stop: { true }, restart: {},
-        closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
-    )
+    static let noop = PanicNetworkLifecycle(stop: { true }, restart: {})
 
     static var live: PanicNetworkLifecycle {
         PanicNetworkLifecycle(
@@ -109,8 +105,7 @@ struct PanicNetworkLifecycle {
             },
             restart: {
                 NetworkActivationService.shared.start()
-            },
-            closeInstalledNostrRoots: { binding in closeCapturedNostrOutboundRootsAndRequestSourceDetachment(binding) }
+            }
         )
     }
 }
@@ -310,7 +305,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     let keychain: KeychainManagerProtocol
     private let panicRecoveryOperations: PanicRecoveryOperations
     private let panicNetworkLifecycle: PanicNetworkLifecycle
-    private let nostrOutboundPanicBinding: NostrOutboundPanicBinding
     private let panicPersistentStoreWipes: PanicPersistentStoreWipes
     let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
@@ -760,7 +754,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicRecoveryOperations = panicRecoveryOperations
             ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
-        self.nostrOutboundPanicBinding = services.nostrOutboundPanicBinding
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
             ?? (TestEnvironment.isRunningTests
@@ -1274,7 +1267,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         startupRetirementBlocked = false
         panicRecoveryBlocked = true
-        _ = panicNetworkLifecycle.closeInstalledNostrRoots(nostrOutboundPanicBinding)
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
         weshAnnouncedInternetKeys.removeAll()
@@ -1412,6 +1404,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
         // disconnect is not enough here.
         NostrRelayManager.shared.resetForPanicWipe()
+        // Paced acks and sends captured before the wipe hold the pre-wipe Nostr identity.
+        NostrTransport.sharedAckPacer.discardWorkBeforeErase()
         // Clearing relay handlers stops NEW events, but a detached gift-wrap
         // decrypt spawned just before the wipe still holds a pre-wipe key and
         // ciphertext; bump the pipeline's wipe generation so its result is
