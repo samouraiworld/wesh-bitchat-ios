@@ -134,35 +134,18 @@ struct SocialIdentity: Codable {
     var notes: String?
 }
 
-/// Trust ladder: unknown → casual → vouched → trusted → verified.
+/// Trust ladder: unknown → casual → trusted → verified.
 ///
 /// Persistence compatibility: `TrustLevel` is stored by its *String* raw
-/// value ("unknown", "casual", …), not by ordinal position, so inserting
-/// `vouched` mid-ladder cannot corrupt previously persisted values — every
-/// pre-existing case keeps the exact raw value it was written with. The
-/// `vouched` tier is additionally never persisted into `SocialIdentity`
-/// (it's recomputed on read from stored vouches), so downgraded builds never
-/// encounter the unfamiliar raw value.
+/// value ("unknown", "casual", …), not by ordinal position, so every case
+/// keeps the exact raw value it was written with.
 enum TrustLevel: String, Codable {
     case unknown
     case casual
-    /// Transitively trusted: vouched for by at least one peer *I* verified.
-    /// Derived at read time — never written to persistent storage.
+    // Retired vouch tier: never written, kept so a stored raw value still decodes.
     case vouched
     case trusted
     case verified
-}
-
-// MARK: - Vouching (transitive verification)
-
-/// One accepted vouch: a peer I verified (the voucher) attested that they
-/// verified the vouchee. Validity is recomputed on read — a record only
-/// counts while its voucher remains in `verifiedFingerprints` and its
-/// timestamp is within `VouchAttestation.maxAge` — so unverifying a voucher
-/// silently invalidates the vouches they gave without a cascade delete.
-struct VouchRecord: Codable, Equatable {
-    let voucherFingerprint: String
-    let timestamp: Date
 }
 
 // MARK: - Identity Cache
@@ -187,21 +170,6 @@ struct IdentityCache: Codable {
     // Blocked Nostr pubkeys (lowercased hex) for geohash chats
     var blockedNostrPubkeys: Set<String> = []
 
-    // Vouching (transitive verification). All three fields are Optional so
-    // caches persisted before this feature decode cleanly — decodeIfPresent
-    // is used below, and a missing key must not trip the "unreadable cache"
-    // recovery path that discards everything.
-
-    // Vouchee fingerprint -> accepted vouches (capped per vouchee)
-    var vouchesByVouchee: [String: [VouchRecord]]? = nil
-
-    // Peer fingerprint -> when we last sent them a vouch batch (rate limit)
-    var vouchBatchSentAt: [String: Date]? = nil
-
-    // Fingerprint -> when we verified it (orders outgoing vouch batches;
-    // entries verified before this field exists sort as oldest)
-    var verifiedAt: [String: Date]? = nil
-
     // Noise-fingerprint -> Ed25519 announcement key, learned only from the
     // authenticated peer-state payload. This prevents a self-signed announce
     // containing a copied public Noise key from replacing a previously bound
@@ -221,9 +189,10 @@ struct IdentityCache: Codable {
     init() {}
 
     // Custom decoding so caches written by older builds (missing newer keys
-    // such as `cryptographicIdentities` or the vouching fields) still load
-    // instead of being discarded. Every field uses decodeIfPresent so a
-    // missing key falls back to its default rather than throwing.
+    // such as `cryptographicIdentities`) still load instead of being
+    // discarded. Every field uses decodeIfPresent so a missing key falls back
+    // to its default rather than throwing. Retired keys (the vouch data) are
+    // not decoded, so they are dropped on load and never re-encoded.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         socialIdentities = try container.decodeIfPresent([String: SocialIdentity].self, forKey: .socialIdentities) ?? [:]
@@ -231,12 +200,33 @@ struct IdentityCache: Codable {
         verifiedFingerprints = try container.decodeIfPresent(Set<String>.self, forKey: .verifiedFingerprints) ?? []
         lastInteractions = try container.decodeIfPresent([String: Date].self, forKey: .lastInteractions) ?? [:]
         blockedNostrPubkeys = try container.decodeIfPresent(Set<String>.self, forKey: .blockedNostrPubkeys) ?? []
-        vouchesByVouchee = try container.decodeIfPresent([String: [VouchRecord]].self, forKey: .vouchesByVouchee)
-        vouchBatchSentAt = try container.decodeIfPresent([String: Date].self, forKey: .vouchBatchSentAt)
-        verifiedAt = try container.decodeIfPresent([String: Date].self, forKey: .verifiedAt)
         authenticatedSigningKeysByFingerprint = try container.decodeIfPresent([String: Data].self, forKey: .authenticatedSigningKeysByFingerprint)
         cryptographicIdentities = try container.decodeIfPresent([String: CryptographicIdentity].self, forKey: .cryptographicIdentities) ?? [:]
         version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    }
+
+    /// Keys written by builds that exchanged vouches: received vouches, the
+    /// per-contact vouch send times, and the verification times that ordered
+    /// outgoing vouches. Only their presence is read, never their contents.
+    private enum RetiredVouchKeys: String, CodingKey, CaseIterable {
+        case vouchesByVouchee
+        case vouchBatchSentAt
+        case verifiedAt
+    }
+
+    private struct RetiredVouchProbe: Decodable {
+        let isPresent: Bool
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: RetiredVouchKeys.self)
+            isPresent = RetiredVouchKeys.allCases.contains { container.contains($0) }
+        }
+    }
+
+    /// True when encoded cache JSON still carries retired vouch data, so the
+    /// loader can rewrite the cache without it.
+    static func containsRetiredVouchData(_ data: Data) -> Bool {
+        (try? JSONDecoder().decode(RetiredVouchProbe.self, from: data))?.isPresent ?? false
     }
 }
 

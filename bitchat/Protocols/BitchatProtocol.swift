@@ -96,8 +96,10 @@ enum NoisePayloadType: UInt8 {
     // Verification (QR-based OOB binding)
     case verifyChallenge = 0x10     // Verification challenge
     case verifyResponse  = 0x11     // Verification response
-    // Transitive verification (web of trust)
-    case vouch = 0x12               // Batch of vouch attestations
+    // BitChat transitive verification. Wesh neither sends nor accepts
+    // vouches (verification comes only from the user's own QR scan); the
+    // value stays reserved so a BitChat peer's batch is dropped unread.
+    case vouch = 0x12
 
     /// #1434 briefly used 0x09 before release. Accept it while prerelease
     /// builds age out, but never emit it. Decoders canonicalize both values to

@@ -571,12 +571,14 @@ final class SecureIdentityStateManagerTests: XCTestCase {
     }
 
     func test_cacheReadFailures_preserveStoredStateAndRequireExplicitRetry() {
+        let pinned = String(repeating: "ab", count: 32)
+        let pinnedPeerID = PeerID(str: String(pinned.prefix(16)))
         for failure: KeychainReadResult in [.deviceLocked, .authenticationFailed, .accessDenied, .otherError(-1)] {
             let keychain = IdentityCacheFaultKeychain()
             let original = SecureIdentityStateManager(keychain)
             original.setFavorite("favorite", isFavorite: true)
             original.setBlocked("blocked", isBlocked: true)
-            original.upsertCryptographicIdentity(fingerprint: "pinned", noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 2, count: 32))
+            original.upsertCryptographicIdentity(fingerprint: pinned, noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 2, count: 32))
             let stored = keychain.backing.getIdentityKey(forKey: keychain.cacheKey)
             let savesBeforeFailure = keychain.cacheSaveCount
             keychain.cacheReadError = failure
@@ -584,7 +586,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
             var unavailable: SecureIdentityStateManager? = SecureIdentityStateManager(keychain)
             XCTAssertFalse(unavailable!.isPersistenceAvailable)
             unavailable!.setFavorite("replacement", isFavorite: true)
-            unavailable!.upsertCryptographicIdentity(fingerprint: "pinned", noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 3, count: 32))
+            unavailable!.upsertCryptographicIdentity(fingerprint: pinned, noisePublicKey: Data(repeating: 1, count: 32), signingPublicKey: Data(repeating: 3, count: 32))
             unavailable!.forceSave()
             XCTAssertFalse(unavailable!.isFavorite(fingerprint: "replacement"))
             XCTAssertEqual(keychain.cacheSaveCount, savesBeforeFailure)
@@ -595,7 +597,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
             XCTAssertTrue(unavailable!.isPersistenceAvailable)
             XCTAssertTrue(unavailable!.isFavorite(fingerprint: "favorite"))
             XCTAssertTrue(unavailable!.isBlocked(fingerprint: "blocked"))
-            XCTAssertEqual(unavailable!.signingPublicKey(forFingerprint: "pinned"), Data(repeating: 2, count: 32))
+            XCTAssertEqual(unavailable!.getCryptoIdentitiesByPeerIDPrefix(pinnedPeerID).first?.signingPublicKey, Data(repeating: 2, count: 32))
             XCTAssertEqual(keychain.cacheSaveCount, savesBeforeFailure, "retry only loads; it never writes an empty replacement")
             unavailable!.setFavorite("after-retry", isFavorite: true)
             unavailable = nil
@@ -622,6 +624,74 @@ final class SecureIdentityStateManagerTests: XCTestCase {
             XCTAssertEqual(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), blob)
             XCTAssertEqual(keychain.cacheSaveCount, 0)
             XCTAssertEqual(keychain.cacheDeleteCount, 0)
+        }
+    }
+
+    func test_legacyCacheWithVouchRecords_loadsAndIsRewrittenWithoutVouchData() throws {
+        // A cache written by a build that exchanged vouches: received vouches,
+        // per-contact send times, verification times, and a social identity
+        // carrying the retired "vouched" tier.
+        let key = Data(repeating: 0x61, count: 32)
+        let verified = String(repeating: "a1", count: 32)
+        let vouchee = String(repeating: "b2", count: 32)
+        let legacyJSON = """
+        {
+          "socialIdentities": {
+            "\(verified)": {"fingerprint": "\(verified)", "claimedNickname": "Alice", "trustLevel": "verified", "isFavorite": true, "isBlocked": false},
+            "\(vouchee)": {"fingerprint": "\(vouchee)", "claimedNickname": "Bob", "trustLevel": "vouched", "isFavorite": false, "isBlocked": false}
+          },
+          "nicknameIndex": {},
+          "verifiedFingerprints": ["\(verified)"],
+          "lastInteractions": {},
+          "blockedNostrPubkeys": [],
+          "vouchesByVouchee": {"\(vouchee)": [{"voucherFingerprint": "\(verified)", "timestamp": 750000000}]},
+          "vouchBatchSentAt": {"\(verified)": 750000000},
+          "verifiedAt": {"\(verified)": 749000000},
+          "cryptographicIdentities": {},
+          "version": 1
+        }
+        """
+        let sealed = try XCTUnwrap(AES.GCM.seal(Data(legacyJSON.utf8), using: SymmetricKey(data: key)).combined)
+        let keychain = IdentityCacheFaultKeychain()
+        _ = keychain.backing.saveIdentityKey(key, forKey: keychain.encryptionKeyName)
+        _ = keychain.backing.saveIdentityKey(sealed, forKey: keychain.cacheKey)
+
+        let manager = SecureIdentityStateManager(keychain)
+        XCTAssertTrue(manager.isPersistenceAvailable)
+        XCTAssertFalse(manager.hasPendingPersistenceChanges)
+        XCTAssertTrue(manager.isVerified(fingerprint: verified))
+        XCTAssertFalse(manager.isVerified(fingerprint: vouchee))
+        XCTAssertTrue(manager.isFavorite(fingerprint: verified))
+        XCTAssertEqual(manager.getSocialIdentity(for: vouchee)?.claimedNickname, "Bob")
+        XCTAssertEqual(manager.getSocialIdentity(for: vouchee)?.trustLevel, .vouched)
+
+        // Loading alone purges the retired keys from storage.
+        XCTAssertEqual(keychain.cacheSaveCount, 1)
+        try assertNoRetiredVouchKeys(in: keychain, key: key)
+
+        // A later save and reload keep everything else and never bring them back.
+        manager.setBlocked(vouchee, isBlocked: true)
+        manager.forceSave()
+        try assertNoRetiredVouchKeys(in: keychain, key: key)
+        let reloaded = SecureIdentityStateManager(keychain)
+        XCTAssertTrue(reloaded.isVerified(fingerprint: verified))
+        XCTAssertTrue(reloaded.isBlocked(fingerprint: vouchee))
+        XCTAssertEqual(reloaded.getSocialIdentity(for: verified)?.claimedNickname, "Alice")
+        XCTAssertEqual(keychain.cacheSaveCount, 2, "a cache without vouch data is not rewritten on load")
+    }
+
+    private func assertNoRetiredVouchKeys(
+        in keychain: IdentityCacheFaultKeychain,
+        key: Data,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let stored = try XCTUnwrap(keychain.backing.getIdentityKey(forKey: keychain.cacheKey), file: file, line: line)
+        let plaintext = try AES.GCM.open(AES.GCM.SealedBox(combined: stored), using: SymmetricKey(data: key))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: plaintext) as? [String: Any], file: file, line: line)
+        XCTAssertNotNil(object["verifiedFingerprints"], file: file, line: line)
+        for retired in ["vouchesByVouchee", "vouchBatchSentAt", "verifiedAt"] {
+            XCTAssertNil(object[retired], "\(retired) persisted", file: file, line: line)
         }
     }
 
@@ -728,9 +798,7 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         XCTAssertTrue(manager.hasPendingPersistenceChanges)
         XCTAssertFalse(manager.isVerified(fingerprint: "verified-peer"))
         XCTAssertTrue(manager.getVerifiedFingerprints().isEmpty)
-        XCTAssertTrue(manager.mostRecentlyVerifiedFingerprints(limit: 5, excluding: "other").isEmpty)
         XCTAssertEqual(manager.getSocialIdentity(for: "verified-peer")?.trustLevel, .unknown)
-        XCTAssertEqual(manager.effectiveTrustLevel(for: "verified-peer"), .unknown)
         XCTAssertTrue(manager.isBlocked(fingerprint: "any-peer"))
         keychain.cacheSaveFails = false
         manager.forceSave()
@@ -738,7 +806,6 @@ final class SecureIdentityStateManagerTests: XCTestCase {
         XCTAssertTrue(manager.isVerified(fingerprint: "verified-peer"))
         XCTAssertEqual(manager.getVerifiedFingerprints(), ["verified-peer"])
         XCTAssertEqual(manager.getSocialIdentity(for: "verified-peer")?.trustLevel, .verified)
-        XCTAssertEqual(manager.effectiveTrustLevel(for: "verified-peer"), .verified)
     }
 
     func test_unconfirmedCacheReadback_keepsPendingChangesForRetry() {

@@ -136,14 +136,6 @@ protocol SecureIdentityStateManagerProtocol {
     func isVerified(fingerprint: String) -> Bool
     func getVerifiedFingerprints() -> Set<String>
 
-    // MARK: Vouching (transitive verification)
-    @discardableResult
-    func recordVouch(voucheeFingerprint: String, voucherFingerprint: String, timestamp: Date) -> Bool
-    func lastVouchBatchSent(to fingerprint: String) -> Date?
-    func markVouchBatchSent(to fingerprint: String, at date: Date)
-    func signingPublicKey(forFingerprint fingerprint: String) -> Data?
-    func mostRecentlyVerifiedFingerprints(limit: Int, excluding fingerprint: String) -> [String]
-
     // MARK: Noise-authenticated announcement identity
     func bindAuthenticatedSigningPublicKey(_ signingPublicKey: Data, fingerprint: String)
     func authenticatedSigningPublicKey(forFingerprint fingerprint: String) -> Data?
@@ -273,6 +265,13 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
                 let loaded = try JSONDecoder().decode(IdentityCache.self, from: decryptedData)
                 cache = loaded
                 cacheIsLoaded = true
+                // Retired vouch records are not decoded; rewrite the cache so
+                // they leave storage too. Best effort: the loaded state is
+                // already durable, so a failed write must not mark it pending,
+                // and the next load or save retries the purge.
+                if IdentityCache.containsRetiredVouchData(decryptedData) {
+                    persist(snapshot: cache)
+                }
             } catch {
                 SecureLogger.warning("Unreadable identity cache preserved; persistence unavailable", category: .security)
                 loadRequiresRecovery = true
@@ -642,12 +641,8 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
             guard self.cacheIsLoaded else { return }
             if verified {
                 self.cache.verifiedFingerprints.insert(fingerprint)
-                var verifiedAt = self.cache.verifiedAt ?? [:]
-                verifiedAt[fingerprint] = Date()
-                self.cache.verifiedAt = verifiedAt
             } else {
                 self.cache.verifiedFingerprints.remove(fingerprint)
-                self.cache.verifiedAt?.removeValue(forKey: fingerprint)
             }
 
             // Update trust level if social identity exists
@@ -671,164 +666,6 @@ final class SecureIdentityStateManager: SecureIdentityStateManagerProtocol {
         queue.sync {
             guard cacheIsLoaded, !pendingSave else { return [] }
             return cache.verifiedFingerprints
-        }
-    }
-
-    // MARK: - Vouching (transitive verification)
-
-    /// Maximum vouchers retained per vouchee (most recent kept).
-    static let maxVouchersPerVouchee = 8
-
-    /// Records an accepted vouch, enforcing every accept-policy gate that can
-    /// be evaluated against stored state (signature verification is the
-    /// caller's job — it needs the sender's announce-bound signing key):
-    /// - the voucher must be a fingerprint *I* verified
-    /// - self-vouches are ignored
-    /// - vouches for peers I already verified are ignored (nothing to add)
-    /// - attestations outside the validity window are ignored
-    /// - at most `maxVouchersPerVouchee` vouchers are kept per vouchee
-    ///
-    /// Returns true when the vouch was stored (or refreshed).
-    @discardableResult
-    func recordVouch(voucheeFingerprint: String, voucherFingerprint: String, timestamp: Date) -> Bool {
-        recordVouch(
-            voucheeFingerprint: voucheeFingerprint,
-            voucherFingerprint: voucherFingerprint,
-            timestamp: timestamp,
-            now: Date()
-        )
-    }
-
-    @discardableResult
-    func recordVouch(voucheeFingerprint: String, voucherFingerprint: String, timestamp: Date, now: Date) -> Bool {
-        queue.sync(flags: .barrier) {
-            guard self.cacheIsLoaded else { return false }
-            guard voucheeFingerprint != voucherFingerprint,
-                  self.cache.verifiedFingerprints.contains(voucherFingerprint),
-                  !self.cache.verifiedFingerprints.contains(voucheeFingerprint) else {
-                return false
-            }
-            let age = now.timeIntervalSince(timestamp)
-            guard age <= VouchAttestation.maxAge, age >= -VouchAttestation.maxClockSkew else {
-                return false
-            }
-
-            var records = self.cache.vouchesByVouchee?[voucheeFingerprint] ?? []
-            if let index = records.firstIndex(where: { $0.voucherFingerprint == voucherFingerprint }) {
-                let newest = max(records[index].timestamp, timestamp)
-                records[index] = VouchRecord(voucherFingerprint: voucherFingerprint, timestamp: newest)
-            } else {
-                records.append(VouchRecord(voucherFingerprint: voucherFingerprint, timestamp: timestamp))
-            }
-            // Keep the most recent vouchers up to the cap.
-            records.sort { $0.timestamp > $1.timestamp }
-            let capped = Array(records.prefix(Self.maxVouchersPerVouchee))
-            guard capped.contains(where: { $0.voucherFingerprint == voucherFingerprint }) else {
-                return false // Full of fresher vouches; nothing changed.
-            }
-
-            var vouches = self.cache.vouchesByVouchee ?? [:]
-            vouches[voucheeFingerprint] = capped
-            self.cache.vouchesByVouchee = vouches
-            self.saveIdentityCache()
-            return true
-        }
-    }
-
-    /// The vouches that currently count for `fingerprint`. Validity is
-    /// recomputed here rather than maintained by cascade deletes: a record
-    /// only counts while its voucher is still verified-by-me and its
-    /// timestamp is within the expiry window.
-    func validVouchers(for fingerprint: String) -> [VouchRecord] {
-        validVouchers(for: fingerprint, now: Date())
-    }
-
-    func validVouchers(for fingerprint: String, now: Date) -> [VouchRecord] {
-        queue.sync {
-            self.validVouchersLocked(for: fingerprint, now: now)
-        }
-    }
-
-    /// Requires `queue`.
-    private func validVouchersLocked(for fingerprint: String, now: Date) -> [VouchRecord] {
-        guard cacheIsLoaded, !pendingSave else { return [] }
-        guard let records = cache.vouchesByVouchee?[fingerprint] else { return [] }
-        return records.filter { record in
-            record.voucherFingerprint != fingerprint
-                && cache.verifiedFingerprints.contains(record.voucherFingerprint)
-                && now.timeIntervalSince(record.timestamp) <= VouchAttestation.maxAge
-        }
-    }
-
-    /// True when the peer has at least one valid vouch and no explicit
-    /// verification of ours.
-    func isVouched(fingerprint: String) -> Bool {
-        isVouched(fingerprint: fingerprint, now: Date())
-    }
-
-    func isVouched(fingerprint: String, now: Date) -> Bool {
-        queue.sync {
-            guard !self.cache.verifiedFingerprints.contains(fingerprint) else { return false }
-            return !self.validVouchersLocked(for: fingerprint, now: now).isEmpty
-        }
-    }
-
-    /// The trust level to display: explicit verification wins, then the
-    /// persisted level, with `vouched` layered in (derived, never persisted)
-    /// between `casual` and `trusted`.
-    func effectiveTrustLevel(for fingerprint: String) -> TrustLevel {
-        effectiveTrustLevel(for: fingerprint, now: Date())
-    }
-
-    func effectiveTrustLevel(for fingerprint: String, now: Date) -> TrustLevel {
-        queue.sync {
-            guard self.cacheIsLoaded, !self.pendingSave else { return .unknown }
-            if self.cache.verifiedFingerprints.contains(fingerprint) { return .verified }
-            let stored = self.cache.socialIdentities[fingerprint]?.trustLevel ?? .unknown
-            let vouched = !self.validVouchersLocked(for: fingerprint, now: now).isEmpty
-            switch stored {
-            case .verified, .trusted:
-                return stored
-            case .vouched, .casual, .unknown:
-                if vouched { return .vouched }
-                // `.vouched` should never be persisted; degrade defensively.
-                return stored == .vouched ? .casual : stored
-            }
-        }
-    }
-
-    func lastVouchBatchSent(to fingerprint: String) -> Date? {
-        queue.sync { cache.vouchBatchSentAt?[fingerprint] }
-    }
-
-    func markVouchBatchSent(to fingerprint: String, at date: Date) {
-        queue.async(flags: .barrier) {
-            guard self.cacheIsLoaded else { return }
-            var sentAt = self.cache.vouchBatchSentAt ?? [:]
-            sentAt[fingerprint] = date
-            self.cache.vouchBatchSentAt = sentAt
-            self.saveIdentityCache()
-        }
-    }
-
-    /// The peer's announce-bound Ed25519 signing key, if seen this session.
-    func signingPublicKey(forFingerprint fingerprint: String) -> Data? {
-        queue.sync { cache.cryptographicIdentities[fingerprint]?.signingPublicKey }
-    }
-
-    /// Verified fingerprints ordered most recently verified first (entries
-    /// without a recorded verification time sort last), excluding the given
-    /// fingerprint. Feeds the outgoing vouch batch.
-    func mostRecentlyVerifiedFingerprints(limit: Int, excluding fingerprint: String) -> [String] {
-        queue.sync {
-            guard self.cacheIsLoaded, !self.pendingSave else { return [] }
-            let verifiedAt = cache.verifiedAt ?? [:]
-            let ordered = cache.verifiedFingerprints
-                .filter { $0 != fingerprint }
-                .sorted {
-                    (verifiedAt[$0] ?? .distantPast, $0) > (verifiedAt[$1] ?? .distantPast, $1)
-                }
-            return Array(ordered.prefix(limit))
         }
     }
 

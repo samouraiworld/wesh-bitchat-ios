@@ -55,9 +55,6 @@ private final class MockChatVerificationContext: ChatVerificationContext {
 
     func saveIdentityState() { saveIdentityStateCount += 1 }
 
-    private(set) var vouchToConnectedVerifiedPeersCount = 0
-    func vouchToConnectedVerifiedPeers() { vouchToConnectedVerifiedPeersCount += 1 }
-
     // Encryption status
     private(set) var encryptionStatuses: [PeerID: EncryptionStatus?] = [:]
     private(set) var updatedEncryptionStatusPeers: [PeerID] = []
@@ -211,7 +208,7 @@ struct ChatVerificationCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func unconfirmedManualVerificationDoesNotPromoteTrustOrVouch() {
+    func unconfirmedManualVerificationDoesNotPromoteTrust() {
         let context = MockChatVerificationContext()
         context.hasPendingIdentityStateChanges = true
         let peerID = PeerID(str: "1122334455667788")
@@ -221,7 +218,6 @@ struct ChatVerificationCoordinatorContextTests {
         #expect(context.identityVerifiedCalls.count == 1)
         #expect(context.storedVerifiedCalls.isEmpty)
         #expect(context.updatedEncryptionStatusPeers.isEmpty)
-        #expect(context.vouchToConnectedVerifiedPeersCount == 0)
     }
 
     @Test @MainActor
@@ -481,7 +477,6 @@ struct ChatVerificationCoordinatorContextTests {
             let response = try #require(NoisePayload.decode(encoded))
             coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
             #expect(context.identityVerifiedCalls.count == (matching ? 1 : 0))
-            #expect(context.vouchToConnectedVerifiedPeersCount == 0)
             #expect(!context.postedLocalNotifications.contains { $0.title == "Mutual verification" })
             coordinator.handleVerifyResponsePayload(from: peerID, payload: response.data)
             #expect(context.identityVerifiedCalls.count == (matching ? 1 : 0))
