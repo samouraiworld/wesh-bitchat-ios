@@ -74,9 +74,9 @@ struct ChatViewModelPrivateChatExtensionTests {
 
     /// An unreachable recipient no longer means instant failure: the message
     /// is routed anyway so the router's outbox/courier/bridge machinery can
-    /// deliver it, and it stays "sending" until a router callback resolves it.
+    /// deliver it, and it waits « En attente » until a router callback resolves it.
     @Test @MainActor
-    func sendPrivateMessage_unreachable_staysSendingForStoreAndForward() async {
+    func sendPrivateMessage_unreachable_waitsForStoreAndForward() async {
         let (viewModel, _) = makeTestableViewModel()
         let validHex = "0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10"
         let peerID = PeerID(str: validHex)
@@ -84,7 +84,7 @@ struct ChatViewModelPrivateChatExtensionTests {
         viewModel.sendPrivateMessage("Hello", to: peerID)
 
         #expect(viewModel.privateChats[peerID]?.count == 1)
-        #expect(viewModel.privateChats[peerID]?.last?.deliveryStatus == .sending)
+        #expect(viewModel.privateChats[peerID]?.last?.deliveryStatus == .notSentYet)
     }
     
     @Test @MainActor
