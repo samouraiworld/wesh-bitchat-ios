@@ -131,20 +131,24 @@ final class MessageRouter {
     // backed off per message: the first retry 30 s after the send, then 1, 2, 4, 8, 16 min,
     // then every 30 min until an ack or the 24h TTL. A scheduled wake drives each retry; a
     // flush (a flapping peer, a restored outbox) cannot publish earlier. Relays reconnecting or
-    // Internet turning On allow one early retry per message, never sooner than 30 s after its
-    // last publication, without moving the message down or up the ladder.
+    // Internet turning On allow one early retry per message, only once its last publication is
+    // 5 min old, without moving the message down or up the ladder. Whatever the cause, a message
+    // is published at most 60 times; past that it waits for the TTL, then fails.
     private static let internetFirstRetryDelay: TimeInterval = 30
     private static let internetMaxRetryDelay: TimeInterval = 30 * 60
-    private static let internetMinPublishGap: TimeInterval = 30
+    private static let internetMinPublishGap: TimeInterval = 5 * 60
+    private static let internetMaxPublications = 60
     private struct InternetResend {
         var sends: Int
+        /// Every publication, backoff steps and early retries alike (a re-wrap is one of them).
+        var publications: Int
         var nextAttemptAt: Date
         var lastPublishedAt: Date
         /// The last publication was an early retry on a fresh connection.
         var lastPublishWasEarly = false
         /// Only the latest scheduled wake for the message acts; older ones are stale.
         var wakeToken: UInt64 = 0
-        /// The early retry waiting for its 30 s gap, if any.
+        /// The early retry waiting for its 5 min gap, if any.
         var earlyWakeToken: UInt64?
     }
     /// By message ID, for messages still in the outbox (an erase clears it with the outbox).
@@ -512,24 +516,33 @@ final class MessageRouter {
         return true
     }
 
-    /// Records an Internet publication and schedules the message's next retry.
+    /// Records an Internet publication and schedules the message's next retry, unless that was
+    /// its last allowed publication.
     private func scheduleInternetRetry(_ messageID: String, for peerID: PeerID) {
-        let sends = (internetResends[messageID]?.sends ?? 0) + 1
+        let previous = internetResends[messageID]
+        let sends = (previous?.sends ?? 0) + 1
+        let publications = (previous?.publications ?? 0) + 1
         let delay = Self.internetRetryDelay(afterSends: sends)
         let now = now()
         internetResends[messageID] = InternetResend(
             sends: sends,
+            publications: publications,
             nextAttemptAt: now.addingTimeInterval(delay),
             lastPublishedAt: now
         )
-        armInternetRetry(messageID, for: peerID, after: delay)
+        if publications < Self.internetMaxPublications {
+            armInternetRetry(messageID, for: peerID, after: delay)
+        } else {
+            SecureLogger.warning("📤 PM id=\(messageID.prefix(8))… reached \(publications) Internet publications; waiting for its TTL", category: .session)
+        }
     }
 
     /// Records an early retry: the ladder stays where it was, but its next step keeps the
-    /// 30 s gap (the pending wake re-arms itself if it now fires too soon).
+    /// 5 min gap (the pending wake re-arms itself if it now fires too soon).
     private func recordEarlyInternetSend(_ messageID: String) {
         guard var resend = internetResends[messageID] else { return }
         let now = now()
+        resend.publications += 1
         resend.lastPublishedAt = now
         resend.lastPublishWasEarly = true
         resend.earlyWakeToken = nil
@@ -537,10 +550,15 @@ final class MessageRouter {
         internetResends[messageID] = resend
     }
 
+    private func reachedInternetPublicationCap(_ resend: InternetResend) -> Bool {
+        resend.publications >= Self.internetMaxPublications
+    }
+
     /// Relays reconnected or Internet turned On. Each pending message gets one early retry,
-    /// at once if its last publication is 30 s old, else when it is. Skipped when the backoff
-    /// is due no later anyway, when one is already waiting, or when the message just went out
-    /// early: a reconnect storm publishes a message at most once per 30 s.
+    /// at once if its last publication is 5 min old, else when it is. Skipped when the backoff
+    /// is due no later anyway, when one is already waiting, when the message just went out
+    /// early, or when it reached its publication cap: a flapping link publishes a message at
+    /// most once per 5 min.
     private func internetBecameAvailable() {
         let now = now()
         for (peerID, queue) in outbox {
@@ -553,7 +571,8 @@ final class MessageRouter {
                     continue
                 }
                 let gapEnd = resend.lastPublishedAt.addingTimeInterval(Self.internetMinPublishGap)
-                guard resend.earlyWakeToken == nil,
+                guard !reachedInternetPublicationCap(resend),
+                      resend.earlyWakeToken == nil,
                       !(resend.lastPublishWasEarly && now < gapEnd) else { continue }
                 let earliest = max(now, gapEnd)
                 guard earliest < resend.nextAttemptAt else { continue }
@@ -606,8 +625,9 @@ final class MessageRouter {
     }
 
     private func internetRetryDue(_ messageID: String, for peerID: PeerID, token: UInt64) {
-        // Acked, dropped or erased since, or superseded by a later send's wake.
+        // Acked, dropped or erased since, superseded by a later send's wake, or capped since.
         guard let resend = internetResends[messageID], resend.wakeToken == token,
+              !reachedInternetPublicationCap(resend),
               queuedMessage(messageID, for: peerID) != nil else { return }
         let remaining = resend.nextAttemptAt.timeIntervalSince(now())
         guard remaining <= 0 else {
@@ -853,7 +873,7 @@ final class MessageRouter {
     }
 
     /// `onlyMessageID`: a scheduled Internet retry resends its own message, not the whole queue.
-    /// `earlyRetry`: an Internet resend may go before its backoff step, 30 s after the last one.
+    /// `earlyRetry`: an Internet resend may go before its backoff step, 5 min after the last one.
     private func flushOutbox(for peerID: PeerID, onlyMessageID: String?, earlyRetry: Bool = false) {
         guard let queued = outbox[peerID], !queued.isEmpty else { return }
         SecureLogger.debug("Flushing outbox for \(peerID.id.prefix(8))… count=\(queued.count)", category: .session)
@@ -933,6 +953,8 @@ final class MessageRouter {
                 }
                 if !transport.unackedSendsAreBounded,
                    let resend = internetResends[message.messageID] {
+                    // Past the cap the message only waits for its TTL.
+                    if reachedInternetPublicationCap(resend) { continue }
                     let notBefore = earlyRetry
                         ? resend.lastPublishedAt.addingTimeInterval(Self.internetMinPublishGap)
                         : resend.nextAttemptAt

@@ -819,78 +819,133 @@ struct MessageRouterTests {
         return (router, internet, clock, clock.now)
     }
 
-    /// Relays reconnect 10 s after a publication: the early retry waits for the 30 s gap,
-    /// then the ladder goes on from the same step.
+    /// Relays reconnect 1 min after a publication: the early retry waits until that
+    /// publication is 5 min old, then the ladder goes on from the same step.
     @Test @MainActor
-    func reconnectSoonAfterAPublicationRetriesOnce30SecondsAfterIt() async {
+    func reconnectSoonAfterAPublicationRetriesOnce5MinutesAfterIt() async {
         let scheduler = ManualRetryScheduler()
-        let (router, internet, clock, last) = internetMessageOnLadder(sends: 4, peerID: PeerID(str: "00000000000000c1"), scheduler: scheduler)
-        #expect(internet.sentPrivateMessages.count == 4)
-        #expect(scheduler.pendingDelays == [240])
-
-        clock.now = last.addingTimeInterval(10)
-        internet.onInternetAvailable?()
-        #expect(internet.sentPrivateMessages.count == 4)
-        #expect(scheduler.pendingDelays == [240, 20])
-
-        clock.now = last.addingTimeInterval(30)
-        scheduler.run(delay: 20)
-        #expect(internet.sentPrivateMessages.count == 5)
-
-        // The ladder is not reset: its next step (240 s after the last normal send) follows.
-        clock.now = last.addingTimeInterval(240)
-        scheduler.run(delay: 240)
+        let (router, internet, clock, last) = internetMessageOnLadder(sends: 6, peerID: PeerID(str: "00000000000000c1"), scheduler: scheduler)
         #expect(internet.sentPrivateMessages.count == 6)
-        #expect(scheduler.pendingDelays == [480])
+        #expect(scheduler.pendingDelays == [960])
+
+        clock.now = last.addingTimeInterval(60)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.count == 6)
+        #expect(scheduler.pendingDelays == [960, 240])
+
+        clock.now = last.addingTimeInterval(300)
+        scheduler.run(delay: 240)
+        #expect(internet.sentPrivateMessages.count == 7)
+
+        // The ladder is not reset: its next step (960 s after the last normal send) follows.
+        clock.now = last.addingTimeInterval(960)
+        scheduler.run(delay: 960)
+        #expect(internet.sentPrivateMessages.count == 8)
+        #expect(scheduler.pendingDelays == [1_800])
         withExtendedLifetime(router) {}
     }
 
     @Test @MainActor
     func reconnectLongAfterAPublicationRetriesAtOnceAndKeepsTheLadder() async {
         let scheduler = ManualRetryScheduler()
-        let (router, internet, clock, last) = internetMessageOnLadder(sends: 5, peerID: PeerID(str: "00000000000000c2"), scheduler: scheduler)
-        #expect(scheduler.pendingDelays == [480])
+        let (router, internet, clock, last) = internetMessageOnLadder(sends: 6, peerID: PeerID(str: "00000000000000c2"), scheduler: scheduler)
+        #expect(scheduler.pendingDelays == [960])
 
-        clock.now = last.addingTimeInterval(300)
+        clock.now = last.addingTimeInterval(400)
         internet.onInternetAvailable?()
-        #expect(internet.sentPrivateMessages.count == 6)
-        #expect(scheduler.pendingDelays == [480])
-
-        clock.now = last.addingTimeInterval(480)
-        scheduler.run(delay: 480)
         #expect(internet.sentPrivateMessages.count == 7)
         #expect(scheduler.pendingDelays == [960])
+
+        clock.now = last.addingTimeInterval(960)
+        scheduler.run(delay: 960)
+        #expect(internet.sentPrivateMessages.count == 8)
+        #expect(scheduler.pendingDelays == [1_800])
         withExtendedLifetime(router) {}
     }
 
-    /// A reconnect storm publishes a message at most once per 30 s.
+    /// A reconnect storm publishes a message at most once per 5 min.
     @Test @MainActor
-    func reconnectStormPublishesOncePer30Seconds() async {
+    func reconnectStormPublishesOncePer5Minutes() async {
         let peerID = PeerID(str: "00000000000000c3")
         let scheduler = ManualRetryScheduler()
-        let (router, internet, clock, last) = internetMessageOnLadder(sends: 4, peerID: peerID, scheduler: scheduler)
+        let (router, internet, clock, last) = internetMessageOnLadder(sends: 6, peerID: peerID, scheduler: scheduler)
 
         for offset in [10.0, 15, 20] {
             clock.now = last.addingTimeInterval(offset)
             internet.onInternetAvailable?()
         }
-        #expect(scheduler.pendingDelays == [240, 20])
-        clock.now = last.addingTimeInterval(30)
-        scheduler.run(delay: 20)
-        #expect(internet.sentPrivateMessages.count == 5)
+        #expect(scheduler.pendingDelays == [960, 290])
+        clock.now = last.addingTimeInterval(300)
+        scheduler.run(delay: 290)
+        #expect(internet.sentPrivateMessages.count == 7)
 
-        for offset in [35.0, 40, 55] {
+        for offset in [310.0, 400, 590] {
             clock.now = last.addingTimeInterval(offset)
             internet.onInternetAvailable?()
             router.flushOutbox(for: peerID)
         }
-        #expect(internet.sentPrivateMessages.count == 5)
-        #expect(scheduler.pendingDelays == [240])
+        #expect(internet.sentPrivateMessages.count == 7)
+        #expect(scheduler.pendingDelays == [960])
 
-        // A reconnect 30 s after that early retry may retry once more.
-        clock.now = last.addingTimeInterval(60)
+        // A reconnect 5 min after that early retry may retry once more.
+        clock.now = last.addingTimeInterval(600)
         internet.onInternetAvailable?()
-        #expect(internet.sentPrivateMessages.count == 6)
+        #expect(internet.sentPrivateMessages.count == 8)
+    }
+
+    /// A link that drops and comes back every minute for a day: a comeback retries early only
+    /// once the last publication is 5 min old, the message is published 60 times at most
+    /// (backoff steps and early retries together; a re-wrap is one of them), then it waits
+    /// for its TTL and fails.
+    @Test @MainActor
+    func flappingLinkRetriesEarlyAtMostEvery5MinutesAndStopsAt60Publications() async {
+        let peerID = PeerID(str: "00000000000000c5")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let clock = MutableTestClock()
+        let start = clock.now
+        let scheduler = TimedRetryScheduler(clock: clock)
+        let router = MessageRouter(transports: [internet], now: { clock.now }, scheduleAfter: scheduler.schedule)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "flap")
+        var publishedAt = [clock.now]
+        var earlyGaps: [TimeInterval] = []
+        // Down for 30 s, up for 30 s, until a minute before the TTL.
+        for tick in 1..<(24 * 120 - 2) {
+            clock.now = start.addingTimeInterval(Double(tick) * 30)
+            if tick.isMultiple(of: 2) {
+                internet.reachablePeers.insert(peerID)
+                let before = internet.sentPrivateMessages.count
+                internet.onInternetAvailable?()
+                if internet.sentPrivateMessages.count > before {
+                    earlyGaps.append(clock.now.timeIntervalSince(publishedAt.last!))
+                    publishedAt.append(clock.now)
+                }
+            } else {
+                internet.reachablePeers.remove(peerID)
+            }
+            let before = internet.sentPrivateMessages.count
+            scheduler.runDue()
+            router.flushOutbox(for: peerID)
+            if internet.sentPrivateMessages.count > before { publishedAt.append(clock.now) }
+        }
+
+        #expect(internet.sentPrivateMessages.count == 60)
+        #expect(publishedAt.count == 60)
+        #expect(!earlyGaps.isEmpty)
+        #expect(earlyGaps.allSatisfy { $0 >= 300 })
+        #expect(zip(publishedAt, publishedAt.dropFirst()).allSatisfy { $1.timeIntervalSince($0) >= 30 })
+        #expect(publishedAt.last! < start.addingTimeInterval(12 * 3_600))
+        #expect(dropped.isEmpty)
+
+        // Past the TTL the message fails.
+        clock.now = start.addingTimeInterval(24 * 3_600 + 60)
+        router.cleanupExpiredMessages()
+        #expect(dropped == ["flap"])
+        #expect(internet.sentPrivateMessages.count == 60)
     }
 
     /// Right after the first send the backoff's own 30 s step comes no later than an early
@@ -1537,6 +1592,29 @@ struct MessageRouterTests {
 /// without real waiting.
 private final class MutableTestClock {
     var now = Date(timeIntervalSince1970: 1_700_000_000)
+}
+
+/// Runs the router's scheduled wakes once a test clock reaches them, earliest first.
+private final class TimedRetryScheduler {
+    private let clock: MutableTestClock
+    private var pending: [(due: Date, action: @MainActor () -> Void)] = []
+
+    init(clock: MutableTestClock) {
+        self.clock = clock
+    }
+
+    func schedule(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        pending.append((clock.now.addingTimeInterval(delay), action))
+    }
+
+    @MainActor
+    func runDue() {
+        while let index = pending.indices
+            .filter({ pending[$0].due <= clock.now })
+            .min(by: { pending[$0].due < pending[$1].due }) {
+            pending.remove(at: index).action()
+        }
+    }
 }
 
 /// Holds the router's scheduled Internet retry wakes until the test runs them.
