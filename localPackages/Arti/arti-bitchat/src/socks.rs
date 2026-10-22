@@ -10,7 +10,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 // SOCKS5 constants
 const SOCKS5_VERSION: u8 = 0x05;
-const SOCKS5_AUTH_NONE: u8 = 0x00;
+const SOCKS5_AUTH_USER_PASS: u8 = 0x02;
+const SOCKS5_AUTH_NO_ACCEPTABLE: u8 = 0xFF;
+const USER_PASS_VERSION: u8 = 0x01;
+const USER_PASS_SUCCESS: u8 = 0x00;
+const USER_PASS_FAILURE: u8 = 0x01;
 const SOCKS5_CMD_CONNECT: u8 = 0x01;
 const SOCKS5_ATYP_IPV4: u8 = 0x01;
 const SOCKS5_ATYP_DOMAIN: u8 = 0x03;
@@ -31,19 +35,57 @@ pub const MAX_CONNECTIONS: usize = 64;
 /// never send a request cannot take the places of working ones.
 pub const MAX_HANDSHAKES: usize = 16;
 
+/// The username and password (RFC 1929) set for one start. Only the app that started Arti
+/// knows them, so another app on the phone can neither use the local Tor port nor tell it
+/// apart from a closed one by completing a handshake.
+pub struct Credentials {
+    username: Vec<u8>,
+    password: Vec<u8>,
+}
+
+impl Credentials {
+    /// Each part holds 1 to 255 bytes, the RFC 1929 limits.
+    pub fn new(username: &[u8], password: &[u8]) -> Option<Self> {
+        let valid = |part: &[u8]| (1..=255).contains(&part.len());
+        (valid(username) && valid(password))
+            .then(|| Self { username: username.to_vec(), password: password.to_vec() })
+    }
+
+    fn accepts(&self, username: &[u8], password: &[u8]) -> bool {
+        same(&self.username, username) & same(&self.password, password)
+    }
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Credentials(redacted)")
+    }
+}
+
+/// Compares without stopping at the first differing byte.
+fn same(expected: &[u8], given: &[u8]) -> bool {
+    expected.len() == given.len()
+        && expected.iter().zip(given).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
+}
+
 /// `handshake`, given up after `limit`.
-pub async fn timed_handshake<S>(stream: &mut S, limit: Duration) -> io::Result<(String, u16)>
+pub async fn timed_handshake<S>(
+    stream: &mut S,
+    credentials: &Credentials,
+    limit: Duration,
+) -> io::Result<(String, u16)>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    match tokio::time::timeout(limit, handshake(stream)).await {
+    match tokio::time::timeout(limit, handshake(stream, credentials)).await {
         Ok(target) => target,
         Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "SOCKS handshake timed out")),
     }
 }
 
-/// Greeting and CONNECT request; returns the requested host name and port.
-pub async fn handshake<S>(stream: &mut S) -> io::Result<(String, u16)>
+/// Greeting, username/password login and CONNECT request; returns the requested host name
+/// and port.
+pub async fn handshake<S>(stream: &mut S, credentials: &Credentials) -> io::Result<(String, u16)>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -60,18 +102,35 @@ where
     let mut methods = vec![0u8; nmethods];
     stream.read_exact(&mut methods).await?;
 
-    // We only support no-auth
-    if !methods.contains(&SOCKS5_AUTH_NONE) {
-        // Send failure: no acceptable methods
-        stream.write_all(&[SOCKS5_VERSION, 0xFF]).await?;
+    // Only username/password: a client without the start's login is turned away.
+    if !methods.contains(&SOCKS5_AUTH_USER_PASS) {
+        stream.write_all(&[SOCKS5_VERSION, SOCKS5_AUTH_NO_ACCEPTABLE]).await?;
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "No acceptable auth methods",
         ));
     }
+    stream.write_all(&[SOCKS5_VERSION, SOCKS5_AUTH_USER_PASS]).await?;
 
-    // Accept no-auth
-    stream.write_all(&[SOCKS5_VERSION, SOCKS5_AUTH_NONE]).await?;
+    // --- Login (RFC 1929) ---
+    // Client sends: VER | ULEN | UNAME | PLEN | PASSWD
+    let mut login_header = [0u8; 2];
+    stream.read_exact(&mut login_header).await?;
+    if login_header[0] != USER_PASS_VERSION {
+        stream.write_all(&[USER_PASS_VERSION, USER_PASS_FAILURE]).await?;
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "SOCKS login refused"));
+    }
+    let mut username = vec![0u8; login_header[1] as usize];
+    stream.read_exact(&mut username).await?;
+    let mut password_len = [0u8; 1];
+    stream.read_exact(&mut password_len).await?;
+    let mut password = vec![0u8; password_len[0] as usize];
+    stream.read_exact(&mut password).await?;
+    if !credentials.accepts(&username, &password) {
+        stream.write_all(&[USER_PASS_VERSION, USER_PASS_FAILURE]).await?;
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "SOCKS login refused"));
+    }
+    stream.write_all(&[USER_PASS_VERSION, USER_PASS_SUCCESS]).await?;
 
     // --- Request ---
     // Client sends: VER | CMD | RSV | ATYP | DST.ADDR | DST.PORT
@@ -175,20 +234,82 @@ mod tests {
     use super::*;
     use tokio::io::{duplex, DuplexStream};
 
-    /// Runs the server handshake against a client that sends `request` after a no-auth
-    /// greeting; returns the server result and every byte the server sent after the greeting.
-    async fn exchange(request: &[u8]) -> (io::Result<(String, u16)>, Vec<u8>) {
+    fn credentials() -> Credentials {
+        Credentials::new(b"wesh-user", b"wesh-pass").unwrap()
+    }
+
+    /// Greeting offering `methods`, then an RFC 1929 login when given.
+    fn greeting(methods: &[u8], login: Option<(&[u8], &[u8])>) -> Vec<u8> {
+        let mut bytes = vec![0x05, methods.len() as u8];
+        bytes.extend_from_slice(methods);
+        if let Some((user, pass)) = login {
+            bytes.extend_from_slice(&[0x01, user.len() as u8]);
+            bytes.extend_from_slice(user);
+            bytes.push(pass.len() as u8);
+            bytes.extend_from_slice(pass);
+        }
+        bytes
+    }
+
+    /// Runs the server handshake against a client that sends `opening` then `request`;
+    /// returns the server result and every byte the server sent.
+    async fn raw_exchange(opening: &[u8], request: &[u8]) -> (io::Result<(String, u16)>, Vec<u8>) {
         let (mut client, mut server) = duplex(1024);
-        client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+        client.write_all(opening).await.unwrap();
         client.write_all(request).await.unwrap();
-        let result = handshake(&mut server).await;
+        let result = handshake(&mut server, &credentials()).await;
         drop(server);
-        let mut method = [0u8; 2];
-        client.read_exact(&mut method).await.unwrap();
-        assert_eq!(method, [0x05, 0x00]);
         let mut reply = Vec::new();
         client.read_to_end(&mut reply).await.unwrap();
         (result, reply)
+    }
+
+    /// Runs the server handshake against a client that logs in, then sends `request`;
+    /// returns the server result and every byte the server sent after the login replies.
+    async fn exchange(request: &[u8]) -> (io::Result<(String, u16)>, Vec<u8>) {
+        let opening = greeting(&[0x00, 0x02], Some((b"wesh-user", b"wesh-pass")));
+        let (result, reply) = raw_exchange(&opening, request).await;
+        assert_eq!(reply[..4], [0x05, 0x02, 0x01, 0x00]);
+        (result, reply[4..].to_vec())
+    }
+
+    #[tokio::test]
+    async fn a_client_offering_no_username_and_password_is_refused() {
+        let (result, reply) = raw_exchange(&greeting(&[0x00], None), &[]).await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(reply, [0x05, 0xFF]);
+    }
+
+    #[tokio::test]
+    async fn a_wrong_login_is_refused_before_any_request_is_read() {
+        let logins: [(&[u8], &[u8]); 3] =
+            [(b"wesh-user", b"wrong-pass"), (b"other-user", b"wesh-pass"), (b"wesh-use", b"wesh-pass")];
+        for (user, pass) in logins {
+            let request = connect(0x03, &domain(b"relay.damus.io"), 443);
+            let (result, reply) = raw_exchange(&greeting(&[0x02], Some((user, pass))), &request).await;
+            let error = result.unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert!(!error.to_string().contains("wesh"), "{}", error);
+            assert_eq!(reply, [0x05, 0x02, 0x01, 0x01]);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_login_with_another_subnegotiation_version_is_refused() {
+        let mut opening = greeting(&[0x02], Some((b"wesh-user", b"wesh-pass")));
+        opening[3] = 0x05;
+        let (result, reply) = raw_exchange(&opening, &[]).await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(reply, [0x05, 0x02, 0x01, 0x01]);
+    }
+
+    #[test]
+    fn credentials_hold_1_to_255_bytes_each_and_never_print() {
+        assert!(Credentials::new(b"", b"pass").is_none());
+        assert!(Credentials::new(b"user", b"").is_none());
+        assert!(Credentials::new(&[b'a'; 256], b"pass").is_none());
+        let credentials = Credentials::new(&[b'a'; 255], b"secret-pass").unwrap();
+        assert!(!format!("{:?}", credentials).contains("secret"));
     }
 
     fn connect(atyp: u8, address: &[u8], port: u16) -> Vec<u8> {
@@ -309,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn a_client_that_stalls_is_given_up() {
         let (_client, mut server): (DuplexStream, DuplexStream) = duplex(1024);
-        let result = timed_handshake(&mut server, Duration::from_millis(50)).await;
+        let result = timed_handshake(&mut server, &credentials(), Duration::from_millis(50)).await;
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
     }
 
@@ -319,12 +440,12 @@ mod tests {
     ) {
         let (mut client, mut server) = duplex(1024);
         let task = tokio::spawn(async move {
-            timed_handshake(&mut server, HANDSHAKE_TIMEOUT).await
+            timed_handshake(&mut server, &credentials(), HANDSHAKE_TIMEOUT).await
         });
-        client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
-        let mut method = [0u8; 2];
-        client.read_exact(&mut method).await.unwrap();
-        assert_eq!(method, [0x05, 0x00]);
+        client.write_all(&greeting(&[0x02], Some((b"wesh-user", b"wesh-pass")))).await.unwrap();
+        let mut replies = [0u8; 4];
+        client.read_exact(&mut replies).await.unwrap();
+        assert_eq!(replies, [0x05, 0x02, 0x01, 0x00]);
         (client, task)
     }
 
