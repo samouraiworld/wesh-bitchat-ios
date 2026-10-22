@@ -41,6 +41,8 @@
 	<string>Wesh uses Bluetooth to connect nearby phones for public chat and verified private conversations.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Wesh uses the camera to scan a contact’s live identity QR code in person.</string>
+	<key>WeshInternetAvailable</key>
+	<string>$(WESH_INTERNET_AVAILABLE)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

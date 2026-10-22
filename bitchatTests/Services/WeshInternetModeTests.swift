@@ -174,7 +174,7 @@ struct WeshInternetModeTests {
             events.compactMap { $0 == "network:on" ? true : $0 == "network:off" ? false : nil }
         }
 
-        @MainActor func make() -> WeshInternetMode {
+        @MainActor func make(available: Bool = true) -> WeshInternetMode {
             WeshInternetMode(defaults: defaults, dependencies: .init(
                 forceTor: { self.events.append("forceTor"); return self.torForcible },
                 ensureNostrIdentity: { self.events.append("ensureKey"); return self.keyStorable },
@@ -188,7 +188,7 @@ struct WeshInternetModeTests {
                 inputs: inputs.eraseToAnyPublisher(),
                 scheduleAfter: { delay, action in self.scheduled.append((delay, action)) },
                 torStoppedUnexpectedly: torStopped.eraseToAnyPublisher()
-            ))
+            ), available: available)
         }
 
         @MainActor func runScheduled() {
@@ -251,6 +251,21 @@ struct WeshInternetModeTests {
         #expect(relaunched.state == .off)
         #expect(!harness.defaults.bool(forKey: WeshInternetSettings.enabledKey))
         #expect(harness.networkEnabled.last == false)
+    }
+
+    @Test func aBuildWithoutInternetRefusesToTurnOnAndIgnoresAStoredOn() {
+        let harness = Harness()
+        harness.defaults.set(true, forKey: WeshInternetSettings.enabledKey)
+        let mode = harness.make(available: false)
+        mode.start()
+        #expect(mode.state == .off)
+        #expect(harness.events == ["network:off", "deleteArti"])
+
+        harness.events.removeAll()
+        mode.acceptDisclosure()
+        #expect(!mode.setEnabled(true))
+        #expect(mode.state == .off)
+        #expect(harness.events.isEmpty)
     }
 
     @Test func switchingOffStopsArtiThenDeletesItsDirectory() {
