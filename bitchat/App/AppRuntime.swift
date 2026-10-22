@@ -151,6 +151,10 @@ final class AppRuntime: ObservableObject {
         VerificationService.shared.configure(with: chatViewModel.meshService)
         // Phones whose welcome ended before the key was made at onboarding get it now.
         if WeshMode.isActive { chatViewModel.ensureWeshNostrIdentity() }
+        #if DEBUG
+        // Simulator M4 only: print my identity or seed a QR contact from the launch environment.
+        if WeshMode.isActive { chatViewModel.applyWeshDebugHooks() }
+        #endif
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
