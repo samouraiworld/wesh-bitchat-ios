@@ -1060,18 +1060,32 @@ private struct WeshDayDivider: View {
     }
 }
 
-private struct WeshMessageBubble: View {
+struct WeshMessageBubble: View {
     let message: BitchatMessage
     let own: Bool
     let privateChat: Bool
+    /// Copied when the bubble is built. `BitchatMessage` is a class that acks update in place, and
+    /// SwiftUI compares it by identity: without these values an open chat kept showing the state
+    /// and label the message had when it was sent.
+    let status: DeliveryStatus
+    let transport: MessageTransport?
     @Environment(\.weshTheme) private var theme
+
+    init(message: BitchatMessage, own: Bool, privateChat: Bool) {
+        self.message = message
+        self.own = own
+        self.privateChat = privateChat
+        status = message.deliveryStatus
+        transport = message.transport
+    }
+
     private var filled: Bool { own && !theme.isDark }
     private var isSystem: Bool { WeshMessageActions.isLocalSystem(message) }
     @ViewBuilder private var metadata: some View {
         Text(message.timestamp, style: .time)
-        if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus, transport: isSystem ? nil : message.transport)) }
-        else if own { Text(WeshDelivery.publicLabel(message.deliveryStatus)) }
-        else if privateChat, !isSystem, let transport = message.transport { Text(WeshDelivery.transportLabel(transport)) }
+        if own, privateChat { Text(WeshDelivery.label(status, transport: isSystem ? nil : transport)) }
+        else if own { Text(WeshDelivery.publicLabel(status)) }
+        else if privateChat, !isSystem, let transport { Text(WeshDelivery.transportLabel(transport)) }
     }
     var body: some View {
         HStack {

@@ -1167,6 +1167,23 @@ struct WeshNativeUITests {
         #expect(label(.failed(reason: "offline")) == "Échec")
     }
 
+    /// An ack updates the message in place (it is a class). The bubble built afterwards must carry
+    /// the new state and label as values, or SwiftUI keeps the open chat's old footer (M4, 22/10:
+    /// « En attente » stayed on screen after every DELIVERED until the chat was reopened).
+    @Test @MainActor func bubbleInputsChangeWhenAnAckUpdatesTheMessageInPlace() {
+        let message = BitchatMessage(id: "bubble-1", sender: "me", content: "Salut", timestamp: Date(), isRelay: false,
+                                     isPrivate: true, deliveryStatus: .notSentYet, transport: .bluetooth)
+        let before = WeshMessageBubble(message: message, own: true, privateChat: true)
+        message.deliveryStatus = .delivered(to: "Nora", at: Date())
+        message.transport = .internet
+        let after = WeshMessageBubble(message: message, own: true, privateChat: true)
+
+        #expect(before.status == .notSentYet)
+        #expect(before.transport == .bluetooth)
+        #expect(after.status != before.status)
+        #expect(after.transport == .internet)
+    }
+
     /// The transport label follows the delivery word, as on Android: « Envoyé · Internet ».
     @Test func ownPrivateLabelCarriesTheTransportAfterTheDeliveryWord() throws {
         let path = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj"))
