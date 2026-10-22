@@ -107,32 +107,3 @@ struct PaveMessageBudget: Equatable {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !PaveMessageBudget(text).isOverLimit
     }
 }
-
-/// The single source of truth shown by the status pill.
-enum PaveConnectionStatus: Equatable {
-    case inRange(Int)
-    case nobodyInRange
-    case bluetoothOff
-    case internet(inRange: Int)
-
-    init(bluetoothOn: Bool, peersInRange: Int, internetActive: Bool) {
-        if internetActive {
-            self = .internet(inRange: bluetoothOn ? max(peersInRange, 0) : 0)
-        } else if !bluetoothOn {
-            self = .bluetoothOff
-        } else if peersInRange > 0 {
-            self = .inRange(peersInRange)
-        } else {
-            self = .nobodyInRange
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .inRange(let count): return PaveCopy.text("pave.status.inRange", count)
-        case .nobodyInRange: return PaveCopy.text("pave.status.nobody")
-        case .bluetoothOff: return PaveCopy.text("pave.status.bluetoothOff")
-        case .internet(let count): return PaveCopy.text("pave.status.internet", count)
-        }
-    }
-}
