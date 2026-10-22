@@ -540,6 +540,72 @@ struct NostrTransportTests {
         #expect(await TestHelpers.waitUntil({ !transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
     }
 
+    @Test("Wesh: once Internet leaves On (as an erase forces), no message or ack is sent")
+    @MainActor
+    func weshSendsStopWhenInternetLeavesOn() async throws {
+        let keychain = MockKeychain()
+        let sender = try NostrIdentity.generate()
+        let contactNpub = try NostrIdentity.generate()
+        let contactPeer = PeerID(hexData: Data(repeating: 0x33, count: 32))
+        let online = CurrentValueSubject<Bool, Never>(true)
+        let probe = NostrTransportProbe()
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                currentIdentity: { sender },
+                sendEvent: probe.record(event:),
+                scheduleAfter: { delay, action in probe.enqueueScheduledAction(delay: delay, action: action) },
+                relayConnectivity: { Just(true).eraseToAnyPublisher() },
+                weshRecipients: { Just([contactPeer: contactNpub.npub]).eraseToAnyPublisher() },
+                weshOnline: { online.eraseToAnyPublisher() },
+                weshIsBlocked: { _ in false }
+            )
+        )
+        transport.senderPeerID = PeerID(str: "0123456789abcdef")
+        #expect(await TestHelpers.waitUntil({ transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+        transport.sendPrivateMessage("before", to: contactPeer, recipientNickname: "QR", messageID: "pm-before")
+        #expect(await TestHelpers.waitUntil({ probe.sentEvents.count == 1 }, timeout: TestConstants.settleTimeout))
+
+        online.send(false)
+        #expect(await TestHelpers.waitUntil({ !transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+        transport.sendPrivateMessage("after", to: contactPeer, recipientNickname: "QR", messageID: "pm-after")
+        transport.sendDeliveryAck(for: "ack-after", to: contactPeer)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        while probe.runNextScheduledAction() {}
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.count == 1)
+    }
+
+    @Test("A send captured before an erase is dropped when it runs")
+    @MainActor
+    func sendCapturedBeforeEraseIsDropped() async throws {
+        let keychain = MockKeychain()
+        let sender = try NostrIdentity.generate()
+        let recipient = try NostrIdentity.generate()
+        let probe = NostrTransportProbe()
+        let pacer = NostrTransport.AckPacer(scheduleAfter: { delay, action in probe.enqueueScheduledAction(delay: delay, action: action) })
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                currentIdentity: { sender },
+                sendEvent: probe.record(event:),
+                ackPacer: pacer
+            )
+        )
+        transport.senderPeerID = PeerID(str: "0123456789abcdef")
+
+        // Still on the main actor: the send's Task has not run when the erase begins.
+        transport.sendPrivateMessageForNostrIdentity(content: "before", toRecipientHex: recipient.publicKeyHex, from: sender, messageID: "pm-before")
+        pacer.discardWorkBeforeErase()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(probe.sentEvents.isEmpty)
+
+        transport.sendPrivateMessageForNostrIdentity(content: "after", toRecipientHex: recipient.publicKeyHex, from: sender, messageID: "pm-after")
+        #expect(await TestHelpers.waitUntil({ probe.sentEvents.count == 1 }, timeout: TestConstants.settleTimeout))
+    }
+
     @Test("Wesh: the flush on On runs after the state really is On (Published emits in willSet)")
     @MainActor
     func weshFlushWhenOnSeesTheNewState() async {
@@ -598,11 +664,10 @@ struct NostrTransportTests {
         relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() },
         weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
         weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
-        weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
+        weshIsBlocked: (@MainActor (Data) -> Bool)? = nil,
+        ackPacer: NostrTransport.AckPacer? = nil
     ) -> NostrTransport.Dependencies {
-        let owner = NostrOutboundOwner(taskCreator: NostrOutboundOwner.mainActorTaskCreator, waiterInstaller: NostrOutboundOwner.inlineWaiterInstaller)
-        return NostrTransport.Dependencies(
-            outboundOwner: owner,
+        NostrTransport.Dependencies(
             notificationCenter: notificationCenter,
             loadFavorites: loadFavorites,
             favoriteStatusForNoiseKey: favoriteStatusForNoiseKey,
@@ -612,6 +677,7 @@ struct NostrTransportTests {
             sendEvent: sendEvent,
             scheduleAfter: scheduleAfter,
             relayConnectivity: relayConnectivity,
+            ackPacer: ackPacer,
             weshRecipients: weshRecipients,
             weshOnline: weshOnline,
             weshIsBlocked: weshIsBlocked
@@ -733,5 +799,52 @@ private final class NostrTransportProbe: @unchecked Sendable {
         guard let action else { return false }
         action()
         return true
+    }
+}
+
+/// An erase must not leave acks queued under the old Nostr key: once the pacer is reset,
+/// nothing that was waiting for its turn is sent, even when the interval elapses later.
+struct NostrAckPacerResetTests {
+    private final class HeldScheduler: @unchecked Sendable {
+        private let lock = NSLock()
+        private var actions: [@Sendable () -> Void] = []
+        func hold(_ action: @escaping @Sendable () -> Void) { lock.withLock { actions.append(action) } }
+        func releaseAll() {
+            let pending = lock.withLock { () -> [@Sendable () -> Void] in
+                defer { actions.removeAll() }
+                return actions
+            }
+            pending.forEach { $0() }
+        }
+    }
+
+    private final class SentLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [Int] = []
+        func record(_ item: Int) { lock.withLock { items.append(item) } }
+        var all: [Int] { lock.withLock { items } }
+    }
+
+    @Test
+    func resetDropsAcksStillWaitingForTheirTurn() async throws {
+        let scheduler = HeldScheduler()
+        let sent = SentLog()
+        let pacer = NostrTransport.AckPacer(scheduleAfter: { _, action in scheduler.hold(action) })
+
+        for item in 1...3 { pacer.enqueue { sent.record(item) } }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(sent.all == [1])
+
+        pacer.discardWorkBeforeErase()
+        for _ in 0..<3 {
+            scheduler.releaseAll()
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(sent.all == [1])
+
+        // Still usable afterwards, for the new identity.
+        pacer.enqueue { sent.record(4) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(sent.all == [1, 4])
     }
 }

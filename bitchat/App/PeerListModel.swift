@@ -106,13 +106,6 @@ final class PeerListModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: Notification.Name("peerStatusUpdated"))
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refresh()
-            }
-            .store(in: &cancellables)
-
     }
 
     private func refresh() {

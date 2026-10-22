@@ -54,12 +54,10 @@ protocol MeshDiagnosing: AnyObject {
     func computeMeshPath(to peerID: PeerID) -> [PeerID]?
 }
 
-/// QR verification and transitive vouching over the Noise session.
+/// QR verification over the Noise session.
 protocol MeshVerifying: AnyObject {
     func sendVerifyChallenge(to peerID: PeerID, noiseKeyHex: String, nonceA: Data)
     func sendVerifyResponse(to peerID: PeerID, noiseKeyHex: String, nonceA: Data)
-    /// Sends an encoded vouch-attestation batch inside the Noise session.
-    func sendVouchAttestations(_ payload: Data, to peerID: PeerID)
 }
 
 /// Store-and-forward archive: the public messages this device is carrying

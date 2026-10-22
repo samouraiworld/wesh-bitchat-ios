@@ -112,35 +112,4 @@ final class MockIdentityManager: SecureIdentityStateManagerProtocol {
     func authenticatedSigningPublicKey(forFingerprint fingerprint: String) -> Data? {
         authenticatedSigningKeys[fingerprint]
     }
-
-    // MARK: Vouching (transitive verification)
-
-    private var vouchesByVouchee: [String: [VouchRecord]] = [:]
-    private var vouchBatchSentAt: [String: Date] = [:]
-
-    @discardableResult
-    func recordVouch(voucheeFingerprint: String, voucherFingerprint: String, timestamp: Date) -> Bool {
-        guard voucheeFingerprint != voucherFingerprint else { return false }
-        var records = vouchesByVouchee[voucheeFingerprint] ?? []
-        records.removeAll { $0.voucherFingerprint == voucherFingerprint }
-        records.append(VouchRecord(voucherFingerprint: voucherFingerprint, timestamp: timestamp))
-        vouchesByVouchee[voucheeFingerprint] = records
-        return true
-    }
-
-    func lastVouchBatchSent(to fingerprint: String) -> Date? {
-        vouchBatchSentAt[fingerprint]
-    }
-
-    func markVouchBatchSent(to fingerprint: String, at date: Date) {
-        vouchBatchSentAt[fingerprint] = date
-    }
-
-    func signingPublicKey(forFingerprint fingerprint: String) -> Data? {
-        nil
-    }
-
-    func mostRecentlyVerifiedFingerprints(limit: Int, excluding fingerprint: String) -> [String] {
-        []
-    }
 }

@@ -4,7 +4,7 @@
 
 Internet traffic — Nostr relay sockets and the geo-relay directory fetch — is routed through Tor by default, fail-closed: when Tor is wanted but not ready, requests queue rather than falling back to clearnet.
 
-Tor is provided by **Arti, in-process**, vendored as a Swift package under `localPackages/Arti` wrapping a Rust static-library xcframework. There is no `tor` binary, no `torrc`, and no control port. A SOCKS5 listener on `127.0.0.1:39050` is the only interface.
+Tor is provided by **Arti, in-process**, vendored as a Swift package under `localPackages/Arti` wrapping a Rust static-library xcframework. There is no `tor` binary, no `torrc`, and no control port. A SOCKS5 listener on `127.0.0.1`, on a random port with a username/password new at each start, is the only interface.
 
 ## Key pieces
 

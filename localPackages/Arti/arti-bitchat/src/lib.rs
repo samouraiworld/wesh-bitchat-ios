@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arti_client::TorClient;
+use arti_client::{IsolationToken, StreamPrefs, TorClient};
 use once_cell::sync::OnceCell;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
@@ -17,6 +17,7 @@ use tor_rtcompat::PreferredRuntime;
 
 mod connections;
 mod controller;
+mod isolation;
 mod lifecycle;
 mod socks;
 
@@ -37,7 +38,9 @@ fn init_state() -> Result<(), &'static str> {
 ///
 /// # Arguments
 /// * `data_dir` - Path to data directory for Tor state (C string)
-/// * `socks_port` - Port for SOCKS5 proxy (e.g., 39050)
+/// * `socks_port` - Port for SOCKS5 proxy on 127.0.0.1, chosen anew by the caller for each start
+/// * `socks_username`, `socks_password` - RFC 1929 login the proxy requires for this start
+///   (C strings, 1 to 255 bytes each); clients without it are refused
 ///
 /// # Returns
 /// * 0 on success
@@ -46,8 +49,14 @@ fn init_state() -> Result<(), &'static str> {
 /// * -3 if runtime initialization failed
 /// * -4 if bootstrap failed
 /// * -5 if native teardown became unconfirmed while admitting this start; restart the process before starting again
+/// * -6 if the SOCKS username or password is invalid
 #[no_mangle]
-pub extern "C" fn arti_start(data_dir: *const c_char, socks_port: u16) -> c_int {
+pub extern "C" fn arti_start(
+    data_dir: *const c_char,
+    socks_port: u16,
+    socks_username: *const c_char,
+    socks_password: *const c_char,
+) -> c_int {
     if ARTI_STATE.get().is_some_and(|state| state.is_running()) {
         return -1;
     }
@@ -56,6 +65,17 @@ pub extern "C" fn arti_start(data_dir: *const c_char, socks_port: u16) -> c_int 
     let data_path = match unsafe { CStr::from_ptr(data_dir) }.to_str() {
         Ok(s) => PathBuf::from(s),
         Err(_) => return -2,
+    };
+
+    if socks_username.is_null() || socks_password.is_null() {
+        return -6;
+    }
+    let credentials = match socks::Credentials::new(
+        unsafe { CStr::from_ptr(socks_username) }.to_bytes(),
+        unsafe { CStr::from_ptr(socks_password) }.to_bytes(),
+    ) {
+        Some(credentials) => Arc::new(credentials),
+        None => return -6,
     };
 
     // Initialize runtime if needed
@@ -73,7 +93,7 @@ pub extern "C" fn arti_start(data_dir: *const c_char, socks_port: u16) -> c_int 
         .expect("valid addr");
 
     state.start(move |session, shutdown_rx| async move {
-        match run_arti(data_path, socks_addr, shutdown_rx, session.clone()).await {
+        match run_arti(data_path, socks_addr, credentials, shutdown_rx, session.clone()).await {
             Ok(_) => tracing::info!("Arti shutdown cleanly"),
             Err(e) => {
                 tracing::error!("Arti error: {}", e);
@@ -183,10 +203,13 @@ fn update_summary(s: &str) {
 async fn handle_socks_connection(
     mut stream: TcpStream,
     client: Arc<TorClient<PreferredRuntime>>,
+    credentials: Arc<socks::Credentials>,
+    hosts: Arc<isolation::PerHost<IsolationToken>>,
     handshake: OwnedSemaphorePermit,
     slots: Arc<Semaphore>,
 ) -> io::Result<()> {
-    let (dest_host, dest_port) = socks::timed_handshake(&mut stream, socks::HANDSHAKE_TIMEOUT).await?;
+    let (dest_host, dest_port) =
+        socks::timed_handshake(&mut stream, &credentials, socks::HANDSHAKE_TIMEOUT).await?;
     drop(handshake);
 
     let Ok(_slot) = slots.try_acquire_owned() else {
@@ -194,8 +217,11 @@ async fn handle_socks_connection(
         return Err(io::Error::new(io::ErrorKind::Other, "SOCKS connection limit reached"));
     };
 
+    let mut prefs = StreamPrefs::new();
+    prefs.set_isolation(hosts.token(&dest_host, IsolationToken::new));
+
     // The Arti error may name the destination, so it is neither logged nor returned.
-    let tor_stream = match client.connect((dest_host.as_str(), dest_port)).await {
+    let tor_stream = match client.connect_with_prefs((dest_host.as_str(), dest_port), &prefs).await {
         Ok(s) => s,
         Err(_) => {
             socks::send_reply(&mut stream, socks::SOCKS5_REP_CONN_REFUSED).await?;
@@ -239,6 +265,7 @@ async fn handle_socks_connection(
 async fn run_arti(
     data_dir: PathBuf,
     socks_addr: SocketAddr,
+    credentials: Arc<socks::Credentials>,
     shutdown_rx: oneshot::Receiver<()>,
     session: controller::SessionContext<TorClient<PreferredRuntime>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -293,6 +320,7 @@ async fn run_arti(
             // its destination.
             let handshakes = Arc::new(Semaphore::new(socks::MAX_HANDSHAKES));
             let slots = Arc::new(Semaphore::new(socks::MAX_CONNECTIONS));
+            let hosts = Arc::new(isolation::PerHost::new());
             let mut connections = connections::ConnectionTasks::default();
             let mut next_id: u64 = 0;
             loop {
@@ -320,9 +348,13 @@ async fn run_arti(
                                 };
                                 if session.admit(|| {
                                     let client = client.clone();
+                                    let credentials = credentials.clone();
+                                    let hosts = hosts.clone();
                                     let slots = slots.clone();
                                     connections.spawn(async move {
-                                        if let Err(e) = handle_socks_connection(stream, client, handshake, slots).await {
+                                        if let Err(e) = handle_socks_connection(
+                                            stream, client, credentials, hosts, handshake, slots,
+                                        ).await {
                                             tracing::debug!("SOCKS connection {}: {}", id, e);
                                         }
                                     });

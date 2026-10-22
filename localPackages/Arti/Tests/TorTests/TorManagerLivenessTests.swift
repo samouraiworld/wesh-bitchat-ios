@@ -9,6 +9,12 @@ private final class FakeArti: @unchecked Sendable {
     private var _socksAlive = true
     private var _startCalls = 0
     private var _stopCalls = 0
+    private var _endpoints: [SocksEndpoint] = []
+    private var _startResult: Int32 = 0
+    var startResult: Int32 {
+        get { lock.withLock { _startResult } }
+        set { lock.withLock { _startResult = newValue } }
+    }
 
     var running: Bool {
         get { lock.withLock { _running } }
@@ -19,16 +25,19 @@ private final class FakeArti: @unchecked Sendable {
         set { lock.withLock { _socksAlive = newValue } }
     }
     var startCalls: Int { lock.withLock { _startCalls } }
+    var endpoints: [SocksEndpoint] { lock.withLock { _endpoints } }
     var stopCalls: Int { lock.withLock { _stopCalls } }
 
     var backend: ArtiBackend {
         ArtiBackend(
-            start: { [self] _, _ in
+            start: { [self] _, socks in
                 lock.withLock {
                     _startCalls += 1
+                    _endpoints.append(socks)
+                    guard _startResult == 0 else { return _startResult }
                     _running = true
+                    return 0
                 }
-                return 0
             },
             stop: { [self] in
                 lock.withLock {
@@ -353,6 +362,60 @@ final class TorManagerLivenessTests: XCTestCase {
         manager.setAppForeground(true)
 
         XCTAssertEqual(arti.startCalls, 0)
+    }
+
+    // MARK: - SOCKS endpoint
+
+    func test_eachStartGivesArtiAndTheSessionANewSocksPortAndLogin() async {
+        let arti = FakeArti()
+        let urlSession = TorURLSession()
+        let directory = stateDirectory
+        let manager = TorManager(
+            backend: arti.backend, urlSession: urlSession, dataDirectory: { directory },
+            pollIntervalNanoseconds: 5_000_000, livenessIntervalNanoseconds: 5_000_000, usesPathMonitor: false
+        )
+        let unused = urlSession.endpoint
+
+        await startReady(manager)
+        XCTAssertTrue(manager.stopSynchronously(timeout: 1))
+        await startReady(manager)
+        defer { manager.shutdownCompletely() }
+
+        let starts = arti.endpoints
+        XCTAssertEqual(starts.count, 2)
+        XCTAssertEqual(starts.last, urlSession.endpoint, "the session must use the login Arti was started with")
+        XCTAssertFalse(starts.contains(unused), "the endpoint known before any start is never used")
+        XCTAssertNotEqual(starts[0].username, starts[1].username)
+        XCTAssertNotEqual(starts[0].password, starts[1].password)
+        for socks in starts {
+            XCTAssertEqual(socks.host, "127.0.0.1")
+            XCTAssertTrue(SocksEndpoint.portRange.contains(socks.port))
+            XCTAssertEqual(socks.username.count, 32)
+            XCTAssertEqual(socks.password.count, 32)
+        }
+    }
+
+    func test_aRefusedStartKeepsTheSessionOnTheLoginArtiAlreadyAccepts() async {
+        let arti = FakeArti()
+        arti.startResult = -1
+        let urlSession = TorURLSession()
+        let directory = stateDirectory
+        let manager = TorManager(
+            backend: arti.backend, urlSession: urlSession, dataDirectory: { directory },
+            pollIntervalNanoseconds: 5_000_000, livenessIntervalNanoseconds: 5_000_000, usesPathMonitor: false
+        )
+        let before = urlSession.endpoint
+        manager.setAutoStartAllowed(true)
+        manager.setAppForeground(true)
+        manager.startIfNeeded()
+        let attempted = await waitUntil { arti.startCalls == 1 }
+
+        XCTAssertTrue(attempted)
+        XCTAssertEqual(arti.startCalls, 1)
+        XCTAssertNotEqual(arti.endpoints.first, before, "the refused start was offered a new login")
+        XCTAssertEqual(urlSession.endpoint, before)
+        XCTAssertEqual(urlSession.session.configuration.connectionProxyDictionary?["SOCKSPort"] as? Int, before.port)
+        manager.shutdownCompletely()
     }
 
     // MARK: - Arti dying mid-session

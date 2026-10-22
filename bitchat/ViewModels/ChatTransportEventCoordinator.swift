@@ -78,8 +78,6 @@ protocol ChatTransportEventContext: AnyObject {
     // MARK: Verification payloads
     func handleVerifyChallengePayload(from peerID: PeerID, payload: Data)
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data)
-
-    func handleVouchPayload(from peerID: PeerID, payload: Data)
 }
 
 extension ChatViewModel: ChatTransportEventContext {
@@ -148,10 +146,6 @@ extension ChatViewModel: ChatTransportEventContext {
 
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data) {
         verificationCoordinator.handleVerifyResponsePayload(from: peerID, payload: payload)
-    }
-
-    func handleVouchPayload(from peerID: PeerID, payload: Data) {
-        vouchCoordinator.handleVouchPayload(from: peerID, payload: payload)
     }
 }
 
@@ -486,7 +480,8 @@ private extension ChatTransportEventCoordinator {
             break
 
         case .vouch:
-            context.handleVouchPayload(from: peerID, payload: payload)
+            // Verification comes only from the user's own QR scan; value stays reserved.
+            break
 
         case .voiceFrame:
             // Wesh has no live voice; the type value stays reserved for
