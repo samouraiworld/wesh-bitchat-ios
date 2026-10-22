@@ -836,6 +836,7 @@ final class MessageOutboxStore {
                 if let index = queue.firstIndex(where: { $0.messageID == candidate.messageID }) {
                     candidate.sendAttempts = max(candidate.sendAttempts, queue[index].sendAttempts)
                     candidate.depositedCourierKeys.formUnion(queue[index].depositedCourierKeys)
+                    candidate.afterBluetoothWrite = candidate.afterBluetoothWrite || queue[index].afterBluetoothWrite
                     queue[index] = candidate
                 } else {
                     queue.append(candidate)

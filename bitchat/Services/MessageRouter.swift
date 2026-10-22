@@ -133,8 +133,9 @@ final class MessageRouter {
     // then every 30 min until an ack or the 24h TTL. A scheduled wake drives each retry; a
     // flush (a flapping peer, a restored outbox) cannot publish earlier. Relays reconnecting or
     // Internet turning On allow one early retry per message, only once its last publication is
-    // 5 min old, without moving the message down or up the ladder. Whatever the cause, a message
-    // is published at most 60 times; past that it waits for the TTL, then fails.
+    // 5 min old, without moving the message down or up the ladder (its next step stays, at least
+    // 30 s later). Whatever the cause, a message is published at most 60 times; past that it
+    // waits for the TTL, then fails.
     private static let internetFirstRetryDelay: TimeInterval = 30
     private static let internetMaxRetryDelay: TimeInterval = 30 * 60
     private static let internetMinPublishGap: TimeInterval = 5 * 60
@@ -570,8 +571,8 @@ final class MessageRouter {
     /// Relays reconnected or Internet turned On. Each pending message gets one early retry,
     /// at once if its last publication is 5 min old, else when it is. Skipped when the backoff
     /// is due no later anyway, when one is already waiting, when the message just went out
-    /// early, or when it reached its publication cap: a flapping link publishes a message at
-    /// most once per 5 min.
+    /// early, or when it reached its publication cap: a flapping link retries a message early
+    /// at most once per 5 min.
     private func internetBecameAvailable() {
         let now = now()
         for (peerID, queue) in outbox {
@@ -948,7 +949,7 @@ final class MessageRouter {
     }
 
     /// `onlyMessageID`: a scheduled Internet retry resends its own message, not the whole queue.
-    /// `earlyRetry`: an Internet resend may go before its backoff step, 5 min after the last one.
+    /// `earlyRetry`: an Internet resend may go before its backoff step, once the last one is 5 min old.
     /// `internetOnly`: a backoff wake publishes over Internet even while Bluetooth is connected;
     /// Bluetooth resends come from connections and flushes, so the wake never turns into a
     /// Bluetooth resend every 30 s that burns the attempt cap.
