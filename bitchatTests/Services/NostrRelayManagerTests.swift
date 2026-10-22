@@ -368,6 +368,31 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(flushed)
     }
 
+    /// Turning Internet off drops sends still waiting for a relay, so nothing queued before the
+    /// switch leaves when Internet comes back on (the app outbox keeps the message itself).
+    func test_discardPendingSends_dropsQueuedEventsBeforeTheyFlush() async throws {
+        let relayURL = "wss://queue-discard.example"
+        let context = makeContext(
+            defaultRelaysAllowed: false,
+            userTorEnabled: true,
+            torEnforced: true,
+            torIsReady: true,
+            torIsForeground: false
+        )
+        let event = try makeSignedEvent(content: "queued before off")
+
+        context.manager.sendEvent(event, to: [relayURL])
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        context.manager.discardPendingSends()
+
+        context.torForeground.value = true
+        context.manager.ensureConnections(to: [relayURL])
+        let connected = await waitUntil { context.sessionFactory.latestConnection(for: relayURL) != nil }
+        XCTAssertTrue(connected)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(context.sessionFactory.latestConnection(for: relayURL)?.sentStrings.count ?? 0, 0)
+    }
+
     func test_sendEvent_sendFailureDoesNotIncrementMessageCount() async throws {
         let relayURL = "wss://send-failure.example"
         let context = makeContext(defaultRelaysAllowed: false)
@@ -400,7 +425,7 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(connected)
 
         let event = try makeSignedEvent(content: "confirmed reject then retry")
-        var results: [Bool] = []
+        var results: [NostrPublishOutcome] = []
         var completionsWereOnMain: [Bool] = []
         context.manager.sendEventImmediately(event, to: relays) {
             results.append($0)
@@ -417,7 +442,7 @@ final class NostrRelayManagerTests: XCTestCase {
         }
         let failedCompleted = await waitUntil { results.count == 1 }
         XCTAssertTrue(failedCompleted)
-        XCTAssertEqual(results, [false])
+        XCTAssertEqual(results, [.rejected])
         XCTAssertEqual(completionsWereOnMain, [true])
         XCTAssertEqual(context.manager.debugPendingMessageQueueCount, 0)
 
@@ -434,7 +459,7 @@ final class NostrRelayManagerTests: XCTestCase {
         )
         let successfulCompleted = await waitUntil { results.count == 2 }
         XCTAssertTrue(successfulCompleted)
-        XCTAssertEqual(results, [false, true])
+        XCTAssertEqual(results, [.rejected, .accepted])
         XCTAssertEqual(completionsWereOnMain, [true, true])
         XCTAssertEqual(context.manager.debugPendingMessageQueueCount, 0)
     }
@@ -451,7 +476,7 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(connected)
 
         let event = try makeSignedEvent(content: "mixed confirmation")
-        var results: [Bool] = []
+        var results: [NostrPublishOutcome] = []
         context.manager.sendEventImmediately(event, to: relays) { results.append($0) }
         try context.sessionFactory.latestConnection(for: relays[0])?.emitOK(
             eventID: event.id,
@@ -466,7 +491,7 @@ final class NostrRelayManagerTests: XCTestCase {
 
         let completed = await waitUntil { results.count == 1 }
         XCTAssertTrue(completed)
-        XCTAssertEqual(results, [true])
+        XCTAssertEqual(results, [.accepted])
     }
 
     func test_sendEventImmediately_timeoutFailsAndIgnoresLateWriteAndOK() async throws {
@@ -481,7 +506,7 @@ final class NostrRelayManagerTests: XCTestCase {
         connection.deferSendCompletions = true
 
         let event = try makeSignedEvent(content: "confirmation timeout")
-        var results: [Bool] = []
+        var results: [NostrPublishOutcome] = []
         context.manager.sendEventImmediately(event, to: [relay]) { results.append($0) }
         XCTAssertTrue(results.isEmpty)
         XCTAssertEqual(
@@ -492,12 +517,139 @@ final class NostrRelayManagerTests: XCTestCase {
         context.scheduler.runNext()
         let timedOut = await waitUntil { results.count == 1 }
         XCTAssertTrue(timedOut)
-        XCTAssertEqual(results, [false])
+        // No relay answered: a timeout is not a refusal, the same event may be republished.
+        XCTAssertEqual(results, [.unconfirmed])
 
         connection.flushDeferredSendCompletions()
         try connection.emitOK(eventID: event.id, success: true, reason: "late")
         try? await Task.sleep(nanoseconds: 30_000_000)
-        XCTAssertEqual(results, [false])
+        XCTAssertEqual(results, [.unconfirmed])
+    }
+
+    /// NIP-01 `OK` false reasons, by machine-readable prefix: `duplicate:` is acceptance,
+    /// passing refusals keep the same event, anything else is a refusal of this event.
+    func test_sendEventImmediately_classifiesOKFalseByReasonPrefix() async throws {
+        let relay = "wss://confirmed-prefixes.example"
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: [relay])
+        let connected = await waitUntil {
+            context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+        }
+        XCTAssertTrue(connected)
+        let cases: [(success: Bool, reason: String, expected: NostrPublishOutcome)] = [
+            (true, "", .accepted),
+            (false, "duplicate: already have this event", .accepted),
+            (false, "rate-limited: slow down", .unconfirmed),
+            (false, "error: could not save", .unconfirmed),
+            (false, "auth-required: sign in first", .unconfirmed),
+            (false, "blocked: not allowed", .rejected),
+            (false, "invalid: bad signature", .rejected),
+            (false, "pow: difficulty 20 required", .rejected),
+            (false, "restricted: members only", .rejected),
+            (false, "mute: unknown prefix", .rejected),
+            (false, "no prefix at all", .rejected),
+            (false, "", .rejected)
+        ]
+        for (index, testCase) in cases.enumerated() {
+            let event = try makeSignedEvent(content: "prefix case \(index)")
+            var results: [NostrPublishOutcome] = []
+            context.manager.sendEventImmediately(event, to: [relay]) { results.append($0) }
+            try context.sessionFactory.latestConnection(for: relay)?.emitOK(
+                eventID: event.id,
+                success: testCase.success,
+                reason: testCase.reason
+            )
+            let settled = await waitUntil { results.count == 1 }
+            XCTAssertTrue(settled, "\(testCase.reason)")
+            XCTAssertEqual(results, [testCase.expected], "\(testCase.reason)")
+        }
+    }
+
+    /// Across relays: any acceptance wins, else any refusal, else no verdict.
+    func test_sendEventImmediately_aggregatesAnswersAcrossRelays() async throws {
+        let relays = ["wss://confirmed-agg-one.example", "wss://confirmed-agg-two.example", "wss://confirmed-agg-three.example"]
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: relays)
+        let connected = await waitUntil {
+            relays.allSatisfy { relay in
+                context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+            }
+        }
+        XCTAssertTrue(connected)
+        let scenarios: [(reasons: [String], expected: NostrPublishOutcome)] = [
+            (["rate-limited: wait", "blocked: no", "duplicate: have it"], .accepted),
+            (["rate-limited: wait", "invalid: bad", "error: disk"], .rejected),
+            (["error: disk", "auth-required: who", "rate-limited: wait"], .unconfirmed)
+        ]
+        for (index, scenario) in scenarios.enumerated() {
+            let event = try makeSignedEvent(content: "aggregate case \(index)")
+            var results: [NostrPublishOutcome] = []
+            context.manager.sendEventImmediately(event, to: relays) { results.append($0) }
+            for (relay, reason) in zip(relays, scenario.reasons) {
+                try context.sessionFactory.latestConnection(for: relay)?.emitOK(
+                    eventID: event.id,
+                    success: false,
+                    reason: reason
+                )
+            }
+            let settled = await waitUntil { results.count == 1 }
+            XCTAssertTrue(settled)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            XCTAssertEqual(results, [scenario.expected], "\(scenario.reasons)")
+        }
+    }
+
+    /// A write that never reached the relay is not a refusal: the caller keeps the same event.
+    func test_sendEventImmediately_failedWriteIsUnconfirmedNotRejected() async throws {
+        let relay = "wss://confirmed-write-failure.example"
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: [relay])
+        let connected = await waitUntil {
+            context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+        }
+        XCTAssertTrue(connected)
+        let connection = try XCTUnwrap(context.sessionFactory.latestConnection(for: relay))
+        connection.sendError = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)
+
+        let event = try makeSignedEvent(content: "write failure")
+        var results: [NostrPublishOutcome] = []
+        context.manager.sendEventImmediately(event, to: [relay]) { results.append($0) }
+        let settled = await waitUntil { results.count == 1 }
+        XCTAssertTrue(settled)
+        XCTAssertEqual(results, [.unconfirmed])
+    }
+
+    /// One relay said `OK` false and the other never answered: the event was refused.
+    func test_sendEventImmediately_rejectionOutlivesASilentRelayTimeout() async throws {
+        let relays = ["wss://confirmed-refuse.example", "wss://confirmed-silent.example"]
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: relays)
+        let connected = await waitUntil {
+            relays.allSatisfy { relay in
+                context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+            }
+        }
+        XCTAssertTrue(connected)
+
+        let event = try makeSignedEvent(content: "refused then silent")
+        var results: [NostrPublishOutcome] = []
+        context.manager.sendEventImmediately(event, to: relays) { results.append($0) }
+        try context.sessionFactory.latestConnection(for: relays[0])?.emitOK(
+            eventID: event.id,
+            success: false,
+            reason: "blocked: policy"
+        )
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertTrue(results.isEmpty, "the silent relay may still accept")
+
+        XCTAssertEqual(
+            context.scheduler.scheduled.first?.delay,
+            TransportConfig.nostrConfirmedSendAckTimeoutSeconds
+        )
+        context.scheduler.runNext()
+        let timedOut = await waitUntil { results.count == 1 }
+        XCTAssertTrue(timedOut)
+        XCTAssertEqual(results, [.rejected])
     }
 
     func test_sendEvent_queueIsPrunedWhenDefaultRelaysAreRevoked() async throws {
@@ -1505,7 +1657,7 @@ final class NostrRelayManagerTests: XCTestCase {
         let currentConnection = try XCTUnwrap(context.sessionFactory.latestConnection(for: relayURL))
 
         let event = try makeSignedEvent(content: "replacement confirmation")
-        var results: [Bool] = []
+        var results: [NostrPublishOutcome] = []
         context.manager.sendEventImmediately(event, to: [relayURL]) { results.append($0) }
         oldConnection.fail(error: NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut))
         try? await Task.sleep(nanoseconds: 30_000_000)
@@ -1513,7 +1665,7 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(context.manager.relays.first(where: { $0.url == relayURL })?.isConnected == true)
 
         try currentConnection.emitOK(eventID: event.id, success: true, reason: "accepted")
-        let confirmed = await waitUntil { results == [true] }
+        let confirmed = await waitUntil { results == [.accepted] }
         XCTAssertTrue(confirmed)
     }
 

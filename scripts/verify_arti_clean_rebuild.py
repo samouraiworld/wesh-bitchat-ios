@@ -22,6 +22,7 @@ INPUTS = {
         "Cargo.lock", "Cargo.toml", "build-ios.sh", "normalize-archive.py",
         "arti-bitchat/Cargo.toml", "arti-bitchat/cbindgen.toml",
         "arti-bitchat/src/connections.rs", "arti-bitchat/src/controller.rs",
+        "arti-bitchat/src/isolation.rs",
         "arti-bitchat/src/lib.rs", "arti-bitchat/src/lifecycle.rs",
         "arti-bitchat/src/socks.rs",
     )
@@ -164,7 +165,7 @@ def rebuild(checkout, work, report):
         f"{NATIVE}/build-ios.sh", f"{NATIVE}/normalize-archive.py", f"{NATIVE}/arti-bitchat",
     ], checkout).splitlines())
     if tracked_inputs != INPUTS:
-        raise ValueError("Tracked native source set differs from the eleven reviewed inputs")
+        raise ValueError("Tracked native source set differs from the twelve reviewed inputs")
     verify_files(checkout, inputs)
     verify_tree(checkout, FRAMEWORK, artifacts)
     exported_header = digest(checked_path(checkout, HEADER))

@@ -169,12 +169,6 @@ private final class MockChatTransportEventContext: ChatTransportEventContext {
     func handleVerifyResponsePayload(from peerID: PeerID, payload: Data) {
         verifyResponsePayloads.append((peerID, payload))
     }
-
-    private(set) var vouchPayloads: [(peerID: PeerID, payload: Data)] = []
-
-    func handleVouchPayload(from peerID: PeerID, payload: Data) {
-        vouchPayloads.append((peerID, payload))
-    }
 }
 
 // MARK: - Helpers
@@ -489,7 +483,6 @@ struct ChatTransportEventCoordinatorContextTests {
         #expect(context.appliedDeliveryStatuses.isEmpty)
         #expect(context.verifyChallengePayloads.isEmpty)
         #expect(context.verifyResponsePayloads.isEmpty)
-        #expect(context.vouchPayloads.isEmpty)
     }
 
     @Test @MainActor
@@ -516,7 +509,36 @@ struct ChatTransportEventCoordinatorContextTests {
         #expect(context.appliedDeliveryStatuses.isEmpty)
         #expect(context.verifyChallengePayloads.isEmpty)
         #expect(context.verifyResponsePayloads.isEmpty)
-        #expect(context.vouchPayloads.isEmpty)
+    }
+
+    @Test @MainActor
+    func vouchPayloadsFromBitChatPeersReachNoHandler() async {
+        // Verification comes only from the user's own QR scan: a BitChat
+        // peer's vouch batch is dropped unread, even from a verified contact.
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context)
+        let peerID = PeerID(str: "99aabbccddeeff00")
+        context.peersByID[peerID] = BitchatPeer(
+            peerID: peerID,
+            noisePublicKey: Data(repeating: 0x44, count: 32),
+            nickname: "alice"
+        )
+        context.admittedPrivateSenders = [peerID]
+
+        coordinator.didReceiveNoisePayload(
+            from: peerID,
+            type: .vouch,
+            payload: Data(repeating: 0x12, count: 64),
+            timestamp: Date()
+        )
+        await drainMainActorTasks()
+
+        #expect(context.handledPrivateMessages.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+        #expect(context.appliedDeliveryStatuses.isEmpty)
+        #expect(context.verifyChallengePayloads.isEmpty)
+        #expect(context.verifyResponsePayloads.isEmpty)
+        #expect(context.notifyUIChangedCount == 0)
     }
 
     @Test @MainActor

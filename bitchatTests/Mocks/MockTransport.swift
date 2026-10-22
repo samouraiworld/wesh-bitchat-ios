@@ -71,6 +71,7 @@ final class MockTransport: Transport, MeshIdentityRecovering,
 
     var connectedPeers: Set<PeerID> = []
     var reachablePeers: Set<PeerID> = []
+    var unackedSendsAreBounded = true
     /// Peers with an established secure session. `nil` mirrors the protocol
     /// default (prompt delivery), so connected peers stay "secure" for tests
     /// that never care about the distinction.
@@ -81,6 +82,12 @@ final class MockTransport: Transport, MeshIdentityRecovering,
     /// Optional synchronous hook for send-ordering tests (for example, an ack
     /// arriving before the router's send call returns).
     var onSendPrivateMessage: (@MainActor (_ messageID: String) -> Void)?
+    /// Set by the router (`RelayConfirmedTransport`); a test calls it to play a relay `OK`.
+    var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)?
+    /// Set by the router; a test calls it to play a relay reconnect or Internet turning On.
+    var onInternetAvailable: (() -> Void)?
+    /// The last set of message IDs the router said it still holds.
+    private(set) var retainedPendingMessageIDs: Set<String>?
     private let mockKeychain = MockKeychain()
 
     // MARK: - Transport Protocol Implementation
@@ -240,11 +247,6 @@ final class MockTransport: Transport, MeshIdentityRecovering,
 
     // MARK: - Remaining mesh capabilities (recording stubs)
 
-    private(set) var sentVouchAttestations: [(Data, PeerID)] = []
-    func sendVouchAttestations(_ payload: Data, to peerID: PeerID) {
-        sentVouchAttestations.append((payload, peerID))
-    }
-
     var archivedPublicMessages: [ArchivedPublicMessage] = []
     private(set) var purgedAllArchived = false
     func collectArchivedPublicMessages(completion: @escaping @MainActor ([ArchivedPublicMessage]) -> Void) {
@@ -340,5 +342,11 @@ final class MockTransport: Transport, MeshIdentityRecovering,
             )
         }
         updatePeerSnapshots(snapshots)
+    }
+}
+
+extension MockTransport: RelayConfirmedTransport {
+    func retainPendingPrivateMessages(_ messageIDs: Set<String>) {
+        retainedPendingMessageIDs = messageIDs
     }
 }

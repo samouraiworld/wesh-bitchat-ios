@@ -5,9 +5,10 @@ import Tor
 
 /// Wesh Internet mode policy constants. Off by default; Tor is mandatory.
 enum WeshInternetPolicy {
-    /// Intersection of the upstream iOS and Android defaults, so every
-    /// BitChat client listens there. No custom relays.
-    static let pinnedRelays = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://offchain.pub"]
+    /// Measured over Tor (21 October 2026). damus and primal are upstream BitChat defaults on
+    /// both platforms, so BitChat users stay reachable; snort.social replaces offchain.pub, which
+    /// refuses Tor exits. No custom relays.
+    static let pinnedRelays = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://relay.snort.social"]
     /// Matches the Tor bootstrap deadline.
     static let connectingStallSeconds: TimeInterval = 75
     /// Bounded wait for Arti to exit before its directory is deleted at panic.

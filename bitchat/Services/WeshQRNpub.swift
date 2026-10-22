@@ -58,11 +58,10 @@ enum WeshQRNpub {
         return holders.count == 1 ? holders[0] : nil
     }
 
-    /// My QR carries my npub only while Internet mode is on and the app is not
-    /// panic-fenced, and only if a key already exists: never created here.
-    static func identityForMyQR(internetEnabled: Bool, panicFenced: Bool,
-                                storedIdentity: () -> NostrIdentity?) -> NostrIdentity? {
-        guard internetEnabled, !panicFenced else { return nil }
+    /// My QR always carries my npub, Internet on or off, unless an erase is unconfirmed, and only
+    /// if a key already exists: never created here (`ChatViewModel.ensureWeshNostrIdentity`).
+    static func identityForMyQR(panicFenced: Bool, storedIdentity: () -> NostrIdentity?) -> NostrIdentity? {
+        guard !panicFenced else { return nil }
         return storedIdentity()
     }
 

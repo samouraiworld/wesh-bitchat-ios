@@ -11,7 +11,6 @@ struct ChatViewModelServiceBundle {
     let autocompleteService: AutocompleteService
     let deduplicationService: MessageDeduplicationService
     let publicMessagePipeline: PublicMessagePipeline
-    let nostrOutboundPanicBinding: NostrOutboundPanicBinding
 
     @MainActor
     init(
@@ -34,7 +33,6 @@ struct ChatViewModelServiceBundle {
             dependencies: .live(idBridge: idBridge, isBlocked: { identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) })
         )
         nostrTransport.senderPeerID = meshService.myPeerID
-        let nostrOutboundPanicBinding = nostrTransport.captureOutboundPanicBinding()
         let messageRouter = MessageRouter(
             transports: [meshService, nostrTransport],
             outboxStore: outboxStore,
@@ -52,7 +50,6 @@ struct ChatViewModelServiceBundle {
         // reprocessing (re-sent DELIVERED bursts, phantom-ack noise).
         self.deduplicationService = MessageDeduplicationService(nostrEventStore: NostrProcessedEventStore())
         self.publicMessagePipeline = PublicMessagePipeline()
-        self.nostrOutboundPanicBinding = nostrOutboundPanicBinding
     }
 }
 
@@ -135,6 +132,14 @@ private extension ChatViewModelBootstrapper {
                 )
                 viewModel.conversations.setDeliveryStatus(.carried, forMessageID: messageID)
             }
+        }
+        // « Envoyé » for an Internet send: a relay answered OK. The store's
+        // no-downgrade rule keeps carried/delivered/read; a failure shown
+        // already is not taken back by a late relay answer.
+        viewModel.messageRouter.onMessageSent = { [weak viewModel] messageID, _ in
+            guard let viewModel else { return }
+            if case .failed = viewModel.conversations.deliveryStatus(forMessageID: messageID) { return }
+            viewModel.conversations.setDeliveryStatus(.sent, forMessageID: messageID)
         }
         viewModel.commandProcessor.contextProvider = viewModel
         viewModel.commandProcessor.meshService = viewModel.meshService
@@ -302,13 +307,6 @@ private extension ChatViewModelBootstrapper {
             viewModel,
             selector: #selector(ChatViewModel.handleFavoriteStatusChanged(_:)),
             name: .favoriteStatusChanged,
-            object: nil
-        )
-
-        NotificationCenter.default.addObserver(
-            viewModel,
-            selector: #selector(ChatViewModel.handlePeerStatusUpdate(_:)),
-            name: Notification.Name("peerStatusUpdated"),
             object: nil
         )
     }

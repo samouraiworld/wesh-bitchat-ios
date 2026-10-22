@@ -88,6 +88,10 @@ protocol Transport: AnyObject {
     // Connectivity and peers
     func isPeerConnected(_ peerID: PeerID) -> Bool
     func isPeerReachable(_ peerID: PeerID) -> Bool
+    /// Whether unacknowledged resends count toward the outbox attempt cap. False for Internet:
+    /// a contact whose QR carries an npub may never turn Internet on, so silence there is normal
+    /// and the 24h outbox TTL bounds the copy instead.
+    var unackedSendsAreBounded: Bool { get }
     /// Whether a send to this peer is likely to leave the device promptly.
     /// Distinct from reachability: Nostr claims any favorite with a known
     /// npub as reachable even with no relay connection, where a send only
@@ -138,14 +142,18 @@ protocol Transport: AnyObject {
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool)
     func sendBroadcastAnnounce()
     func sendDeliveryAck(for messageID: String, to peerID: PeerID)
-    /// Capabilities the peer advertised in its last verified announce;
-    /// empty for peers that predate the capabilities TLV.
-    func peerCapabilities(_ peerID: PeerID) -> PeerCapabilities
-    /// Appends a peer-authenticated observer. Unlike
-    /// `installNoiseSessionCallbacks` this never touches the (single-slot)
-    /// handshake-required callback, so secondary features can observe
-    /// session establishment without disturbing the primary registration.
-    func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void)
+}
+
+/// A transport whose private sends are confirmed later by the network rather than by a local
+/// write (Internet: a relay `OK`). The router learns which sends were accepted (« Envoyé ») and
+/// tells the transport which messages it still holds, so per-message state (the signed gift
+/// wrap) never outlives the outbox.
+protocol RelayConfirmedTransport: AnyObject {
+    @MainActor var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)? { get set }
+    /// Relays reconnected or Internet turned On: pending messages may retry early.
+    @MainActor var onInternetAvailable: (() -> Void)? { get set }
+    /// Forgets per-message state for every message not in `messageIDs`.
+    @MainActor func retainPendingPrivateMessages(_ messageIDs: Set<String>)
 }
 
 /// A carried public mesh message from the store-and-forward window, decoded
@@ -191,8 +199,7 @@ extension Transport {
         onHandshakeRequired: @escaping (PeerID) -> Void
     ) {}
 
-    func peerCapabilities(_ peerID: PeerID) -> PeerCapabilities { [] }
-    func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void) {}
+    var unackedSendsAreBounded: Bool { true }
 
     func sendMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
         sendMessage(content, mentions: mentions)

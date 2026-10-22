@@ -501,7 +501,9 @@ struct WeshInternetModeTests {
         #expect(url.path.hasSuffix("Application Support/bitchat/arti"))
     }
 
-    @Test func pinnedRelaysAreTheSharedUpstreamDefaults() {
-        #expect(WeshInternetPolicy.pinnedRelays == ["wss://relay.damus.io", "wss://relay.primal.net", "wss://offchain.pub"])
+    /// V1 list, measured over Tor on 21 October 2026: offchain.pub refuses Tor exits and is replaced by
+    /// relay.snort.social. damus and primal stay, so BitChat users who listen on them are still reached.
+    @Test func pinnedRelaysAreTheMeasuredV1List() {
+        #expect(WeshInternetPolicy.pinnedRelays == ["wss://relay.damus.io", "wss://relay.primal.net", "wss://relay.snort.social"])
     }
 }

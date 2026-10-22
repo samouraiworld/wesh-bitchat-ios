@@ -436,7 +436,11 @@ private struct WeshInbox: View {
     /// Pushed only once the sheet is gone: a push during its dismissal is dropped.
     @State private var chatAfterExchange: WeshQRTrust.Contact?
     @State private var storageCheck = 0
+    @State private var connexion = false
     @EnvironmentObject private var peers: PeerListModel
+    @ObservedObject private var internetMode = WeshInternetMode.shared
+
+    private var internetStatus: PaveInternetStatus { internetMode.internetStatus }
 
     private var storageNotice: WeshContactStorageNotice? {
         let _ = storageCheck
@@ -473,6 +477,15 @@ private struct WeshInbox: View {
                 PaveReachCard(phonesInReach: peers.reachableMeshPeerCount, bluetoothOn: chrome.bluetoothState == .poweredOn)
                     .listRowInsets(EdgeInsets(top: PaveSpace.s2, leading: PaveSpace.s4, bottom: PaveSpace.s2, trailing: PaveSpace.s4))
                     .listRowSeparator(.hidden)
+                // Only once Internet mode is on: off, the reach card already says it is Bluetooth only.
+                if internetStatus.showsHomePill {
+                    PaveStatusPill(status: internetStatus) {
+                        if internetStatus.offersRetry { internetMode.retryInternet() } else { connexion = true }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets(top: PaveSpace.s1, leading: PaveSpace.s4, bottom: PaveSpace.s2, trailing: PaveSpace.s4))
+                    .listRowSeparator(.hidden)
+                }
             }
             .listRowBackground(theme.canvas)
             Section {
@@ -531,6 +544,11 @@ private struct WeshInbox: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(PaveDisplayName.safe(row.nickname)).font(.headline)
                                     PaveFingerprintText(fingerprint: PaveFingerprint.short(row.peerID.noiseKey))
+                                    if let badge = PaveContactInternetBadge(
+                                        contact: row, internet: internetStatus,
+                                        routable: runtime.chatViewModel.isWeshInternetContact(row.peerID)) {
+                                        PaveInternetBadge(badge: badge)
+                                    }
                                     Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? PaveCopy.text("pave.wesh.inbox.verified"))
                                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                         .font(.subheadline).foregroundStyle(theme.secondary)
@@ -566,6 +584,7 @@ private struct WeshInbox: View {
         }) {
             WeshContactSheet(runtime: runtime, onOpenChat: { chatAfterExchange = $0 })
         }
+        .sheet(isPresented: $connexion) { WeshConnectionSettings() }
         .navigationDestination(isPresented: Binding(get: { openedContact != nil },
                                                     set: { if !$0 { openedContact = nil } })) {
             if let contact = openedContact {
@@ -1315,8 +1334,8 @@ private struct WeshContactDetails: View {
     let contact: WeshQRTrust.Contact
     var inSheet = false
     @ObservedObject private var service: UnifiedPeerService
-    // periphery:ignore - observed so the view re-renders when QR trust changes
     @ObservedObject private var trust = WeshQRTrust.shared
+    @ObservedObject private var internetMode = WeshInternetMode.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.weshTheme) private var theme
     @State private var removing = false
@@ -1335,6 +1354,15 @@ private struct WeshContactDetails: View {
         contact.peerID.noiseKey.map { runtime.chatViewModel.identityManager.isBlocked(fingerprint: $0.sha256Fingerprint()) } ?? false
     }
 
+    /// The stored record, so a rescan while this page is open updates the badge.
+    private var internetBadge: PaveContactInternetBadge? {
+        // Fail closed: a contact removed while this page is open gets no badge.
+        guard let current = trust.contacts.first(where: { $0.id == contact.id }) else { return nil }
+        return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus,
+                                        routable: runtime.chatViewModel.isWeshInternetContact(current.peerID),
+                                        blocked: blocked)
+    }
+
     var body: some View {
         List {
             Section {
@@ -1344,6 +1372,13 @@ private struct WeshContactDetails: View {
                     PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
                     Label(blocked ? PaveCopy.text("pave.wesh.contact.blocked") : PaveCopy.text("pave.wesh.contact.verifiedHere"), systemImage: blocked ? "hand.raised" : "lock")
                         .font(.subheadline).foregroundStyle(theme.secondary)
+                    if let internetBadge {
+                        PaveInternetBadge(badge: internetBadge)
+                        if internetBadge == .rescanRequired {
+                            Text(PaveCopy.text("pave.contact.rescanHelp"))
+                                .font(.subheadline).foregroundStyle(theme.secondary)
+                        }
+                    }
                     Text(PaveCopy.text("pave.wesh.contact.qrNameScope"))
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(.vertical, 16)

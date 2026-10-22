@@ -367,11 +367,6 @@ final class ChatPeerIdentityCoordinator {
         context.selectedPrivateChatFingerprint = nil
     }
 
-    @MainActor
-    func handlePeerStatusUpdate() {
-        updatePrivateChatPeerIfNeeded()
-    }
-
     func handleFavoriteStatusChanged(_ notification: Notification) {
         guard let peerPublicKey = notification.userInfo?["peerPublicKey"] as? Data else { return }
 

@@ -994,10 +994,11 @@ struct ChatPrivateConversationCoordinatorContextTests {
 
         coordinator.sendPrivateMessage("hello bob", to: peerID)
 
-        // Offline but mutual favorite with a Nostr key: routed, marked sent,
-        // and the nickname falls back to the favorite relationship.
+        // Offline but mutual favorite with a Nostr key: routed, and the
+        // nickname falls back to the favorite relationship. « Envoyé » waits
+        // for a relay OK (the router's onMessageSent), not the hand-off.
         #expect(context.routedPrivateMessages.map(\.content) == ["hello bob"])
-        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .sent)
+        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .sending)
         #expect(context.privateChats[peerID]?.first?.recipientNickname == "bob")
     }
 
@@ -1022,7 +1023,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
         coordinator.sendPrivateMessage("hello again", to: shortID)
 
         #expect(context.routedPrivateMessages.map(\.content) == ["hello again"])
-        #expect(context.privateChats[shortID]?.first?.deliveryStatus == .sent)
+        #expect(context.privateChats[shortID]?.first?.deliveryStatus == .sending)
         #expect(context.privateChats[shortID]?.first?.recipientNickname == "bob")
     }
 

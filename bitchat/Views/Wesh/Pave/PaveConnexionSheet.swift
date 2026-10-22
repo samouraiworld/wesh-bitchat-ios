@@ -6,24 +6,34 @@ import UIKit
 import AppKit
 #endif
 
-/// What the Internet mode is doing, as shown to people.
+/// What the Internet mode is doing, as shown to people (spec §3 « Pill »).
 enum PaveInternetStatus: Equatable {
     case off
-    case connecting
-    case connected(relayCount: Int?)
+    /// Tor bootstrap, 0 to 100.
+    case connecting(torProgress: Int)
+    case connected
     case paused
     case failed
 
     var isEnabled: Bool { self != .off }
 
-    var label: String {
+    /// Failed is the only state a touch on the status retries.
+    var offersRetry: Bool { self == .failed }
+
+    /// The home pill adds nothing while Internet is off: the reach card already says
+    /// everything travels over Bluetooth, and Internet stays opt-in.
+    var showsHomePill: Bool { isEnabled }
+
+    var label: String { label() }
+
+    func label(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         switch self {
-        case .off: return PaveCopy.text("pave.internet.off")
-        case .connecting: return PaveCopy.text("pave.internet.connecting")
-        case .connected(let relays?): return PaveCopy.text("pave.internet.connectedRelays", relays)
-        case .connected(nil): return PaveCopy.text("pave.internet.connected")
-        case .paused: return PaveCopy.text("pave.internet.paused")
-        case .failed: return PaveCopy.text("pave.internet.failed")
+        case .off: return PaveCopy.text("pave.internet.off", bundle: bundle, locale: locale)
+        case .connecting(let progress):
+            return PaveCopy.text("pave.internet.connecting", bundle: bundle, locale: locale, min(max(progress, 0), 100))
+        case .connected: return PaveCopy.text("pave.internet.connected", bundle: bundle, locale: locale)
+        case .paused: return PaveCopy.text("pave.internet.paused", bundle: bundle, locale: locale)
+        case .failed: return PaveCopy.text("pave.internet.failed", bundle: bundle, locale: locale)
         }
     }
 }
@@ -32,8 +42,8 @@ extension PaveInternetStatus {
     init(_ state: WeshInternetState) {
         switch state {
         case .off: self = .off
-        case .connecting: self = .connecting
-        case .on: self = .connected(relayCount: nil)
+        case .connecting(let progress): self = .connecting(torProgress: progress)
+        case .on: self = .connected
         case .paused: self = .paused
         case .error: self = .failed
         }
@@ -78,12 +88,12 @@ final class PaveInternetModeStub: WeshInternetModeProviding {
 
     @discardableResult func setInternetModeEnabled(_ enabled: Bool) -> Bool {
         if enabled, !disclosureAccepted || refusesEnabling { return false }
-        internetStatus = enabled ? .connecting : .off
+        internetStatus = enabled ? .connecting(torProgress: 0) : .off
         return true
     }
 
     func retryInternet() {
-        if internetStatus == .failed { internetStatus = .connecting }
+        if internetStatus == .failed { internetStatus = .connecting(torProgress: 0) }
     }
 }
 
@@ -190,13 +200,16 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
             }
             .tint(theme[.internet])
             .frame(minHeight: PaveTouch.minimum)
-            Text(internet.internetStatus.label)
-                .paveText(.label)
-                .fontWeight(.regular)
-                .foregroundStyle(internet.internetStatus == .failed ? theme[.danger] : theme[.ink])
-            if internet.internetStatus == .failed {
-                Button(PaveCopy.text("pave.action.retry")) { internet.retryInternet() }
-                    .buttonStyle(.paveSecondary)
+            if internet.internetStatus.offersRetry {
+                // « Internet indisponible — Réessayer »: the status is the retry button.
+                Button(internet.internetStatus.label) { internet.retryInternet() }
+                    .buttonStyle(.paveDanger)
+                    .accessibilityHint(PaveCopy.text("pave.status.retryHint"))
+            } else {
+                Text(internet.internetStatus.label)
+                    .paveText(.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(theme[.ink])
             }
             if refused {
                 Text(PaveCopy.text("pave.internet.refused"))
@@ -300,7 +313,7 @@ struct PaveConnexionSheet_Previews: PreviewProvider {
     static var previews: some View {
         PavePreview.variants {
             PaveConnexionSheet(bluetooth: .on, peersInRange: 7,
-                               internet: PaveInternetModeStub(internetStatus: .connected(relayCount: 3)), onClose: {})
+                               internet: PaveInternetModeStub(internetStatus: .connected), onClose: {})
         }
         PavePreview.variants {
             PaveConnexionSheet(bluetooth: .unauthorized, peersInRange: 0, internet: PaveInternetModeStub(), onClose: {})

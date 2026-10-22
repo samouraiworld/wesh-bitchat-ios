@@ -16,9 +16,11 @@ private final class FakeSocksServer: @unchecked Sendable {
     private let lock = NSLock()
     private var _request: ConnectRequest?
     private var _greeting: [UInt8] = []
+    private var _login: (username: String, password: String)?
 
     var request: ConnectRequest? { lock.withLock { _request } }
     var greeting: [UInt8] { lock.withLock { _greeting } }
+    var login: (username: String, password: String)? { lock.withLock { _login } }
 
     init() throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
@@ -60,7 +62,20 @@ private final class FakeSocksServer: @unchecked Sendable {
                 return
             }
             lock.withLock { _greeting = head + methods }
-            _ = writeAll(client, [0x05, 0x00])
+            if methods.contains(0x02) {
+                // RFC 1929: VER | ULEN | UNAME | PLEN | PASSWD, recorded then accepted.
+                _ = writeAll(client, [0x05, 0x02])
+                guard let loginHead = readExactly(client, 2),
+                      let user = readExactly(client, Int(loginHead[1])),
+                      let passLength = readExactly(client, 1),
+                      let pass = readExactly(client, Int(passLength[0])) else { onRequest(); return }
+                lock.withLock {
+                    _login = (String(bytes: user, encoding: .utf8) ?? "", String(bytes: pass, encoding: .utf8) ?? "")
+                }
+                _ = writeAll(client, [0x01, 0x00])
+            } else {
+                _ = writeAll(client, [0x05, 0x00])
+            }
             guard let header = readExactly(client, 4) else { onRequest(); return }
             let atyp = header[3]
             var host = ""
@@ -115,13 +130,14 @@ final class TorURLSessionSocksTests: XCTestCase {
     /// (ATYP 0x03) so Tor resolves it at the exit. An IPv4/IPv6 address type
     /// here would mean the name was resolved on the device, in clear DNS.
     func test_relayWebSocket_sendsTheHostnameToSocksAsDomainName() throws {
-        for relay in ["relay.damus.io", "relay.primal.net", "offchain.pub"] {
+        for relay in ["relay.damus.io", "relay.primal.net", "relay.snort.social"] {
             let server = try FakeSocksServer()
             defer { server.stop() }
             let handled = expectation(description: "SOCKS request for \(relay)")
             server.serveOnce { handled.fulfill() }
 
-            let session = TorURLSession.makeTorSession(port: Int(server.port))
+            let socks = endpoint(port: server.port)
+            let session = TorURLSession.makeTorSession(endpoint: socks)
             let task = session.webSocketTask(with: URL(string: "wss://\(relay)")!)
             task.resume()
             wait(for: [handled], timeout: 10)
@@ -129,6 +145,9 @@ final class TorURLSessionSocksTests: XCTestCase {
             session.invalidateAndCancel()
 
             XCTAssertEqual(server.greeting.first, 0x05, "\(relay): the proxy must be spoken to in SOCKS5")
+            XCTAssertTrue(server.greeting.dropFirst(2).contains(0x02), "\(relay): username/password must be offered")
+            XCTAssertEqual(server.login?.username, socks.username, relay)
+            XCTAssertEqual(server.login?.password, socks.password, relay)
             XCTAssertEqual(server.request, .init(addressType: 0x03, host: relay, port: 443))
         }
     }
@@ -139,14 +158,34 @@ final class TorURLSessionSocksTests: XCTestCase {
         let handled = expectation(description: "SOCKS request")
         server.serveOnce { handled.fulfill() }
 
-        let session = TorURLSession.makeTorSession(port: Int(server.port))
+        let socks = endpoint(port: server.port)
+        let session = TorURLSession.makeTorSession(endpoint: socks)
         let task = session.dataTask(with: URL(string: "https://relay.damus.io/")!)
         task.resume()
         wait(for: [handled], timeout: 10)
         task.cancel()
         session.invalidateAndCancel()
 
+        XCTAssertEqual(server.login?.username, socks.username)
         XCTAssertEqual(server.request, .init(addressType: 0x03, host: "relay.damus.io", port: 443))
+    }
+
+    private func endpoint(port: UInt16) -> SocksEndpoint {
+        let random = SocksEndpoint.random()
+        return SocksEndpoint(host: "127.0.0.1", port: Int(port), username: random.username, password: random.password)
+    }
+
+    func test_renewedEndpoint_hasANewPortRangeLoginAndNeverPrintsIt() {
+        let urlSession = TorURLSession()
+        let first = urlSession.endpoint
+        let renewed = urlSession.renewEndpoint()
+
+        XCTAssertEqual(urlSession.endpoint, renewed)
+        XCTAssertNotEqual(first.password, renewed.password)
+        XCTAssertTrue(SocksEndpoint.portRange.contains(renewed.port))
+        XCTAssertFalse(renewed.description.contains(renewed.password))
+        XCTAssertFalse(renewed.description.contains(renewed.username))
+        XCTAssertEqual(urlSession.session.configuration.connectionProxyDictionary?["SOCKSPort"] as? Int, renewed.port)
     }
 
     func test_sharedSession_staysProxiedWhenDirectModeIsRequested() {
@@ -158,6 +197,8 @@ final class TorURLSessionSocksTests: XCTestCase {
         let proxy = urlSession.session.configuration.connectionProxyDictionary
         XCTAssertEqual(proxy?["SOCKSEnable"] as? Int, 1)
         XCTAssertEqual(proxy?["SOCKSProxy"] as? String, "127.0.0.1")
-        XCTAssertEqual(proxy?["SOCKSPort"] as? Int, 39050)
+        XCTAssertEqual(proxy?["SOCKSPort"] as? Int, urlSession.endpoint.port)
+        XCTAssertEqual(proxy?["kCFStreamPropertySOCKSUser"] as? String, urlSession.endpoint.username)
+        XCTAssertEqual(proxy?["kCFStreamPropertySOCKSPassword"] as? String, urlSession.endpoint.password)
     }
 }

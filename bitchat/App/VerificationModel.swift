@@ -44,7 +44,6 @@ final class VerificationModel: ObservableObject {
         // Read-only: showing a QR never creates Nostr key material.
         let bridge = chatViewModel.idBridge
         guard let identity = WeshQRNpub.identityForMyQR(
-            internetEnabled: WeshInternetSettings.isEnabled(),
             panicFenced: !chatViewModel.networkActivationAllowed,
             storedIdentity: { try? bridge.storedNostrIdentity() }
         ) else {
@@ -117,17 +116,6 @@ final class VerificationModel: ObservableObject {
             .store(in: &cancellables)
 
         chatViewModel.$allPeers
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &cancellables)
-
-        // Vouch state changes (ChatVouchCoordinator.notifyPeerTrustChanged)
-        // are signalled via this notification rather than a published
-        // property, so an open fingerprint sheet refreshes its vouched badge
-        // live when a vouch batch is accepted.
-        NotificationCenter.default.publisher(for: Notification.Name("peerStatusUpdated"))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()

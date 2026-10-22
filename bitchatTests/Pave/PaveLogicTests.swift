@@ -70,17 +70,6 @@ struct PaveDeliveryStateTests {
     }
 }
 
-@Suite("Pavé status pill")
-struct PaveConnectionStatusTests {
-    @Test func statusPillResolvesItsFourStates() {
-        #expect(PaveConnectionStatus(bluetoothOn: true, peersInRange: 7, internetActive: false) == .inRange(7))
-        #expect(PaveConnectionStatus(bluetoothOn: true, peersInRange: 0, internetActive: false) == .nobodyInRange)
-        #expect(PaveConnectionStatus(bluetoothOn: false, peersInRange: 3, internetActive: false) == .bluetoothOff)
-        #expect(PaveConnectionStatus(bluetoothOn: true, peersInRange: 3, internetActive: true) == .internet(inRange: 3))
-        #expect(PaveConnectionStatus(bluetoothOn: false, peersInRange: 3, internetActive: true) == .internet(inRange: 0))
-    }
-}
-
 @Suite("Pavé palette contrast")
 struct PavePaletteContrastTests {
     @Test(arguments: PaveThemeID.allCases)
