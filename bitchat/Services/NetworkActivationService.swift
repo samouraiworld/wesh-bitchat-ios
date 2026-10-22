@@ -14,6 +14,8 @@ protocol NetworkActivationTorControlling: AnyObject {
 protocol NetworkActivationRelayControlling: AnyObject {
     func connect()
     func disconnect()
+    /// Drops events still waiting for a relay; the app outbox keeps the messages themselves.
+    func discardPendingSends()
 }
 
 protocol NetworkActivationProxyControlling: AnyObject {
@@ -33,12 +35,20 @@ final class NetworkActivationService: ObservableObject {
 
     @Published private(set) var activationAllowed: Bool = false
     @Published private(set) var userTorEnabled: Bool = true
-    @Published private(set) var userInternetEnabled: Bool = true
+    /// Off until the persisted Wesh toggle says otherwise, so nothing can connect by default.
+    @Published private(set) var userInternetEnabled: Bool = false
 
     /// BLE does not depend on this opt-in. Wesh nearby mode disables all relay activation.
+    /// Turning it off (the user's toggle, or a hard Tor fault) also drops events still waiting
+    /// for a relay, so nothing queued before leaves when Internet comes back on. Private
+    /// messages stay in the app outbox; receipts and favorite notices are dropped for good.
+    /// A lost network keeps the queue.
     func setUserInternetEnabled(_ enabled: Bool) {
+        let turnedOff = userInternetEnabled && !enabled
         userInternetEnabled = enabled
-        if started { reevaluate() }
+        guard started else { return }
+        if turnedOff { relayController.discardPendingSends() }
+        reevaluate()
     }
     /// Coarse, debounced network reachability. `false` only when the OS reports
     /// no usable interface at all. Surfaced for UI ("offline" vs "connecting").
