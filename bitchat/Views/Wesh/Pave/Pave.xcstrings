@@ -4823,36 +4823,19 @@
         }
       }
     },
-    "pave.wesh.delivery.carried" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confié à un relais · réception non confirmée"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Handed to a relay · receipt unconfirmed"
-          }
-        }
-      }
-    },
     "pave.wesh.delivery.delivered" : {
       "extractionState" : "manual",
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Réception confirmée"
+            "value" : "Distribué"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Receipt confirmed"
+            "value" : "Delivered"
           }
         }
       }
@@ -4863,30 +4846,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Échec d’envoi"
+            "value" : "Échec"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Send failed"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.partial" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transmission partielle"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Partial transmission"
+            "value" : "Failed"
           }
         }
       }
@@ -4993,36 +4959,19 @@
         }
       }
     },
-    "pave.wesh.delivery.sending" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "En cours d’envoi"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sending"
-          }
-        }
-      }
-    },
     "pave.wesh.delivery.sent" : {
       "extractionState" : "manual",
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Transmission non confirmée"
+            "value" : "Envoyé"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Transmission unconfirmed"
+            "value" : "Sent"
           }
         }
       }
@@ -5033,13 +4982,30 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "En attente d’envoi"
+            "value" : "En attente"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Waiting to send"
+            "value" : "Waiting"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.withTransport" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
           }
         }
       }
