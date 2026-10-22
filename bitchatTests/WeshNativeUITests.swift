@@ -1150,13 +1150,31 @@ struct WeshNativeUITests {
         let bundle = try #require(Bundle(path: path))
         let publicLabel: (DeliveryStatus) -> String = { WeshDelivery.publicLabel($0, bundle: bundle, locale: Locale(identifier: "fr")) }
         let label: (DeliveryStatus) -> String = { WeshDelivery.label($0, bundle: bundle, locale: Locale(identifier: "fr")) }
-        #expect(publicLabel(.notSentYet) == "En attente de diffusion")
-        #expect(publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
-        #expect(publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
-        #expect(label(.notSentYet) != label(.sent))
-        #expect(label(.sent).contains("non confirmée"))
-        #expect(label(.carried).contains("non confirmée"))
-        #expect(label(.delivered(to: "Nora", at: Date())) == "Réception confirmée")
+        // The public room has no receipts: En attente / Envoyé / Échec only, as on Android.
+        #expect(publicLabel(.notSentYet) == "En attente")
+        #expect(publicLabel(.sending) == "En attente")
+        #expect(publicLabel(.sent) == "Envoyé")
+        #expect(publicLabel(.partiallyDelivered(reached: 1, total: 3)) == "Envoyé")
+        #expect(publicLabel(.read(by: "Nora", at: Date())) == "Envoyé")
+        #expect(publicLabel(.failed(reason: "offline")) == "Échec")
+        // Spec §3: En attente / Envoyé / Distribué / Lu / Échec. A courier hand-off is « Envoyé ».
+        #expect(label(.notSentYet) == "En attente")
+        #expect(label(.sending) == "En attente")
+        #expect(label(.sent) == "Envoyé")
+        #expect(label(.carried) == "Envoyé")
+        #expect(label(.delivered(to: "Nora", at: Date())) == "Distribué")
         #expect(label(.read(by: "Nora", at: Date())) == "Lu")
+        #expect(label(.failed(reason: "offline")) == "Échec")
+    }
+
+    /// The transport label follows the delivery word, as on Android: « Envoyé · Internet ».
+    @Test func ownPrivateLabelCarriesTheTransportAfterTheDeliveryWord() throws {
+        let path = try #require(PaveCopy.bundle.path(forResource: "fr", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+        let locale = Locale(identifier: "fr")
+        #expect(WeshDelivery.label(.sent, transport: .internet, bundle: bundle, locale: locale) == "Envoyé · Internet")
+        #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date()), transport: .bluetooth, bundle: bundle, locale: locale)
+            == "Distribué · Bluetooth")
+        #expect(WeshDelivery.label(.notSentYet, transport: nil, bundle: bundle, locale: locale) == "En attente")
     }
 }

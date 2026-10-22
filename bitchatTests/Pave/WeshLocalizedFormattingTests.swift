@@ -44,14 +44,15 @@ struct WeshLocalizedFormattingTests {
         }
     }
 
-    @Test func englishDeliveryStillDistinguishesTransmissionFromReceiptAndKeepsStoredAppearanceIDs() throws {
+    @Test func englishDeliveryUsesTheSpecWordsAndKeepsStoredAppearanceIDs() throws {
         let english = try resources("en")
         let locale = Locale(identifier: "en")
-        #expect(WeshDelivery.label(.sent, bundle: english, locale: locale) == "Transmission unconfirmed")
-        #expect(WeshDelivery.label(.carried, bundle: english, locale: locale) == "Handed to a relay · receipt unconfirmed")
-        #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date()), bundle: english, locale: locale) == "Receipt confirmed")
-        #expect(WeshDelivery.publicLabel(.read(by: "Nora", at: Date()), bundle: english, locale: locale)
-            == "Public broadcast · receipt unconfirmed")
+        #expect(WeshDelivery.label(.notSentYet, bundle: english, locale: locale) == "Waiting")
+        #expect(WeshDelivery.label(.sent, bundle: english, locale: locale) == "Sent")
+        #expect(WeshDelivery.label(.carried, bundle: english, locale: locale) == "Sent")
+        #expect(WeshDelivery.label(.delivered(to: "Nora", at: Date()), bundle: english, locale: locale) == "Delivered")
+        #expect(WeshDelivery.label(.sent, transport: .internet, bundle: english, locale: locale) == "Sent · Internet")
+        #expect(WeshDelivery.publicLabel(.read(by: "Nora", at: Date()), bundle: english, locale: locale) == "Sent")
         #expect(WeshAppearance(rawValue: "night")?.title(bundle: english, locale: locale) == "Night")
         #expect(WeshAppearance(rawValue: "day")?.title(bundle: english, locale: locale) == "Day")
         #expect(WeshAppearance(rawValue: "night")?.paveTheme == .nuit)
