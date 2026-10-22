@@ -681,6 +681,13 @@ final class NostrRelayManager: ObservableObject {
         state.completion(state.sawRejection ? .rejected : .unconfirmed)
     }
 
+    func discardPendingSends() {
+        messageQueueLock.lock()
+        messageQueue.removeAll()
+        pendingSendDropCount = 0
+        messageQueueLock.unlock()
+    }
+
     private func enqueuePendingSend(_ event: NostrEvent, pendingRelays: Set<String>) {
         messageQueueLock.lock()
         messageQueue.append(PendingSend(event: event, pendingRelays: pendingRelays))
