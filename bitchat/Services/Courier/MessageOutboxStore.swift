@@ -33,6 +33,9 @@ final class MessageOutboxStore {
         /// Noise keys of couriers already carrying this message, so deposit
         /// retries add couriers instead of re-burning the same ones.
         var depositedCourierKeys: Set<Data>
+        /// Written over a Bluetooth session and still unacked once its ack window ended: the
+        /// write stands, so expiry keeps « Envoyé » instead of reporting a failure.
+        var afterBluetoothWrite = false
 
         init(
             content: String,
@@ -61,6 +64,7 @@ final class MessageOutboxStore {
             timestamp = try container.decode(Date.self, forKey: .timestamp)
             sendAttempts = try container.decodeIfPresent(Int.self, forKey: .sendAttempts) ?? 0
             depositedCourierKeys = try container.decodeIfPresent(Set<Data>.self, forKey: .depositedCourierKeys) ?? []
+            afterBluetoothWrite = try container.decodeIfPresent(Bool.self, forKey: .afterBluetoothWrite) ?? false
         }
     }
 
@@ -832,6 +836,7 @@ final class MessageOutboxStore {
                 if let index = queue.firstIndex(where: { $0.messageID == candidate.messageID }) {
                     candidate.sendAttempts = max(candidate.sendAttempts, queue[index].sendAttempts)
                     candidate.depositedCourierKeys.formUnion(queue[index].depositedCourierKeys)
+                    candidate.afterBluetoothWrite = candidate.afterBluetoothWrite || queue[index].afterBluetoothWrite
                     queue[index] = candidate
                 } else {
                     queue.append(candidate)

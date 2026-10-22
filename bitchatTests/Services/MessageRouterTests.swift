@@ -1033,6 +1033,253 @@ struct MessageRouterTests {
         #expect(attempts == [.internet, .bluetooth])
     }
 
+    /// A contact in Bluetooth range with an npub, Internet on: a mesh with a secure session and
+    /// an Internet transport that reaches them, both behind manual wakes.
+    @MainActor
+    private func bluetoothAndInternetRouter(
+        peerID: PeerID,
+        scheduler: ManualRetryScheduler,
+        clock: MutableTestClock
+    ) -> (router: MessageRouter, mesh: MockTransport, internet: MockTransport) {
+        let mesh = MockTransport()
+        mesh.connectedPeers.insert(peerID)
+        mesh.securePeers = [peerID]
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [mesh, internet], now: { clock.now }, scheduleAfter: scheduler.schedule)
+        return (router, mesh, internet)
+    }
+
+    /// Rule 4: a Bluetooth message with no ack 20 s after its last hand-off goes over Internet
+    /// once, under the same ID, then follows the Internet backoff. A Bluetooth resend in the
+    /// meantime restarts the 20 s.
+    @Test @MainActor
+    func bluetoothMessageWithoutAckFor20sIsResentOverInternetUnderTheSameID() async {
+        let peerID = PeerID(str: "00000000000000e1")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let start = clock.now
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var attempts: [MessageTransport] = []
+        router.onMessageAttempted = { _, _, transport in attempts.append(transport) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "r4")
+        #expect(mesh.sentPrivateMessages.count == 1)
+        #expect(internet.sentPrivateMessages.isEmpty)
+        #expect(scheduler.pendingDelays == [20])
+
+        clock.now = start.addingTimeInterval(10)
+        router.flushOutbox(for: peerID)
+        #expect(mesh.sentPrivateMessages.count == 2)
+        #expect(scheduler.pendingDelays == [20, 20])
+
+        // The first window is superseded by the resend's.
+        clock.now = start.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.isEmpty)
+
+        clock.now = start.addingTimeInterval(30)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["r4"])
+        #expect(attempts == [.bluetooth, .bluetooth, .internet])
+        #expect(scheduler.pendingDelays == [30])
+        withExtendedLifetime(router) {}
+    }
+
+    /// Once on the Internet backoff, its wakes publish over Internet even while the contact is
+    /// still connected over Bluetooth: no Bluetooth resend every 30 s, the backoff climbs, and
+    /// the Bluetooth attempt cap never drops the message.
+    @Test @MainActor
+    func internetBackoffAfterARule4ResendStaysOnInternetWhileBluetoothIsConnected() async {
+        let peerID = PeerID(str: "00000000000000e7")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "ladder4")
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.run(delay: 20)
+        #expect(internet.sentPrivateMessages.count == 1)
+
+        let delays: [TimeInterval] = [30, 60, 120, 240, 480, 960, 1_800, 1_800, 1_800, 1_800]
+        for (index, delay) in delays.enumerated() {
+            #expect(scheduler.pendingDelays == [delay])
+            clock.now = clock.now.addingTimeInterval(delay)
+            scheduler.run(delay: delay)
+            #expect(internet.sentPrivateMessages.count == index + 2)
+        }
+        #expect(mesh.sentPrivateMessages.count == 1)
+        #expect(dropped.isEmpty)
+    }
+
+    @Test @MainActor
+    func bluetoothMessageAckedWithin20sNeverGoesOverInternet() async {
+        let peerID = PeerID(str: "00000000000000e2")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let (router, _, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "acked")
+        router.markDelivered("acked", for: [peerID])
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.isEmpty)
+        #expect(scheduler.pendingDelays.isEmpty)
+    }
+
+    /// With Internet off at the deadline the Bluetooth write stands: nothing goes over
+    /// Internet, and the window does not come back by itself.
+    @Test @MainActor
+    func bluetoothMessageWithInternetOffAtTheDeadlineIsNotResentOverInternet() async {
+        let peerID = PeerID(str: "00000000000000e3")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "off")
+        internet.reachablePeers.remove(peerID)
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.isEmpty)
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(mesh.sentPrivateMessages.count == 1)
+        #expect(dropped.isEmpty)
+    }
+
+    /// Rule 4 never moves a message the send policy no longer admits (a key that no longer
+    /// matches the QR-verified one), nor one erased in the meantime.
+    @Test @MainActor
+    func bluetoothAckWindowNeverSendsADeniedOrErasedMessageOverInternet() async {
+        let peerID = PeerID(str: "00000000000000e4")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let (router, _, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        let enrolledKey = Data(repeating: 4, count: 32)
+        var currentKey = enrolledKey
+        router.privateSendPolicy = { _, pinned in
+            guard pinned == nil || pinned == currentKey else { return nil }
+            return currentKey
+        }
+
+        router.sendPrivate("Denied later", to: peerID, recipientNickname: "Peer", messageID: "denied")
+        currentKey = Data(repeating: 5, count: 32)
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.isEmpty)
+
+        currentKey = enrolledKey
+        router.sendPrivate("Erased", to: peerID, recipientNickname: "Peer", messageID: "erased")
+        #expect(router.wipeOutbox())
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.isEmpty)
+    }
+
+    /// Lead decision 22/10: when the copy of a message written over a Bluetooth session expires
+    /// unacked, the Bluetooth write stands and the message keeps « Envoyé »; no failure is
+    /// reported. A message whose Bluetooth hand-off had no session can still fail.
+    @Test @MainActor
+    func expiredMessageWrittenOverABluetoothSessionReportsNoFailure() async {
+        let peerID = PeerID(str: "00000000000000e6")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let start = clock.now
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Written", to: peerID, recipientNickname: "Peer", messageID: "written")
+        clock.now = start.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["written"])
+
+        mesh.securePeers = []
+        router.sendPrivate("Handshake pending", to: peerID, recipientNickname: "Peer", messageID: "pending")
+        internet.reachablePeers.remove(peerID)
+        clock.now = start.addingTimeInterval(40)
+        scheduler.run(delay: 20)
+
+        clock.now = start.addingTimeInterval(25 * 3_600)
+        router.cleanupExpiredMessages()
+        #expect(dropped == ["pending"])
+    }
+
+    /// The flag that keeps « Envoyé » survives a relaunch (the outbox is stored), and an
+    /// outbox written before it existed decodes without it.
+    @Test
+    func queuedMessageKeepsItsBluetoothWriteAcrossEncoding() throws {
+        var message = MessageRouter.QueuedMessage(content: "Hi", nickname: "Peer", messageID: "m", timestamp: Date())
+        message.afterBluetoothWrite = true
+        let data = try JSONEncoder().encode(message)
+        #expect(try JSONDecoder().decode(MessageRouter.QueuedMessage.self, from: data).afterBluetoothWrite)
+
+        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "afterBluetoothWrite")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        #expect(try JSONDecoder().decode(MessageRouter.QueuedMessage.self, from: legacyData).afterBluetoothWrite == false)
+    }
+
+    /// Lead decision 22/10, as on Android: an early retry leaves the backoff where it was. Its
+    /// next step stays at the scheduled time (at least 30 s after the early retry), instead of
+    /// moving 5 min out.
+    @Test @MainActor
+    func earlyRetryShortlyBeforeTheNextStepLeavesThatStepInPlace() async {
+        let scheduler = ManualRetryScheduler()
+        let (router, internet, clock, last) = internetMessageOnLadder(sends: 6, peerID: PeerID(str: "00000000000000c6"), scheduler: scheduler)
+        #expect(scheduler.pendingDelays == [960])
+
+        clock.now = last.addingTimeInterval(900)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.count == 7)
+
+        clock.now = last.addingTimeInterval(960)
+        scheduler.run(delay: 960)
+        #expect(internet.sentPrivateMessages.count == 8)
+        #expect(scheduler.pendingDelays == [1_800])
+
+        // An early retry 10 s before a step pushes that step to 30 s after itself.
+        clock.now = last.addingTimeInterval(960 + 1_790)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.count == 9)
+        clock.now = last.addingTimeInterval(960 + 1_800)
+        scheduler.run(delay: 1_800)
+        #expect(internet.sentPrivateMessages.count == 9)
+        #expect(scheduler.pendingDelays == [20])
+        clock.now = last.addingTimeInterval(960 + 1_820)
+        scheduler.run(delay: 20)
+        #expect(internet.sentPrivateMessages.count == 10)
+        withExtendedLifetime(router) {}
+    }
+
+    /// Rule 3: out of Bluetooth range with Internet off the message waits in the outbox; it is
+    /// published once Internet comes on, then follows the Internet backoff.
+    @Test @MainActor
+    func messageWithoutRouteWaitsAndGoesOverInternetOnceItComesOn() async {
+        let peerID = PeerID(str: "00000000000000e5")
+        let mesh = MockTransport()
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        let scheduler = ManualRetryScheduler()
+        let router = MessageRouter(transports: [mesh, internet], scheduleAfter: scheduler.schedule)
+
+        router.sendPrivate("Later", to: peerID, recipientNickname: "Peer", messageID: "wait")
+        router.flushOutbox(for: peerID)
+        #expect(mesh.sentPrivateMessages.isEmpty)
+        #expect(internet.sentPrivateMessages.isEmpty)
+        #expect(scheduler.pendingDelays.isEmpty)
+
+        internet.reachablePeers.insert(peerID)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["wait"])
+        #expect(mesh.sentPrivateMessages.isEmpty)
+        #expect(scheduler.pendingDelays == [30])
+    }
+
     /// Per-message Internet state (backoff here, the signed gift wrap in the transport) lives
     /// only while the message is in the outbox: an ack forgets it, and so does an erase, after
     /// which a message queued again goes out on the next flush.

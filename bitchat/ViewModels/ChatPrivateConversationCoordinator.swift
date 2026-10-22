@@ -379,7 +379,7 @@ final class ChatPrivateConversationCoordinator {
             recipientNickname: recipientNickname,
             senderPeerID: context.myPeerID,
             mentions: nil,
-            deliveryStatus: .sending
+            deliveryStatus: .notSentYet
         )
 
         context.appendPrivateMessage(message, to: peerID)
@@ -402,8 +402,9 @@ final class ChatPrivateConversationCoordinator {
         if isConnected || isReachable {
             context.setPrivateDeliveryStatus(.sent, forMessageID: messageID, peerID: peerID)
         }
-        // Otherwise the message stays "sending"; router callbacks move it to
-        // sent once a relay accepts an Internet publication (a hand-off to
+        // Otherwise the message stays « En attente » (queued with no route, or
+        // published over Internet without a relay answer yet); router callbacks
+        // move it to sent once a relay accepts an Internet publication (a hand-off to
         // the relay layer alone proves nothing), carried (📦) when a
         // courier/bridge copy ships, delivered/read on acks, or failed when
         // the outbox TTL expires.

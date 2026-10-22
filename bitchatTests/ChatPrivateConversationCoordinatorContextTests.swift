@@ -1005,9 +1005,10 @@ struct ChatPrivateConversationCoordinatorContextTests {
 
         // Offline but mutual favorite with a Nostr key: routed, and the
         // nickname falls back to the favorite relationship. « Envoyé » waits
-        // for a relay OK (the router's onMessageSent), not the hand-off.
+        // for a relay OK (the router's onMessageSent), not the hand-off: until
+        // then it is « En attente ».
         #expect(context.routedPrivateMessages.map(\.content) == ["hello bob"])
-        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .sending)
+        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .notSentYet)
         #expect(context.privateChats[peerID]?.first?.recipientNickname == "bob")
     }
 
@@ -1032,17 +1033,17 @@ struct ChatPrivateConversationCoordinatorContextTests {
         coordinator.sendPrivateMessage("hello again", to: shortID)
 
         #expect(context.routedPrivateMessages.map(\.content) == ["hello again"])
-        #expect(context.privateChats[shortID]?.first?.deliveryStatus == .sending)
+        #expect(context.privateChats[shortID]?.first?.deliveryStatus == .notSentYet)
         #expect(context.privateChats[shortID]?.first?.recipientNickname == "bob")
     }
 
     /// Field-found: pre-judging reachability here marked the message failed
     /// without ever routing it, so the router's retained outbox, courier
     /// deposits, and bridge drops never got a chance. A fully unreachable
-    /// non-favorite must still be routed and stay "sending" (the router's
-    /// callbacks later move it to carried/delivered or expire it as failed).
+    /// non-favorite must still be routed and wait « En attente » (spec §3 rule 3;
+    /// the router's callbacks later move it to carried/delivered or expire it as failed).
     @Test @MainActor
-    func sendPrivateMessage_routesAndStaysSendingWhenOfflineWithoutMutualFavorite() async {
+    func sendPrivateMessage_routesAndWaitsWhenOfflineWithoutMutualFavorite() async {
         let context = MockChatPrivateConversationContext()
         let coordinator = ChatPrivateConversationCoordinator(context: context)
         let peerID = PeerID(hexData: Data(repeating: 0xCD, count: 32))
@@ -1050,7 +1051,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
         coordinator.sendPrivateMessage("hello?", to: peerID)
 
         #expect(context.routedPrivateMessages.map(\.content) == ["hello?"])
-        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .sending)
+        #expect(context.privateChats[peerID]?.first?.deliveryStatus == .notSentYet)
     }
 
     @Test @MainActor
@@ -1103,5 +1104,30 @@ struct ChatPrivateConversationCoordinatorContextTests {
                                          id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
         #expect(context.nostrDeliveryAcks.map(\.messageID) == ["nostr-1"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["nostr-1"])
+    }
+
+    /// Rule 4, receiving side: the Internet copy of a message already received over Bluetooth
+    /// makes no second bubble, but is acked over Internet so the sender stops resending.
+    @Test @MainActor
+    func internetCopyOfABluetoothMessageIsAckedWithoutASecondBubble() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let convKey = PeerID(hexData: Data(repeating: 0xAD, count: 32))
+        let senderPubkey = "feedface00112244"
+        context.privateChats[convKey] = [BitchatMessage(
+            id: "r4-copy", sender: "alice", content: "Salut", timestamp: Date(), isRelay: false,
+            isPrivate: true, recipientNickname: "me", senderPeerID: convKey,
+            deliveryStatus: .delivered(to: "me", at: Date()), transport: .bluetooth
+        )]
+
+        let payload = NoisePayload(type: .privateMessage,
+                                   data: PrivateMessagePacket(messageID: "r4-copy", content: "Salut").encode()!)
+        coordinator.handlePrivateMessage(payload, senderPubkey: senderPubkey, convKey: convKey,
+                                         id: MockChatPrivateConversationContext.dummyIdentity, messageTimestamp: Date())
+
+        #expect(context.nostrDeliveryAcks.map(\.messageID) == ["r4-copy"])
+        #expect(context.nostrDeliveryAcks.first?.recipientHex == senderPubkey)
+        #expect(context.privateChats[convKey]?.map(\.id) == ["r4-copy"])
+        #expect(context.privateChats[convKey]?.first?.transport == .bluetooth)
     }
 }
