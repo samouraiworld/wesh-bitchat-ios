@@ -138,6 +138,16 @@ final class Conversation: ObservableObject, Identifiable {
         return true
     }
 
+    fileprivate func applyTransport(_ transport: MessageTransport, forMessageID messageID: String) -> Bool {
+        guard let index = physicalIndex(forMessageID: messageID) else { return false }
+        let message = messages[index]
+        message.transport = transport
+        // Write back even when this instance was already changed through a mirrored copy
+        // sharing it, so this conversation's observers re-render too.
+        messages[index] = message
+        return true
+    }
+
     /// Republishes a message without changing state. Used for mirrored
     /// copies that share a BitchatMessage instance: the first conversation's
     /// status apply mutated the shared object, so this conversation's
@@ -506,6 +516,46 @@ final class ConversationStore: ObservableObject {
             changes.send(.statusChanged(id, messageID: messageID, status))
         }
         return true
+    }
+
+    /// Labels every copy of the message with the transport of its last attempt or ack
+    /// (ID-only, like `setDeliveryStatus(_:forMessageID:)`). Returns `false` when no
+    /// conversation holds it.
+    @discardableResult
+    func setTransport(_ transport: MessageTransport, forMessageID messageID: String) -> Bool {
+        guard let ids = conversationIDsByMessageID[messageID] else { return false }
+        return applyTransport(transport, forMessageID: messageID, among: ids)
+    }
+
+    /// The same, limited to the direct conversations of the peer that acked.
+    @discardableResult
+    func setTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        inDirectPeerAliases peerIDs: Set<PeerID>
+    ) -> Bool {
+        guard let indexedIDs = conversationIDsByMessageID[messageID] else { return false }
+        let allowedIDs = Set(peerIDs.map { ConversationID.directPeer($0) })
+        return applyTransport(transport, forMessageID: messageID, among: indexedIDs.intersection(allowedIDs))
+    }
+
+    private func applyTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        among ids: Set<ConversationID>
+    ) -> Bool {
+        // Unchanged everywhere: nothing to republish.
+        guard ids.contains(where: { conversationsByID[$0]?.message(withID: messageID)?.transport != transport }) else {
+            return false
+        }
+        var applied = false
+        for id in ids {
+            guard let conversation = conversationsByID[id],
+                  conversation.applyTransport(transport, forMessageID: messageID) else { continue }
+            applied = true
+            changes.send(.updated(id, messageID: messageID))
+        }
+        return applied
     }
 
     /// Current delivery status of `messageID` in whichever conversation

@@ -141,6 +141,10 @@ private extension ChatViewModelBootstrapper {
             if case .failed = viewModel.conversations.deliveryStatus(forMessageID: messageID) { return }
             viewModel.conversations.setDeliveryStatus(.sent, forMessageID: messageID)
         }
+        // « Bluetooth » / « Internet » follows the last send attempt until an ack sets it.
+        viewModel.messageRouter.onMessageAttempted = { [weak viewModel] messageID, _, transport in
+            viewModel?.conversations.setTransport(transport, forMessageID: messageID)
+        }
         viewModel.commandProcessor.contextProvider = viewModel
         viewModel.commandProcessor.meshService = viewModel.meshService
     }

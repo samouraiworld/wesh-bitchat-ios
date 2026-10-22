@@ -1002,6 +1002,37 @@ struct MessageRouterTests {
         #expect(sent == ["ok1"])
     }
 
+    /// The « Bluetooth » / « Internet » label follows each attempt: Internet while the peer is
+    /// out of range, Bluetooth once a resend goes over the mesh.
+    @Test @MainActor
+    func eachAttemptReportsTheTransportItWentThrough() async {
+        let peerID = PeerID(str: "00000000000000d1")
+        let mesh = MockTransport()
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [mesh, internet], scheduleAfter: ManualRetryScheduler().schedule)
+        var attempts: [MessageTransport] = []
+        router.onMessageAttempted = { messageID, attemptPeerID, transport in
+            #expect(messageID == "label1")
+            #expect(attemptPeerID == peerID)
+            attempts.append(transport)
+        }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "label1")
+        #expect(attempts == [.internet])
+
+        mesh.connectedPeers.insert(peerID)
+        router.flushOutbox(for: peerID)
+        #expect(mesh.sentPrivateMessages.count == 1)
+        #expect(attempts == [.internet, .bluetooth])
+
+        // Nothing queued for the peer any more: no attempt, no label change.
+        router.markDelivered("label1")
+        router.flushOutbox(for: peerID)
+        #expect(attempts == [.internet, .bluetooth])
+    }
+
     /// Per-message Internet state (backoff here, the signed gift wrap in the transport) lives
     /// only while the message is in the outbox: an ack forgets it, and so does an erase, after
     /// which a message queued again goes out on the next flush.

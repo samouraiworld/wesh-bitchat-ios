@@ -29,6 +29,13 @@ protocol ChatDeliveryContext: AnyObject {
         forMessageID messageID: String,
         inDirectPeerAliases peerIDs: Set<PeerID>
     ) -> Bool
+    /// Labels the acked message, in the acking peer's direct conversations only, with the
+    /// transport the ack came over.
+    func setTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        inDirectPeerAliases peerIDs: Set<PeerID>
+    )
     /// Current delivery status of the message in whichever conversation holds it.
     func deliveryStatus(forMessageID messageID: String) -> DeliveryStatus?
     /// Message IDs across all direct conversations (read-receipt pruning).
@@ -68,6 +75,14 @@ extension ChatViewModel: ChatDeliveryContext {
             forMessageID: messageID,
             inDirectPeerAliases: peerIDs
         )
+    }
+
+    func setTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        inDirectPeerAliases peerIDs: Set<PeerID>
+    ) {
+        conversations.setTransport(transport, forMessageID: messageID, inDirectPeerAliases: peerIDs)
     }
 
     func deliveryStatus(forMessageID messageID: String) -> DeliveryStatus? {
@@ -193,6 +208,8 @@ final class ChatDeliveryCoordinator {
               ) else {
             return false
         }
+        // Receipts reaching this coordinator come over the mesh.
+        context.setTransport(.bluetooth, forMessageID: messageID, inDirectPeerAliases: peerIDAliases)
         context.notifyUIChanged()
         return true
     }

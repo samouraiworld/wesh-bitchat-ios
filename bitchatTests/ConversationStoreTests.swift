@@ -1244,6 +1244,41 @@ struct ConversationStoreTests {
         #expect(store.conversation(for: .mesh).message(withID: messageID)?.deliveryStatus == .sent)
     }
 
+    @Test("the transport label follows the given aliases, or every copy when ID-only")
+    @MainActor
+    func transportLabelIsScopedLikeReceipts() {
+        let store = ConversationStore()
+        let ackingPeer = PeerID(str: "2122232425262728")
+        let otherPeer = PeerID(str: "3132333435363738")
+        let acking = ConversationID.directPeer(ackingPeer)
+        let other = ConversationID.directPeer(otherPeer)
+        let messageID = "labelled"
+        store.upsertByID(makeMessage(id: messageID, timestamp: 1, isPrivate: true, deliveryStatus: .sent), in: acking)
+        store.upsertByID(makeMessage(id: messageID, timestamp: 1, isPrivate: true, deliveryStatus: .sent), in: other)
+        var updatedIDs: [ConversationID] = []
+        let cancellable = store.changes.sink { change in
+            if case .updated(let id, messageID) = change { updatedIDs.append(id) }
+        }
+        defer { cancellable.cancel() }
+
+        #expect(store.setTransport(.bluetooth, forMessageID: messageID, inDirectPeerAliases: [ackingPeer]))
+        #expect(store.conversation(for: acking).message(withID: messageID)?.transport == .bluetooth)
+        #expect(store.conversation(for: other).message(withID: messageID)?.transport == nil)
+        #expect(updatedIDs == [acking])
+
+        #expect(store.setTransport(.internet, forMessageID: messageID))
+        #expect(store.conversation(for: acking).message(withID: messageID)?.transport == .internet)
+        #expect(store.conversation(for: other).message(withID: messageID)?.transport == .internet)
+        #expect(updatedIDs.count == 3)
+
+        // Unchanged everywhere: no republish.
+        #expect(!store.setTransport(.internet, forMessageID: messageID))
+        #expect(updatedIDs.count == 3)
+
+        #expect(!store.setTransport(.internet, forMessageID: "unknown"))
+        #expect(!store.setTransport(.internet, forMessageID: messageID, inDirectPeerAliases: []))
+    }
+
     // MARK: - Invariant audit (field observability)
 
     /// A store exercised through every intent family: public + geohash +

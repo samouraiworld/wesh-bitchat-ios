@@ -14,6 +14,13 @@ import struct Foundation.Date
 import struct Foundation.TimeInterval
 import struct Foundation.UUID
 
+/// The transport a private message last travelled on: its last send attempt, then its ack.
+/// Shown as « Bluetooth » / « Internet ». Kept on this device only, never sent.
+public enum MessageTransport: String, Codable, Sendable {
+    case bluetooth
+    case internet
+}
+
 /// Represents a user-visible message in the BitChat system.
 /// Handles both broadcast messages and private encrypted messages,
 /// with support for mentions, replies, and delivery tracking.
@@ -33,6 +40,8 @@ public final class BitchatMessage: Codable {
     /// True when this message reached us across a mesh bridge (signed by its
     /// author for an internet rendezvous) rather than over local radio.
     public let isBridged: Bool
+    /// Private messages only; `nil` until a send attempt, an ack or the receipt sets it.
+    public var transport: MessageTransport?
 
     // Cached formatted text (not included in Codable)
     private var _cachedFormattedText: [String: AttributedString] = [:]
@@ -49,7 +58,7 @@ public final class BitchatMessage: Codable {
     enum CodingKeys: String, CodingKey {
         case id, sender, content, timestamp, isRelay, originalSender
         case isPrivate, recipientNickname, senderPeerID, mentions, deliveryStatus
-        case isBridged
+        case isBridged, transport
     }
 
     public init(from decoder: any Decoder) throws {
@@ -69,6 +78,8 @@ public final class BitchatMessage: Codable {
         deliveryStatus = try container.decodeIfPresent(DeliveryStatus.self, forKey: .deliveryStatus) ?? .notSentYet
         // Absent in archives written before bridging existed.
         isBridged = try container.decodeIfPresent(Bool.self, forKey: .isBridged) ?? false
+        // Absent in archives written before the label existed.
+        transport = try container.decodeIfPresent(MessageTransport.self, forKey: .transport)
     }
 
     public init(
@@ -83,7 +94,8 @@ public final class BitchatMessage: Codable {
         senderPeerID: PeerID? = nil,
         mentions: [String]? = nil,
         deliveryStatus: DeliveryStatus? = nil,
-        isBridged: Bool = false
+        isBridged: Bool = false,
+        transport: MessageTransport? = nil
     ) {
         self.id = id ?? UUID().uuidString
         self.sender = sender
@@ -97,6 +109,7 @@ public final class BitchatMessage: Codable {
         self.mentions = mentions
         self.deliveryStatus = deliveryStatus ?? (isPrivate ? .sending : .notSentYet)
         self.isBridged = isBridged
+        self.transport = transport
     }
 }
 
@@ -115,7 +128,8 @@ extension BitchatMessage: Equatable {
                lhs.senderPeerID == rhs.senderPeerID &&
                lhs.mentions == rhs.mentions &&
                lhs.deliveryStatus == rhs.deliveryStatus &&
-               lhs.isBridged == rhs.isBridged
+               lhs.isBridged == rhs.isBridged &&
+               lhs.transport == rhs.transport
     }
 }
 

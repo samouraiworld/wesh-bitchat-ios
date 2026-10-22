@@ -332,6 +332,8 @@ final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Senda
     func isPeerConnected(_ peerID: PeerID) -> Bool { false }
 
     var unackedSendsAreBounded: Bool { false }
+
+    var messageTransport: MessageTransport { .internet }
     
     func isPeerReachable(_ peerID: PeerID) -> Bool {
         // Callers address peers by either the short 16-hex ID or the full

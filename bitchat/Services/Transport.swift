@@ -92,6 +92,8 @@ protocol Transport: AnyObject {
     /// a contact whose QR carries an npub may never turn Internet on, so silence there is normal
     /// and the 24h outbox TTL bounds the copy instead.
     var unackedSendsAreBounded: Bool { get }
+    /// The label a private message sent or acked through this transport carries.
+    var messageTransport: MessageTransport { get }
     /// Whether a send to this peer is likely to leave the device promptly.
     /// Distinct from reachability: Nostr claims any favorite with a known
     /// npub as reachable even with no relay connection, where a send only
@@ -200,6 +202,8 @@ extension Transport {
     ) {}
 
     var unackedSendsAreBounded: Bool { true }
+
+    var messageTransport: MessageTransport { .bluetooth }
 
     func sendMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
         sendMessage(content, mentions: mentions)
