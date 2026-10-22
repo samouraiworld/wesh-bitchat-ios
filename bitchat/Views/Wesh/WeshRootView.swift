@@ -1071,6 +1071,7 @@ private struct WeshMessageBubble: View {
         Text(message.timestamp, style: .time)
         if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
         else if own { Text(WeshDelivery.publicLabel(message.deliveryStatus)) }
+        if privateChat, !isSystem, let transport = message.transport { Text(WeshDelivery.transportLabel(transport)) }
     }
     var body: some View {
         HStack {
@@ -1100,6 +1101,14 @@ enum WeshDelivery {
         case .failed: return PaveCopy.text("pave.wesh.delivery.publicFailed", bundle: bundle, locale: locale)
         case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.publicPartial", bundle: bundle, locale: locale)
         default: return PaveCopy.text("pave.wesh.delivery.publicUnconfirmed", bundle: bundle, locale: locale)
+        }
+    }
+
+    /// « Bluetooth » / « Internet »: how the private message last travelled.
+    static func transportLabel(_ transport: MessageTransport, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        switch transport {
+        case .bluetooth: return PaveCopy.text("pave.wesh.transport.bluetooth", bundle: bundle, locale: locale)
+        case .internet: return PaveCopy.text("pave.wesh.transport.internet", bundle: bundle, locale: locale)
         }
     }
 

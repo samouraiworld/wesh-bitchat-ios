@@ -420,6 +420,7 @@ struct ChatTransportEventCoordinatorContextTests {
         await drainMainActorTasks()
         #expect(context.handledPrivateMessages.map(\.id) == ["pm-1"])
         #expect(context.handledPrivateMessages.first?.sender == "alice")
+        #expect(context.handledPrivateMessages.first?.transport == .bluetooth)
         #expect(context.meshDeliveryAcks.count == 1)
         #expect(context.meshDeliveryAcks.first?.messageID == "pm-1")
 

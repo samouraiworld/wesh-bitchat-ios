@@ -386,7 +386,8 @@ private extension ChatTransportEventCoordinator {
                         ? context.myPeerID
                         : stablePeerID,
                     mentions: message.mentions,
-                    deliveryStatus: message.deliveryStatus
+                    deliveryStatus: message.deliveryStatus,
+                    transport: message.transport
                 )
                 context.appendPrivateMessage(migrated, to: stablePeerID)
             }
@@ -431,7 +432,8 @@ private extension ChatTransportEventCoordinator {
                 isPrivate: true,
                 recipientNickname: context.nickname,
                 senderPeerID: peerID,
-                mentions: mentions.isEmpty ? nil : mentions
+                mentions: mentions.isEmpty ? nil : mentions,
+                transport: .bluetooth
             )
             context.handlePrivateMessage(message)
             context.sendMeshDeliveryAck(for: packet.messageID, to: peerID)
@@ -508,7 +510,8 @@ private extension ChatTransportEventCoordinator {
                 isPrivate: true,
                 recipientNickname: context.nickname,
                 senderPeerID: peerID,
-                deliveryStatus: .delivered(to: context.nickname, at: timestamp)
+                deliveryStatus: .delivered(to: context.nickname, at: timestamp),
+                transport: .bluetooth
             )
             context.handlePrivateMessage(message)
 

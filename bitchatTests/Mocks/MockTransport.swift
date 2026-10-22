@@ -72,6 +72,8 @@ final class MockTransport: Transport, MeshIdentityRecovering,
     var connectedPeers: Set<PeerID> = []
     var reachablePeers: Set<PeerID> = []
     var unackedSendsAreBounded = true
+    /// Tests model Internet as the transport whose unacked sends are unbounded.
+    var messageTransport: MessageTransport { unackedSendsAreBounded ? .bluetooth : .internet }
     /// Peers with an established secure session. `nil` mirrors the protocol
     /// default (prompt delivery), so connected peers stay "secure" for tests
     /// that never care about the distinction.

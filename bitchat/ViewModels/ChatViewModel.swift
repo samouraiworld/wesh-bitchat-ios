@@ -551,6 +551,14 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.setDeliveryStatus(status, forMessageID: messageID, in: .directPeer(peerID))
     }
 
+    /// Labels one of our private messages with the transport its ack came over. An ack naming
+    /// a message we received changes nothing.
+    @MainActor
+    func setPrivateMessageTransport(_ transport: MessageTransport, forMessageID messageID: String, peerID: PeerID) {
+        guard isOutgoingPrivateMessage(messageID, toAny: [peerID]) else { return }
+        conversations.setTransport(transport, forMessageID: messageID, inDirectPeerAliases: [peerID])
+    }
+
     /// Flags the peer's chat as unread (store unread state).
     @MainActor
     func markPrivateChatUnread(_ peerID: PeerID) {

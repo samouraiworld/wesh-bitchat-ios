@@ -114,7 +114,8 @@ final class PrivateChatManager: ObservableObject {
                         recipientNickname: message.recipientNickname,
                         senderPeerID: message.senderPeerID == meshService.myPeerID ? meshService.myPeerID : peerID,
                         mentions: message.mentions,
-                        deliveryStatus: message.deliveryStatus
+                        deliveryStatus: message.deliveryStatus,
+                        transport: message.transport
                     )
                     // Store append dedups by message ID (skips ones the
                     // target chat already has).
@@ -175,7 +176,8 @@ final class PrivateChatManager: ObservableObject {
                         recipientNickname: message.recipientNickname,
                         senderPeerID: peerID,
                         mentions: message.mentions,
-                        deliveryStatus: message.deliveryStatus
+                        deliveryStatus: message.deliveryStatus,
+                        transport: message.transport
                     )
                     if store.append(updatedMessage, to: .directPeer(peerID)) {
                         consolidatedCount += 1
