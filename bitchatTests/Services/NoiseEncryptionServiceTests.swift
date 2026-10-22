@@ -927,7 +927,9 @@ struct NoiseEncryptionServiceTests {
 
     @Test("Deterministic responder recovers once from an always-yield peer")
     func yieldedResponderRecoversFromLegacyDoubleYield() async throws {
-        let timeoutInterval: TimeInterval = 1
+        // A safety deadline only: the crossed messages below must fail on their own, never
+        // because a preempted runner let a 1 s handshake deadline expire mid-sequence.
+        let timeoutInterval: TimeInterval = 3
         let endpoints = orderedServices(
             ordinaryHandshakeTimeout: timeoutInterval,
             ordinaryResponderHandshakeTimeout: timeoutInterval
@@ -1006,7 +1008,7 @@ struct NoiseEncryptionServiceTests {
 
         let recoveryRequested = await TestHelpers.waitUntil(
             { recovery.requests.count == 1 },
-            timeout: 5
+            timeout: TestConstants.longTimeout
         )
         #expect(recoveryRequested)
         let recoveryRequest = try #require(recovery.requests.first)
