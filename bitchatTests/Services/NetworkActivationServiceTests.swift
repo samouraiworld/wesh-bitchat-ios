@@ -122,7 +122,7 @@ struct NetworkActivationInternetOffTests {
     }
 
     @Test
-    func onlyTheUsersOffDiscardsSendsWaitingForARelay() {
+    func turningInternetOffDiscardsSendsWaitingForARelayButALostNetworkKeepsThem() async {
         let (service, relay, reachability) = makeService()
         defer { service.stopForPanic() }
         service.start()
@@ -130,7 +130,11 @@ struct NetworkActivationInternetOffTests {
 
         // Losing the network keeps them: they leave when it comes back.
         reachability.set(false)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(!service.activationAllowed)
         reachability.set(true)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(service.activationAllowed)
         #expect(relay.discardCallCount == 0)
 
         service.setUserInternetEnabled(false)

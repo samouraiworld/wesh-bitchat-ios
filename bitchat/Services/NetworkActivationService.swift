@@ -39,8 +39,10 @@ final class NetworkActivationService: ObservableObject {
     @Published private(set) var userInternetEnabled: Bool = false
 
     /// BLE does not depend on this opt-in. Wesh nearby mode disables all relay activation.
-    /// Turning it off also drops events still waiting for a relay, so nothing queued before the
-    /// switch leaves when Internet comes back on. A lost network keeps them.
+    /// Turning it off (the user's toggle, or a hard Tor fault) also drops events still waiting
+    /// for a relay, so nothing queued before leaves when Internet comes back on. Private
+    /// messages stay in the app outbox; receipts and favorite notices are dropped for good.
+    /// A lost network keeps the queue.
     func setUserInternetEnabled(_ enabled: Bool) {
         let turnedOff = userInternetEnabled && !enabled
         userInternetEnabled = enabled
