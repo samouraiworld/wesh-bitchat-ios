@@ -27,11 +27,12 @@ enum WeshDebugContactSeed {
         return Request(noiseKeyHex: parts[0].lowercased(), npub: parts[1], nickname: parts.count == 3 ? parts[2] : "Contact")
     }
 
-    /// Records the contact as a verified QR scan with a valid npub proof would, then marks its
-    /// fingerprint verified. False, with nothing recorded, when a scanned QR would not bind it.
+    /// In the order of a verified QR scan with a valid npub proof: the fingerprint is marked
+    /// verified (`markVerified` returns whether that was saved), then the contact is recorded.
+    /// False, with nothing marked or recorded, when a scanned QR would not bind it.
     @MainActor
     static func seed(_ request: Request, into trust: WeshQRTrust, ownedNpubs: Set<String>?,
-                     markVerified: (String) -> Void) -> Bool {
+                     markVerified: (String) -> Bool) -> Bool {
         trust.reloadIfNeeded()
         guard trust.storageState == .available,
               let key = Data(hexString: request.noiseKeyHex), key.count == 32 else { return false }
@@ -41,10 +42,9 @@ enum WeshDebugContactSeed {
                                             noiseKeyHex: request.noiseKeyHex, ownedNpubs: ownedNpubs,
                                             contacts: trust.contacts)
         guard case .bound(let npub, _, let unbinding) = outcome, npub == request.npub, unbinding.isEmpty,
-              trust.enroll(sessionKey: key, nickname: request.nickname,
-                           outcome: .bound(npub: npub, proven: true, unbinding: [])) else { return false }
-        markVerified(key.sha256Fingerprint())
-        return true
+              markVerified(key.sha256Fingerprint()) else { return false }
+        return trust.enroll(sessionKey: key, nickname: request.nickname,
+                            outcome: .bound(npub: npub, proven: true, unbinding: []))
     }
 }
 
@@ -58,10 +58,14 @@ extension ChatViewModel {
             print("WESH_DEBUG_IDENTITY noise=\(meshService.noiseStaticPublicKeyData().hexEncodedString()) npub=\(npub)")
         }
         guard let request = WeshDebugContactSeed.request(from: environment) else { return }
+        // Same identity-store conditions as the real enrollment (ChatVerificationCoordinator).
         let enrolled = WeshDebugContactSeed.seed(request, into: .shared, ownedNpubs: try? idBridge.locallyOwnedNpubs()) { fingerprint in
+            guard identityManager.isPersistenceAvailable, !identityManager.hasPendingPersistenceChanges else { return false }
             identityManager.setVerified(fingerprint: fingerprint, verified: true)
             identityManager.forceSave()
+            guard identityManager.isPersistenceAvailable, !identityManager.hasPendingPersistenceChanges else { return false }
             peerIdentityStore.setVerified(fingerprint, verified: true)
+            return true
         }
         print("WESH_DEBUG_SEED_CONTACT \(enrolled ? "enrolled" : "refused")")
     }

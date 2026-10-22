@@ -25,7 +25,7 @@ struct WeshDebugContactSeedTests {
         let trust = WeshQRTrust()
         var verified: [String] = []
         let request = WeshDebugContactSeed.Request(noiseKeyHex: noiseA, npub: fixtureNpub, nickname: "Nora")
-        #expect(WeshDebugContactSeed.seed(request, into: trust, ownedNpubs: []) { verified.append($0) })
+        #expect(WeshDebugContactSeed.seed(request, into: trust, ownedNpubs: []) { verified.append($0); return true })
 
         let key = try #require(Data(hexString: noiseA))
         let contact = try #require(trust.contacts.first)
@@ -53,10 +53,19 @@ struct WeshDebugContactSeedTests {
         for (request, owned, trust) in cases {
             let before = trust.contacts
             var verified: [String] = []
-            #expect(!WeshDebugContactSeed.seed(request, into: trust, ownedNpubs: owned) { verified.append($0) }, "\(request.nickname)")
+            #expect(!WeshDebugContactSeed.seed(request, into: trust, ownedNpubs: owned) { verified.append($0); return true }, "\(request.nickname)")
             #expect(trust.contacts == before, "\(request.nickname)")
             #expect(verified.isEmpty, "\(request.nickname)")
         }
+    }
+
+    /// A verification the identity store could not save (locked, pending changes) records no contact.
+    @Test func unsavedVerificationRecordsNoContact() {
+        let trust = WeshQRTrust()
+        let request = WeshDebugContactSeed.Request(noiseKeyHex: noiseA, npub: fixtureNpub, nickname: "Nora")
+        #expect(!WeshDebugContactSeed.seed(request, into: trust, ownedNpubs: []) { _ in false })
+        #expect(trust.contacts.isEmpty)
+        #expect(trust.fingerprints.isEmpty)
     }
 
     /// Release builds have no seed entry point: the hook's file is all `#if DEBUG`, and every
@@ -66,18 +75,12 @@ struct WeshDebugContactSeedTests {
             .deletingLastPathComponent()  // Services
             .deletingLastPathComponent()  // bitchatTests
             .deletingLastPathComponent()  // repo root
-        let hookFile = root.appendingPathComponent("bitchat/Services/WeshDebugContactSeed.swift")
-        let hookLines = try String(contentsOf: hookFile, encoding: .utf8)
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        #expect(hookLines.first == "#if DEBUG")
-        #expect(hookLines.last == "#endif")
-
+        let hookFile = root.appendingPathComponent("bitchat/Services/WeshDebugContactSeed.swift").standardizedFileURL
         let markers = ["WeshDebugContactSeed", "applyWeshDebugHooks", "WESH_DEBUG_"]
         var mentions = 0
         let sources = try #require(FileManager.default.enumerator(at: root.appendingPathComponent("bitchat"), includingPropertiesForKeys: nil))
-        for case let url as URL in sources where url.pathExtension == "swift" && url.lastPathComponent != hookFile.lastPathComponent {
+        for case let url as URL in sources where url.pathExtension == "swift" {
+            let isHookFile = url.standardizedFileURL.path == hookFile.path
             var conditions: [Bool] = []
             for line in try String(contentsOf: url, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false) {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -87,8 +90,9 @@ struct WeshDebugContactSeedTests {
                     conditions[conditions.count - 1] = false
                 } else if trimmed.hasPrefix("#endif"), !conditions.isEmpty {
                     conditions.removeLast()
-                } else if markers.contains(where: trimmed.contains) {
-                    mentions += 1
+                } else if isHookFile ? !trimmed.isEmpty : markers.contains(where: trimmed.contains) {
+                    // Every line of the hook's file, and every mention elsewhere, compiles in Debug only.
+                    if !isHookFile { mentions += 1 }
                     #expect(conditions.contains(true), "\(url.lastPathComponent): \(trimmed)")
                 }
             }
