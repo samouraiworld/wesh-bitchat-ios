@@ -71,6 +71,7 @@ final class MockTransport: Transport, MeshIdentityRecovering,
 
     var connectedPeers: Set<PeerID> = []
     var reachablePeers: Set<PeerID> = []
+    var unackedSendsAreBounded = true
     /// Peers with an established secure session. `nil` mirrors the protocol
     /// default (prompt delivery), so connected peers stay "secure" for tests
     /// that never care about the distinction.
@@ -239,11 +240,6 @@ final class MockTransport: Transport, MeshIdentityRecovering,
     }
 
     // MARK: - Remaining mesh capabilities (recording stubs)
-
-    private(set) var sentVouchAttestations: [(Data, PeerID)] = []
-    func sendVouchAttestations(_ payload: Data, to peerID: PeerID) {
-        sentVouchAttestations.append((payload, peerID))
-    }
 
     var archivedPublicMessages: [ArchivedPublicMessage] = []
     private(set) var purgedAllArchived = false

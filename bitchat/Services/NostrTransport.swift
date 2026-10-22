@@ -6,7 +6,6 @@ import Combine
 // Minimal Nostr transport conforming to Transport for offline sending
 final class NostrTransport: Transport, @unchecked Sendable {
     struct Dependencies {
-        let outboundOwner: NostrOutboundOwner
         let notificationCenter: NotificationCenter
         let loadFavorites: @MainActor () -> [Data: FavoritesPersistenceService.FavoriteRelationship]
         let favoriteStatusForNoiseKey: @MainActor (Data) -> FavoritesPersistenceService.FavoriteRelationship?
@@ -32,7 +31,6 @@ final class NostrTransport: Transport, @unchecked Sendable {
         let weshIsBlocked: (@MainActor (Data) -> Bool)?
 
         init(
-            outboundOwner: NostrOutboundOwner,
             notificationCenter: NotificationCenter,
             loadFavorites: @escaping @MainActor () -> [Data: FavoritesPersistenceService.FavoriteRelationship],
             favoriteStatusForNoiseKey: @escaping @MainActor (Data) -> FavoritesPersistenceService.FavoriteRelationship?,
@@ -47,7 +45,6 @@ final class NostrTransport: Transport, @unchecked Sendable {
             weshOnline: (@MainActor () -> AnyPublisher<Bool, Never>)? = nil,
             weshIsBlocked: (@MainActor (Data) -> Bool)? = nil
         ) {
-            self.outboundOwner = outboundOwner
             self.notificationCenter = notificationCenter
             self.loadFavorites = loadFavorites
             self.favoriteStatusForNoiseKey = favoriteStatusForNoiseKey
@@ -59,8 +56,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             // Default pacer drives its throttle through the same injected
             // scheduler, so tests that step scheduleAfter manually keep
             // control of the ack cadence.
-            self.ackPacer = ackPacer ?? AckPacer(owner: outboundOwner, scheduleAfter: scheduleAfter)
-            precondition(self.ackPacer.owner === outboundOwner, "ACK pacer must retain the same original outbound owner")
+            self.ackPacer = ackPacer ?? AckPacer(scheduleAfter: scheduleAfter)
             self.weshRecipients = weshRecipients
             self.weshOnline = weshOnline
             self.weshIsBlocked = weshIsBlocked
@@ -83,7 +79,6 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 weshIsBlocked = isBlocked ?? { _ in true }
             }
             return Dependencies(
-                outboundOwner: .originalProcess,
                 notificationCenter: .default,
                 loadFavorites: { FavoritesPersistenceService.shared.favorites },
                 favoriteStatusForNoiseKey: { FavoritesPersistenceService.shared.getFavoriteStatus(for: $0) },
@@ -130,66 +125,58 @@ final class NostrTransport: Transport, @unchecked Sendable {
     final class AckPacer: @unchecked Sendable {
         typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-        let owner: NostrOutboundOwner
-        private let queue: DispatchQueue
-        private struct Pending {
-            let ticket: NostrOutboundOwner.CallbackTicket
-            let send: (NostrOutboundOwner.CallbackTicket) -> Void
-        }
-        private var pending: [Pending] = []
+        private let queue = DispatchQueue(label: "chat.bitchat.nostr-ack-pacer")
+        private var pending: [() -> Void] = []
         private var isSending = false
         private let interval: TimeInterval = TransportConfig.nostrReadAckInterval
         private let scheduleAfter: Scheduler
 
-        /// An injected queue MUST be serial. Nil retains the original production serial queue.
-        init(owner: NostrOutboundOwner, queue: DispatchQueue? = nil, scheduleAfter: @escaping Scheduler = { delay, action in
+        init(scheduleAfter: @escaping Scheduler = { delay, action in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: action)
         }) {
-            self.owner = owner
-            self.queue = queue ?? DispatchQueue(label: "chat.bitchat.nostr-ack-pacer")
             self.scheduleAfter = scheduleAfter
         }
 
-        func enqueue(ticket: NostrOutboundOwner.CallbackTicket, _ send: @escaping (NostrOutboundOwner.CallbackTicket) -> Void) {
-            guard case .reserved(let appended) = owner.reserveCallback(kind: .ackQueueAppend, parent: .child(ticket)) else { return }
+        func enqueue(_ send: @escaping () -> Void) {
             queue.async {
-                self.owner.callbackEntered(appended)
-                defer { self.owner.callbackBodyReturned(appended) }
-                self.pending.append(Pending(ticket: ticket, send: send))
+                self.pending.append(send)
                 self.processNext()
             }
         }
 
-        /// Must be called on `queue`; callback return is never a child-task join.
+        private var epoch: UInt64 = 0
+
+        /// Bumped by the emergency erase. Sends and acks captured before it are dropped when
+        /// they run, so nothing reserved under the pre-erase identity leaves afterwards. Shared
+        /// in production like the pacer; isolated per `Dependencies` in tests.
+        var eraseEpoch: UInt64 { queue.sync { epoch } }
+
+        /// Erase: drops every ack still waiting for its turn and fences every send captured
+        /// before this point. The send already handed to the relay manager is not recalled.
+        func discardWorkBeforeErase() {
+            queue.sync {
+                epoch &+= 1
+                pending.removeAll()
+            }
+        }
+
+        /// Must be called on `queue`.
         private func processNext() {
             guard !isSending, !pending.isEmpty else { return }
             isSending = true
-            let next = pending.removeFirst()
-            owner.callbackEntered(next.ticket)
-            next.send(next.ticket)
-            owner.callbackBodyReturned(next.ticket)
-            guard case .reserved(let reset) = owner.reserveCallback(kind: .ackResetScheduler, parent: .child(next.ticket)) else { return }
-            let owner = self.owner
+            let send = pending.removeFirst()
+            send()
             scheduleAfter(interval) { [weak self] in
-                owner.callbackEntered(reset)
-                defer { owner.callbackBodyReturned(reset) }
                 guard let self else { return }
-                guard case .reserved(let queued) = owner.reserveCallback(kind: .ackResetQueue, parent: .child(reset)) else { return }
                 self.queue.async {
-                    owner.callbackEntered(queued)
-                    defer { owner.callbackBodyReturned(queued) }
                     self.isSending = false
                     self.processNext()
                 }
             }
         }
     }
-    static let sharedAckPacer = AckPacer(owner: .originalProcess)
+    static let sharedAckPacer = AckPacer()
     private let dependencies: Dependencies
-
-    func captureOutboundPanicBinding() -> NostrOutboundPanicBinding {
-        dependencies.outboundOwner.captureOutboundPanicBinding()
-    }
     private var favoriteStatusObserver: NSObjectProtocol?
 
     // Reachability Cache (thread-safe)
@@ -202,7 +189,6 @@ final class NostrTransport: Transport, @unchecked Sendable {
     private var weshNpubs: [PeerID: String]?
     private var weshIsOnline = false
     private var weshCancellables: Set<AnyCancellable> = []
-    private var sourceDetachmentEndpoints: [NostrSourceDetachmentEndpoint] = []
     private let queue = DispatchQueue(label: "nostr.transport.state", attributes: .concurrent)
 
     @MainActor
@@ -212,122 +198,47 @@ final class NostrTransport: Transport, @unchecked Sendable {
         dependencies: Dependencies? = nil
     ) {
         self.dependencies = dependencies ?? .live(idBridge: idBridge)
-        let sourceOwner = self.dependencies.outboundOwner
 
         if let weshRecipients = self.dependencies.weshRecipients {
             // Wesh: QR contacts only; favorites are never consulted.
             queue.sync(flags: .barrier) { self.weshNpubs = [:] }
-            switch sourceOwner.beginSourceInstallation(kind: .weshRecipients) {
-            case .accepted(let recipientsSource):
-                let recipientsCancellable = weshRecipients()
-                    .sink { [weak self, weak sourceOwner] recipients in
-                        let event = sourceOwner?.sourceEventEntered(recipientsSource)
-                        defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                        guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                        guard let self else { return }
-                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRecipientsState, permit: permit) else { return }
-                        self.queue.async(flags: .barrier) {
-                            self.dependencies.outboundOwner.sourceWriteEntered(write)
-                            defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                            self.weshNpubs = recipients
-                        }
-                    }
-                recipientsCancellable.store(in: &weshCancellables)
-                let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(recipientsSource,
-                    cancellable: recipientsCancellable), to: recipientsSource)
-                let installationReturn = sourceOwner.noteSourceInstallationReturned(recipientsSource)
-                finishOwnedEndpoint(recipientsSource, bindingID: endpointBinding, installationReturn: installationReturn)
-            case .refusedBeforeRoot: break
-            }
-            if let weshOnline = self.dependencies.weshOnline {
-                switch sourceOwner.beginSourceInstallation(kind: .weshOnline) {
-                case .accepted(let onlineSource):
-                    let onlineCancellable = weshOnline()
-                        .sink { [weak self, weak sourceOwner] online in
-                            let event = sourceOwner?.sourceEventEntered(onlineSource)
-                            defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                            guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                            guard let self else { return }
-                            guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshOnlineState, permit: permit) else { return }
-                            self.queue.async(flags: .barrier) {
-                                self.dependencies.outboundOwner.sourceWriteEntered(write)
-                                defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                                self.weshIsOnline = online
-                            }
-                        }
-                    onlineCancellable.store(in: &weshCancellables)
-                    let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(onlineSource,
-                        cancellable: onlineCancellable), to: onlineSource)
-                    let installationReturn = sourceOwner.noteSourceInstallationReturned(onlineSource)
-                    finishOwnedEndpoint(onlineSource, bindingID: endpointBinding, installationReturn: installationReturn)
-                case .refusedBeforeRoot: break
+            weshRecipients()
+                .sink { [weak self] recipients in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.weshNpubs = recipients }
                 }
-            }
-            switch sourceOwner.beginSourceInstallation(kind: .weshRelayConnectivity) {
-            case .accepted(let relaySource):
-                let relayCancellable = self.dependencies.relayConnectivity()
-                    .sink { [weak self, weak sourceOwner] connected in
-                        let event = sourceOwner?.sourceEventEntered(relaySource)
-                        defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                        guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                        guard let self else { return }
-                        guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .weshRelayState, permit: permit) else { return }
-                        self.queue.async(flags: .barrier) {
-                            self.dependencies.outboundOwner.sourceWriteEntered(write)
-                            defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                            self.relaysConnected = connected
-                        }
-                    }
-                relayConnectivityCancellable = relayCancellable
-                let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(relaySource,
-                    cancellable: relayCancellable), to: relaySource)
-                let installationReturn = sourceOwner.noteSourceInstallationReturned(relaySource)
-                finishOwnedEndpoint(relaySource, bindingID: endpointBinding, installationReturn: installationReturn)
-            case .refusedBeforeRoot: break
-            }
+                .store(in: &weshCancellables)
+            self.dependencies.weshOnline?()
+                .sink { [weak self] online in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.weshIsOnline = online }
+                }
+                .store(in: &weshCancellables)
+            relayConnectivityCancellable = self.dependencies.relayConnectivity()
+                .sink { [weak self] connected in
+                    guard let self else { return }
+                    self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                }
             return
         }
 
         setupObservers()
 
-        switch sourceOwner.beginColdProvider(purpose: .legacyFavoritesWarm) {
-        case .accepted(let permission):
-            // Settlement follows both the provider and the original synchronous cache barrier.
-            defer { sourceOwner.noteColdProviderReturned(permission) }
-            // Synchronously warm the cache to avoid startup race
-            let favorites = self.dependencies.loadFavorites()
-            let reachable = favorites.values
-                .filter { $0.peerNostrPublicKey != nil }
-                .map { PeerID(publicKey: $0.peerNoisePublicKey) }
+        // Synchronously warm the cache to avoid startup race
+        let favorites = self.dependencies.loadFavorites()
+        let reachable = favorites.values
+            .filter { $0.peerNostrPublicKey != nil }
+            .map { PeerID(publicKey: $0.peerNoisePublicKey) }
 
-            queue.sync(flags: .barrier) {
-                self.reachablePeers = Set(reachable)
+        queue.sync(flags: .barrier) {
+            self.reachablePeers = Set(reachable)
+        }
+
+        relayConnectivityCancellable = self.dependencies.relayConnectivity()
+            .sink { [weak self] connected in
+                guard let self else { return }
+                self.queue.async(flags: .barrier) { self.relaysConnected = connected }
             }
-        case .refusedBeforeRoot: break
-        }
-
-        switch sourceOwner.beginSourceInstallation(kind: .legacyRelayConnectivity) {
-        case .accepted(let relaySource):
-            let relayCancellable = self.dependencies.relayConnectivity()
-                .sink { [weak self, weak sourceOwner] connected in
-                    let event = sourceOwner?.sourceEventEntered(relaySource)
-                    defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-                    guard let sourceOwner, let event, case .accepted(let permit) = sourceOwner.admitBody(event) else { return }
-                    guard let self else { return }
-                    guard case .reserved(let write) = sourceOwner.reserveAdmittedSourceWrite(kind: .legacyRelayState, permit: permit) else { return }
-                    self.queue.async(flags: .barrier) {
-                        self.dependencies.outboundOwner.sourceWriteEntered(write)
-                        defer { self.dependencies.outboundOwner.noteSourceWriteBodyEnd(write) }
-                        self.relaysConnected = connected
-                    }
-                }
-            relayConnectivityCancellable = relayCancellable
-            let endpointBinding = bindOwnedEndpoint(sourceOwner.makeCancellableSourceEndpoint(relaySource,
-                cancellable: relayCancellable), to: relaySource)
-            let installationReturn = sourceOwner.noteSourceInstallationReturned(relaySource)
-            finishOwnedEndpoint(relaySource, bindingID: endpointBinding, installationReturn: installationReturn)
-        case .refusedBeforeRoot: break
-        }
     }
 
     deinit {
@@ -338,65 +249,23 @@ final class NostrTransport: Transport, @unchecked Sendable {
 
     @MainActor
     private func setupObservers() {
-        let sourceOwner = dependencies.outboundOwner
-        let observerSource: NostrOutboundOwner.SourceInstallation
-        switch sourceOwner.beginSourceInstallation(kind: .legacyFavoriteObserver) {
-        case .accepted(let source): observerSource = source
-        case .refusedBeforeRoot: return
-        }
-        let observerToken = dependencies.notificationCenter.addObserver(
+        favoriteStatusObserver = dependencies.notificationCenter.addObserver(
             forName: .favoriteStatusChanged,
             object: nil,
             queue: nil
-        ) { [weak self, weak sourceOwner] _ in
-            let event = sourceOwner?.sourceEventEntered(observerSource)
-            defer { if let event { sourceOwner?.noteSourceEventBodyEnd(event) } }
-            guard let sourceOwner, let event else { return }
-            switch sourceOwner.admitBody(event) {
-            case .accepted: self?.refreshReachablePeers(sourceEvent: event)
-            case .refusedBeforeRoot, .protocolFault: return
-            }
+        ) { [weak self] _ in
+            self?.refreshReachablePeers()
         }
-        favoriteStatusObserver = observerToken
-        let endpointBinding = bindOwnedEndpoint(sourceOwner.makeObserverSourceEndpoint(observerSource,
-            center: dependencies.notificationCenter, token: observerToken), to: observerSource)
-        let installationReturn = sourceOwner.noteSourceInstallationReturned(observerSource)
-        finishOwnedEndpoint(observerSource, bindingID: endpointBinding, installationReturn: installationReturn)
     }
 
-    @MainActor
-    private func bindOwnedEndpoint(_ creation: NostrOutboundOwner.SourceEndpointCreation,
-                                   to source: NostrOutboundOwner.SourceInstallation) -> NostrOutboundOwner.Identity? {
-        guard case .created(let endpoint) = creation else { return nil }
-        sourceDetachmentEndpoints.append(endpoint)
-        guard case .bound(let bindingID) = dependencies.outboundOwner.bindSourceEndpoint(endpoint, to: source) else { return nil }
-        return bindingID
-    }
-
-    @MainActor
-    private func finishOwnedEndpoint(_ source: NostrOutboundOwner.SourceInstallation,
-                                     bindingID: NostrOutboundOwner.Identity?,
-                                     installationReturn: NostrOutboundOwner.SourceReceiptUpdate) {
-        guard let bindingID, case .recorded = installationReturn,
-              case .ready(let claim) = dependencies.outboundOwner.finishSourceEndpointBinding(source, bindingID: bindingID),
-              let claim else { return }
-        _ = dependencies.outboundOwner.invokeSourceDetachment(claim)
-    }
-
-    private func refreshReachablePeers(sourceEvent: NostrOutboundOwner.SourceEventTicket?) {
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveTask(kind: .refreshReachablePeers, parent: .root) else { return }
-        if let sourceEvent { owner.linkSourceEvent(sourceEvent, toExistingTask: ticket) }
-        owner.dispatch(ticket) { @MainActor [self] in
+    private func refreshReachablePeers() {
+        Task { @MainActor in
             let favorites = dependencies.loadFavorites()
             let reachable = favorites.values
                 .filter { $0.peerNostrPublicKey != nil }
                 .map { PeerID(publicKey: $0.peerNoisePublicKey) }
-            
-            guard case .reserved(let write) = owner.reserveCallback(kind: .refreshStateWrite, parent: .child(ticket)) else { return }
+
             self.queue.async(flags: .barrier) { [weak self] in
-                owner.callbackEntered(write)
-                defer { owner.callbackBodyReturned(write) }
                 self?.reachablePeers = Set(reachable)
             }
         }
@@ -419,6 +288,8 @@ final class NostrTransport: Transport, @unchecked Sendable {
     func emergencyDisconnectAll() { /* no-op */ }
 
     func isPeerConnected(_ peerID: PeerID) -> Bool { false }
+
+    var unackedSendsAreBounded: Bool { false }
     
     func isPeerReachable(_ peerID: PeerID) -> Bool {
         // Callers address peers by either the short 16-hex ID or the full
@@ -462,9 +333,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
     func sendMessage(_ content: String, mentions: [String]) { /* no-op */ }
 
     func sendPrivateMessage(_ content: String, to peerID: PeerID, recipientNickname: String, messageID: String) {
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveTask(kind: .privateMessage, parent: .root) else { return }
-        owner.dispatch(ticket) { @MainActor [self] in
+        let epoch = dependencies.ackPacer.eraseEpoch
+        Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -485,17 +356,16 @@ final class NostrTransport: Transport, @unchecked Sendable {
     /// Explicit-identity acks ride throwaway transport instances that must stay alive
     /// until their ack leaves the queue.
     private func enqueueAck(_ ack: QueuedAck) {
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveCallback(kind: .pendingAckHandoff, parent: .root) else { return }
-        dependencies.ackPacer.enqueue(ticket: ticket) { parent in self.sendAckItem(ack, parent: parent) }
+        let epoch = dependencies.ackPacer.eraseEpoch
+        dependencies.ackPacer.enqueue { self.sendAckItem(ack, epoch: epoch) }
     }
 
     func sendFavoriteNotification(to peerID: PeerID, isFavorite: Bool) {
         // Wesh sends `[FAVORITED]:npub` only over a Noise session, never over a relay.
         if queue.sync(execute: { weshNpubs != nil }) { return }
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveTask(kind: .favoriteNotification, parent: .root) else { return }
-        owner.dispatch(ticket) { @MainActor [self] in
+        let epoch = dependencies.ackPacer.eraseEpoch
+        Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
@@ -530,9 +400,9 @@ extension NostrTransport {
 
     // MARK: Private messages using the supplied Nostr identity
     func sendPrivateMessageForNostrIdentity(content: String, toRecipientHex recipientHex: String, from identity: NostrIdentity, messageID: String) {
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveTask(kind: .explicitIdentityMessage, parent: .root) else { return }
-        owner.dispatch(ticket) { @MainActor [self] in
+        let epoch = dependencies.ackPacer.eraseEpoch
+        Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             guard !recipientHex.isEmpty else { return }
             SecureLogger.debug("GeoDM: send PM mid=\(messageID.prefix(8))…", category: .session)
             guard let embedded = NostrEmbeddedBitChat.encodePMForNostrNoRecipient(content: content, messageID: messageID) else {
@@ -575,10 +445,9 @@ extension NostrTransport {
 
 
     /// Sends a single ack item (invoked by the pacer, one per interval)
-    private func sendAckItem(_ item: QueuedAck, parent: NostrOutboundOwner.CallbackTicket) {
-        let owner = dependencies.outboundOwner
-        guard case .reserved(let ticket) = owner.reserveTask(kind: .ackItem, parent: .child(parent)) else { return }
-        owner.dispatch(ticket) { @MainActor [self] in
+    private func sendAckItem(_ item: QueuedAck, epoch: UInt64) {
+        Task { @MainActor in
+            guard epoch == dependencies.ackPacer.eraseEpoch else { return }
             switch item {
             case .readDirect(let receipt, let peerID):
                 guard let recipientNpub = resolveRecipientNpub(for: peerID),

@@ -130,7 +130,7 @@ final class TorURLSessionSocksTests: XCTestCase {
     /// (ATYP 0x03) so Tor resolves it at the exit. An IPv4/IPv6 address type
     /// here would mean the name was resolved on the device, in clear DNS.
     func test_relayWebSocket_sendsTheHostnameToSocksAsDomainName() throws {
-        for relay in ["relay.damus.io", "relay.primal.net", "offchain.pub"] {
+        for relay in ["relay.damus.io", "relay.primal.net", "relay.snort.social"] {
             let server = try FakeSocksServer()
             defer { server.stop() }
             let handled = expectation(description: "SOCKS request for \(relay)")

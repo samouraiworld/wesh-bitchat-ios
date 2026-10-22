@@ -1965,18 +1965,6 @@ final class BLEService: NSObject {
         guard let payload = VerificationService.shared.buildVerifyResponse(noiseKeyHex: noiseKeyHex, nonceA: nonceA) else { return }
         sendNoisePayload(payload, to: peerID)
     }
-
-    // MARK: Vouching over Noise
-
-    func sendVouchAttestations(_ payload: Data, to peerID: PeerID) {
-        sendNoisePayload(NoisePayload(type: .vouch, data: payload).encode(), to: peerID)
-    }
-
-    func addPeerAuthenticatedObserver(_ handler: @escaping (PeerID, String) -> Void) {
-        // Appends to the encryption service's handler array, so this never
-        // displaces the callbacks installed by installNoiseSessionCallbacks.
-        noiseService.addOnPeerAuthenticatedHandler(handler)
-    }
 }
 
 // MARK: - GossipSyncManager Delegate
@@ -3084,8 +3072,8 @@ extension BLEService {
 
     
     private func sendNoisePayload(_ typedPayload: Data, to peerID: PeerID) {
-        // Hop like sendMessage: the Transport-facing wrappers (verify/vouch/
-        // group payloads) call this from the main actor, and the send path
+        // Hop like sendMessage: the Transport-facing wrappers (verify
+        // payloads) call this from the main actor, and the send path
         // sync-waits on bleQueue for link state.
         if DispatchQueue.getSpecific(key: messageQueueKey) == nil {
             messageQueue.async { [weak self] in

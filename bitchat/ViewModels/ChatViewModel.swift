@@ -94,12 +94,8 @@ struct PanicNetworkLifecycle {
     /// so the panic transaction does not commit.
     let stop: @MainActor () -> Bool
     let restart: @MainActor () -> Void
-    let closeInstalledNostrRoots: @MainActor (NostrOutboundPanicBinding) -> NostrOutboundOwner.RootCloseOutcome
 
-    static let noop = PanicNetworkLifecycle(
-        stop: { true }, restart: {},
-        closeInstalledNostrRoots: { _ in .unconfirmed(.participantMissing) }
-    )
+    static let noop = PanicNetworkLifecycle(stop: { true }, restart: {})
 
     static var live: PanicNetworkLifecycle {
         PanicNetworkLifecycle(
@@ -109,8 +105,7 @@ struct PanicNetworkLifecycle {
             },
             restart: {
                 NetworkActivationService.shared.start()
-            },
-            closeInstalledNostrRoots: { binding in closeCapturedNostrOutboundRootsAndRequestSourceDetachment(binding) }
+            }
         )
     }
 }
@@ -202,7 +197,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// Noise key hex + npub pairs already sent `[FAVORITED]:npub` in this process.
     var weshAnnouncedInternetKeys: Set<String> = []
     lazy var verificationCoordinator = ChatVerificationCoordinator(context: self, weshMode: weshPrivatePolicyEnabled)
-    lazy var vouchCoordinator = ChatVouchCoordinator(context: self)
 
     // Computed properties for compatibility
     @MainActor
@@ -311,7 +305,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     let keychain: KeychainManagerProtocol
     private let panicRecoveryOperations: PanicRecoveryOperations
     private let panicNetworkLifecycle: PanicNetworkLifecycle
-    private let nostrOutboundPanicBinding: NostrOutboundPanicBinding
     private let panicPersistentStoreWipes: PanicPersistentStoreWipes
     let weshMeetingNote: WeshMeetingNoteStore
     private var isPanicResetting = false
@@ -761,7 +754,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicRecoveryOperations = panicRecoveryOperations
             ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
-        self.nostrOutboundPanicBinding = services.nostrOutboundPanicBinding
         self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
         self.weshMeetingNote = weshMeetingNote
             ?? (TestEnvironment.isRunningTests
@@ -851,6 +843,17 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         if networkActivationAllowed {
             configureBootstrapIfNeeded()
         }
+    }
+
+    /// Wesh: my QR always carries my npub, so the Nostr key exists once the welcome is done.
+    /// It is made here, locally, and is not used on the network while Internet is off. A locked
+    /// Keychain or an unconfirmed erase makes nothing; the next start or welcome tries again.
+    /// Returns whether a key exists afterwards.
+    @MainActor
+    @discardableResult
+    func ensureWeshNostrIdentity(welcomeDone: Bool = WeshWelcome.isDone()) -> Bool {
+        guard welcomeDone, networkActivationAllowed else { return false }
+        return (try? idBridge.getCurrentNostrIdentity()) != nil
     }
 
     @MainActor
@@ -1176,11 +1179,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         peerIdentityCoordinator.endPrivateChat()
     }
 
-    @MainActor
-    @objc func handlePeerStatusUpdate(_: Notification) {
-        peerIdentityCoordinator.handlePeerStatusUpdate()
-    }
-
     @objc func handleFavoriteStatusChanged(_ notification: Notification) {
         peerIdentityCoordinator.handleFavoriteStatusChanged(notification)
     }
@@ -1280,7 +1278,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         startupRetirementBlocked = false
         panicRecoveryBlocked = true
-        _ = panicNetworkLifecycle.closeInstalledNostrRoots(nostrOutboundPanicBinding)
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
         weshAnnouncedInternetKeys.removeAll()
@@ -1418,6 +1415,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         // Geohash DM handlers can capture pre-wipe Nostr identities, so a plain
         // disconnect is not enough here.
         NostrRelayManager.shared.resetForPanicWipe()
+        // Paced acks and sends captured before the wipe hold the pre-wipe Nostr identity.
+        NostrTransport.sharedAckPacer.discardWorkBeforeErase()
         // Clearing relay handlers stops NEW events, but a detached gift-wrap
         // decrypt spawned just before the wipe still holds a pre-wipe key and
         // ciphertext; bump the pipeline's wipe generation so its result is
@@ -1693,7 +1692,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func setupNoiseCallbacks() {
         verificationCoordinator.setupNoiseCallbacks()
-        vouchCoordinator.setupNoiseCallbacks()
     }
 
     // MARK: - BitchatDelegate Methods
@@ -1799,9 +1797,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         case .peerListUpdated(let peers):
             peerListCoordinator.didUpdatePeerListSynchronously(peers)
-            // A peer-list update follows every verified announce, which is
-            // where a peer's `.vouch` capability actually arrives.
-            vouchCoordinator.peersUpdated(peers)
 
         case .peerSnapshotsUpdated:
             break
@@ -1876,12 +1871,6 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
     func didUpdatePeerList(_ peers: [PeerID]) {
         peerListCoordinator.didUpdatePeerList(peers)
-        // A peer-list update follows every verified announce, which is where a
-        // peer's `.vouch` capability actually arrives — retry vouching now that
-        // capabilities may finally be known (closes the auth-time capability race).
-        Task { @MainActor [weak self] in
-            self?.vouchCoordinator.peersUpdated(peers)
-        }
     }
 
     @MainActor
