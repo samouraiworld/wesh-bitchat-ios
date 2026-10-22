@@ -88,8 +88,9 @@ struct PublicMessagePipelineTests {
         #expect(delegate.committed.isEmpty)
         #expect(delegate.batchingStates.isEmpty)
         // Suspend so the real default timer and its queued MainActor task can progress.
-        // This is a functional deadline, not an exact wall-clock cadence gate.
-        let deadline = Date().addingTimeInterval(5)
+        // This is a functional deadline, not an exact wall-clock cadence gate; a starved CI
+        // main queue has taken over 5 s to run the timer's task.
+        let deadline = Date().addingTimeInterval(TestConstants.settleTimeout)
         while delegate.committed.count < 3 && Date() < deadline {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
