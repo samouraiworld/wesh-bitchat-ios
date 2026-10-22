@@ -425,7 +425,7 @@ private final class RootFixture: @unchecked Sendable {
             }
             ledger.track(handle)
             creations.update { $0 += 1 }
-            if holdCreatorReturn && returnGate.wait(timeout: .now() + 5) != .success {
+            if holdCreatorReturn && returnGate.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned creator return barrier timed out") }
             }
             return handle
@@ -477,7 +477,7 @@ private final class RootFixture: @unchecked Sendable {
         ackQueue.async {
             hold.entered.update { $0 = true }
             defer { hold.finished.update { $0 = true } }
-            if hold.release.wait(timeout: .now() + 5) != .success {
+            if hold.release.wait(timeout: .now() + TestConstants.settleTimeout) != .success {
                 errors.update { $0.append("owned ACK queue hold timed out") }
             }
         }
@@ -595,7 +595,8 @@ private func requireFixture(_ condition: Bool, _ message: String) throws {
 
 private func eventually(_ condition: () -> Bool) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(5))
+    // A hang guard, not a latency budget: starved CI queues took over 5 s.
+    let deadline = clock.now.advanced(by: .seconds(TestConstants.settleTimeout))
     while !condition() {
         if clock.now >= deadline { throw RootFixtureError("owned readiness/completion guard expired") }
         await Task.yield()
