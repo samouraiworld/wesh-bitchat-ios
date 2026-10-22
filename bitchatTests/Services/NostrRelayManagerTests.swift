@@ -1054,6 +1054,13 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(subscriptionsSent)
 
         try context.sessionFactory.latestConnection(for: firstRelayURL)?.emitEventMessage(subscriptionID: "events", event: invalidEvent)
+        // Relays run their pipelines in parallel: the forged copy must reach its duplicate
+        // precheck before the genuine one is recorded, or it is (rightly) dropped as a
+        // duplicate and this test no longer exercises the poisoning path.
+        let forgedPrechecked = await waitUntil {
+            context.manager.relays.first(where: { $0.url == firstRelayURL })?.messagesReceived == 1
+        }
+        XCTAssertTrue(forgedPrechecked)
         try context.sessionFactory.latestConnection(for: secondRelayURL)?.emitEventMessage(subscriptionID: "events", event: event)
 
         // Wait on the DELIVERY-side state (second main hop, after off-main
@@ -1068,6 +1075,41 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertEqual(receivedIDs, [event.id])
         XCTAssertEqual(context.manager.debugDuplicateInboundEventDropCount, 0)
         XCTAssertEqual(context.manager.debugDuplicateInboundEventDropCount(forSubscriptionID: "events"), 0)
+    }
+
+    /// The other order: a forged copy arriving after the genuine one was delivered is dropped
+    /// as a duplicate before verification (no Schnorr cost), and the genuine copy is delivered
+    /// once. This is the order a loaded CI runner can produce in the test above.
+    func test_receiveEvent_forgedCopyAfterTheGenuineOneIsDroppedAsDuplicate() async throws {
+        let firstRelayURL = "wss://forged-late-one.example"
+        let secondRelayURL = "wss://forged-late-two.example"
+        let context = makeContext(defaultRelaysAllowed: false)
+        let event = try makeSignedEvent(content: "genuine-before-forged")
+        let invalidEvent = invalidSignatureCopy(of: event)
+        var receivedIDs: [String] = []
+
+        context.manager.subscribe(
+            filter: makeFilter(),
+            id: "events",
+            relayUrls: [firstRelayURL, secondRelayURL]
+        ) { event in
+            receivedIDs.append(event.id)
+        }
+        let subscriptionsSent = await waitUntil {
+            context.sessionFactory.latestConnection(for: firstRelayURL)?.sentStrings.count == 1 &&
+            context.sessionFactory.latestConnection(for: secondRelayURL)?.sentStrings.count == 1
+        }
+        XCTAssertTrue(subscriptionsSent)
+
+        try context.sessionFactory.latestConnection(for: secondRelayURL)?.emitEventMessage(subscriptionID: "events", event: event)
+        let genuineDelivered = await waitUntil { receivedIDs == [event.id] }
+        XCTAssertTrue(genuineDelivered)
+        try context.sessionFactory.latestConnection(for: firstRelayURL)?.emitEventMessage(subscriptionID: "events", event: invalidEvent)
+        let forgedDropped = await waitUntil { context.manager.debugDuplicateInboundEventDropCount == 1 }
+
+        XCTAssertTrue(forgedDropped)
+        XCTAssertEqual(receivedIDs, [event.id])
+        XCTAssertEqual(context.manager.debugDuplicateInboundEventDropCount(forSubscriptionID: "events"), 1)
     }
 
     /// The relay boundary is the single signature-verification point for the
@@ -1102,6 +1144,13 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(subscriptionsSent)
 
         try context.sessionFactory.latestConnection(for: firstRelayURL)?.emitEventMessage(subscriptionID: "gift-wraps", event: tampered)
+        // Relays run their pipelines in parallel: the forged copy must reach its duplicate
+        // precheck before the genuine one is recorded, or it is (rightly) dropped as a
+        // duplicate and this test no longer exercises the poisoning path.
+        let forgedPrechecked = await waitUntil {
+            context.manager.relays.first(where: { $0.url == firstRelayURL })?.messagesReceived == 1
+        }
+        XCTAssertTrue(forgedPrechecked)
         try context.sessionFactory.latestConnection(for: secondRelayURL)?.emitEventMessage(subscriptionID: "gift-wraps", event: giftWrap)
 
         // Wait on the DELIVERY-side state (second main hop, after off-main
