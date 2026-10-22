@@ -35,6 +35,15 @@ struct WeshLocalizedFormattingTests {
             == "Demande de " + name + ", non vérifiée, " + fingerprint)
     }
 
+    @Test func transportLabelsReadBluetoothAndInternetInBothLanguages() throws {
+        for language in ["en", "fr"] {
+            let bundle = try resources(language)
+            let locale = Locale(identifier: language)
+            #expect(WeshDelivery.transportLabel(.bluetooth, bundle: bundle, locale: locale) == "Bluetooth")
+            #expect(WeshDelivery.transportLabel(.internet, bundle: bundle, locale: locale) == "Internet")
+        }
+    }
+
     @Test func englishDeliveryStillDistinguishesTransmissionFromReceiptAndKeepsStoredAppearanceIDs() throws {
         let english = try resources("en")
         let locale = Locale(identifier: "en")

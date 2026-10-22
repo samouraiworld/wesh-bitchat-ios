@@ -77,6 +77,10 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
         }
     }
 
+    func setPrivateMessageTransport(_ transport: MessageTransport, forMessageID messageID: String, peerID: PeerID) {
+        privateChats[peerID]?.first { $0.id == messageID }?.transport = transport
+    }
+
     @discardableResult
     func setPrivateDeliveryStatus(_ status: DeliveryStatus, forMessageID messageID: String, peerID: PeerID) -> Bool {
         guard let chat = privateChats[peerID],
@@ -394,6 +398,8 @@ struct ChatPrivateConversationCoordinatorContextTests {
             makeIncomingMessage(id: "mine-1", sender: "me"),
             makeIncomingMessage(id: "mine-2", sender: "me")
         ]
+        // Last attempt went over Bluetooth; the ack came back over Internet.
+        context.privateChats[convKey]?.first?.transport = .bluetooth
 
         coordinator.handleDelivered(
             NoisePayload(type: .delivered, data: Data("mine-1".utf8)),
@@ -401,6 +407,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
             convKey: convKey
         )
         #expect(isDelivered(context.privateChats[convKey]?.first?.deliveryStatus, to: "alice#1234"))
+        #expect(context.privateChats[convKey]?.first?.transport == .internet)
         #expect(context.notifyUIChangedCount == 1)
 
         coordinator.handleReadReceipt(
@@ -409,6 +416,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
             convKey: convKey
         )
         #expect(isRead(context.privateChats[convKey]?.last?.deliveryStatus, by: "alice#1234"))
+        #expect(context.privateChats[convKey]?.last?.transport == .internet)
         #expect(context.notifyUIChangedCount == 2)
 
         // Unknown message id: no state change, no UI notification.
@@ -525,6 +533,7 @@ struct ChatPrivateConversationCoordinatorContextTests {
         #expect(context.sentNostrDeliveryAcks == ["geo-1"])
         #expect(context.privateChats[convKey]?.map(\.id) == ["geo-1"])
         #expect(context.privateChats[convKey]?.first?.sender == "bob#5678")
+        #expect(context.privateChats[convKey]?.first?.transport == .internet)
         #expect(context.unreadPrivateMessages.isEmpty)
         #expect(context.notifyUIChangedCount == 1)
 

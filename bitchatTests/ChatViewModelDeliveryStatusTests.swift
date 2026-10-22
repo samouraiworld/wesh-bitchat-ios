@@ -712,6 +712,14 @@ private final class MockChatDeliveryContext: ChatDeliveryContext {
         store.setDeliveryStatus(status, forMessageID: messageID)
     }
 
+    func setTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        inDirectPeerAliases peerIDs: Set<PeerID>
+    ) {
+        store.setTransport(transport, forMessageID: messageID, inDirectPeerAliases: peerIDs)
+    }
+
     @discardableResult
     func setDeliveryStatus(
         _ status: DeliveryStatus,
@@ -860,6 +868,8 @@ struct ChatDeliveryCoordinatorContextTests {
         let otherPeerID = PeerID(str: "1112131415161718")
         let messageID = "authenticated-receipt-collision"
         let mirroredMessage = makePrivateMessage(id: messageID, status: .sent)
+        // Last attempt went over Internet; the receipt came back over the mesh.
+        mirroredMessage.transport = .internet
 
         context.store.append(mirroredMessage, to: .directPeer(ephemeralPeerID))
         context.store.append(mirroredMessage, to: .directPeer(stablePeerID))
@@ -897,6 +907,30 @@ struct ChatDeliveryCoordinatorContextTests {
         #expect(context.peerBoundDeliveredMessages[0].messageID == messageID)
         #expect(context.peerBoundDeliveredMessages[0].peerIDs == aliases)
         #expect(context.notifyUIChangedCount == 1)
+        #expect(context.store.conversation(for: .directPeer(stablePeerID)).message(withID: messageID)?.transport == .bluetooth)
+        #expect(context.store.conversation(for: .directPeer(otherPeerID)).message(withID: messageID)?.transport == nil)
+    }
+
+    /// A receipt that changes no status (a delivered ack after the read) leaves the label of
+    /// the ack that did.
+    @Test @MainActor
+    func staleReceiptKeepsTheLabelOfTheAckThatCounted() async {
+        let context = MockChatDeliveryContext()
+        let coordinator = ChatDeliveryCoordinator(context: context)
+        let peerID = PeerID(str: "3132333435363738")
+        let messageID = "read-over-internet"
+        let message = makePrivateMessage(id: messageID, status: .read(by: "Peer", at: Date()))
+        message.transport = .internet
+        context.store.append(message, to: .directPeer(peerID))
+
+        let didUpdate = coordinator.updateAcknowledgedMessageDeliveryStatus(
+            messageID,
+            status: .delivered(to: "Peer", at: Date()),
+            from: [peerID]
+        )
+
+        #expect(!didUpdate)
+        #expect(context.store.conversation(for: .directPeer(peerID)).message(withID: messageID)?.transport == .internet)
     }
 
     @Test @MainActor

@@ -624,6 +624,14 @@ private final class PerfDeliveryContext: ChatDeliveryContext {
         store.setDeliveryStatus(status, forMessageID: messageID)
     }
 
+    func setTransport(
+        _ transport: MessageTransport,
+        forMessageID messageID: String,
+        inDirectPeerAliases peerIDs: Set<PeerID>
+    ) {
+        store.setTransport(transport, forMessageID: messageID, inDirectPeerAliases: peerIDs)
+    }
+
     @discardableResult
     func setDeliveryStatus(
         _ status: DeliveryStatus,

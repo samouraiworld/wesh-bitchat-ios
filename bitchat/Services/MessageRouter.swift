@@ -84,6 +84,10 @@ final class MessageRouter {
     /// caller at hand-off; an Internet hand-off alone proves nothing.
     var onMessageSent: ((_ messageID: String, _ peerID: PeerID) -> Void)?
 
+    /// Invoked as a private message is handed to a transport, with that transport's kind:
+    /// the message's « Bluetooth » / « Internet » label follows its last attempt.
+    var onMessageAttempted: ((_ messageID: String, _ peerID: PeerID, _ transport: MessageTransport) -> Void)?
+
     /// Keeps retained private messages from remaining in a stale sending state
     /// for the rest of a long session. The returned task also permits a caller
     /// to cancel maintenance when it owns a shorter router lifetime.
@@ -247,7 +251,7 @@ final class MessageRouter {
             enqueue(message, for: peerID)
             secureTransmissions.insert(PeerMessageKey(peerID: peerID, messageID: messageID))
             SecureLogger.debug("Routing PM via \(type(of: transport)) (connected) to \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
-            transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
+            send(content, via: transport, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
             return
         }
 
@@ -270,7 +274,7 @@ final class MessageRouter {
             SecureLogger.debug("Routing PM via \(type(of: transport)) (connected, no secure session) to \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
             enqueue(message, for: peerID)
             secureTransmissions.remove(PeerMessageKey(peerID: peerID, messageID: messageID))
-            transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
+            send(content, via: transport, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
             attemptCourierDeposit(messageID: messageID, for: peerID)
             return
         }
@@ -282,7 +286,7 @@ final class MessageRouter {
             // receivers dedup resends by message ID.
             SecureLogger.debug("Routing PM via \(type(of: transport)) (reachable) to \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
             enqueue(message, for: peerID)
-            transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
+            send(content, via: transport, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
             if !transport.unackedSendsAreBounded { scheduleInternetRetry(messageID, for: peerID) }
             // "Reachable" without prompt delivery means the send cannot be
             // published now (Nostr with relays down; it is retried on the
@@ -853,8 +857,9 @@ final class MessageRouter {
                 "Auth retry -> \(type(of: transport)) for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…",
                 category: .session
             )
-            transport.sendPrivateMessage(
+            send(
                 message.content,
+                via: transport,
                 to: peerID,
                 recipientNickname: message.nickname,
                 messageID: message.messageID
@@ -866,6 +871,19 @@ final class MessageRouter {
         if outboxChanged {
             persistOutbox()
         }
+    }
+
+    /// Every private send goes through here so the label follows the last attempt. Reported
+    /// before the hand-off: a synchronous ack then has the last word.
+    private func send(
+        _ content: String,
+        via transport: Transport,
+        to peerID: PeerID,
+        recipientNickname: String,
+        messageID: String
+    ) {
+        onMessageAttempted?(messageID, peerID, transport.messageTransport)
+        transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
     }
 
     func flushOutbox(for peerID: PeerID) {
@@ -917,7 +935,7 @@ final class MessageRouter {
                 secureTransmissions.insert(
                     PeerMessageKey(peerID: peerID, messageID: message.messageID)
                 )
-                transport.sendPrivateMessage(message.content, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
+                send(message.content, via: transport, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
                 outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
             } else if let transport = connectedTransport(for: peerID) {
@@ -935,7 +953,7 @@ final class MessageRouter {
                 secureTransmissions.remove(
                     PeerMessageKey(peerID: peerID, messageID: message.messageID)
                 )
-                transport.sendPrivateMessage(message.content, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
+                send(message.content, via: transport, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
             } else if let transport = reachableTransport(for: peerID) {
                 // Reachability without a connection is a freshness heuristic,
@@ -961,7 +979,7 @@ final class MessageRouter {
                     if now < notBefore { continue }
                 }
                 SecureLogger.debug("Outbox -> \(type(of: transport)) (reachable) for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…", category: .session)
-                transport.sendPrivateMessage(message.content, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
+                send(message.content, via: transport, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
                 if transport.unackedSendsAreBounded {
                     outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged

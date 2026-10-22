@@ -36,6 +36,8 @@ protocol ChatPrivateConversationContext: AnyObject {
     /// message is unknown or the update would downgrade the status.
     @discardableResult
     func setPrivateDeliveryStatus(_ status: DeliveryStatus, forMessageID messageID: String, peerID: PeerID) -> Bool
+    /// Labels a private message with the transport its ack came over.
+    func setPrivateMessageTransport(_ transport: MessageTransport, forMessageID messageID: String, peerID: PeerID)
     func markPrivateChatUnread(_ peerID: PeerID)
     func markPrivateChatRead(_ peerID: PeerID)
     /// Moves all messages from `oldPeerID`'s chat into `newPeerID`'s chat
@@ -318,7 +320,8 @@ final class ChatPrivateConversationCoordinator {
                         senderPeerID: targetPeerID,
                         mentions: message.mentions,
                         deliveryStatus: message.deliveryStatus,
-                        isBridged: message.isBridged
+                        isBridged: message.isBridged,
+                        transport: message.transport
                     ),
                     in: targetPeerID
                 )
@@ -474,7 +477,8 @@ final class ChatPrivateConversationCoordinator {
             isPrivate: true,
             recipientNickname: context.nickname,
             senderPeerID: conversationPeerID,
-            deliveryStatus: .delivered(to: context.nickname, at: Date())
+            deliveryStatus: .delivered(to: context.nickname, at: Date()),
+            transport: .internet
         )
 
         context.appendPrivateMessage(message, to: conversationPeerID)
@@ -517,6 +521,7 @@ final class ChatPrivateConversationCoordinator {
                 peerID: conversationPeerID
             )
             if didChange {
+                context.setPrivateMessageTransport(.internet, forMessageID: messageID, peerID: conversationPeerID)
                 context.notifyUIChanged()
             }
             SecureLogger.info(
@@ -555,6 +560,7 @@ final class ChatPrivateConversationCoordinator {
                 peerID: conversationPeerID
             )
             if didChange {
+                context.setPrivateMessageTransport(.internet, forMessageID: messageID, peerID: conversationPeerID)
                 context.notifyUIChanged()
             }
             SecureLogger.info("GeoDM: recv READ for mid=\(messageID.prefix(8))… from=\(senderPubkey.prefix(8))…", category: .session)
@@ -776,7 +782,8 @@ final class ChatPrivateConversationCoordinator {
             recipientNickname: message.recipientNickname,
             senderPeerID: message.senderPeerID,
             mentions: message.mentions,
-            deliveryStatus: message.deliveryStatus
+            deliveryStatus: message.deliveryStatus,
+            transport: message.transport
         )
     }
 
