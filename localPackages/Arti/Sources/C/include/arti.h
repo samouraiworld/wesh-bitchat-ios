@@ -18,7 +18,8 @@ extern "C" {
  *         -3: runtime initialization failed
  *         -4: bootstrap failed
  */
-int32_t arti_start(const char *data_dir, uint16_t socks_port);
+int32_t arti_start(const char *data_dir, uint16_t socks_port,
+                   const char *socks_username, const char *socks_password);
 
 /**
  * Stop Arti gracefully.

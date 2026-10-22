@@ -689,6 +689,71 @@ struct MessageRouterTests {
         #expect(transport.sentPrivateMessages.count == 11)
     }
 
+    /// An Internet send to a contact whose QR carries an npub but who never turned Internet on
+    /// cannot be told from silence. Those resends must not burn the attempt cap and drop the
+    /// message before the two phones meet over Bluetooth; they are paced to one an hour, so a
+    /// flapping peer cannot pump relay publications, and the 24h TTL still ends (and reports) it.
+    @Test @MainActor
+    func flushOutbox_internetResendsArePacedAndOnlyTheTTLDropsThem() async {
+        let peerID = PeerID(str: "00000000000000ae")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start
+        let router = MessageRouter(transports: [internet], now: { clock })
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "in1")
+        // Flushes inside the hour publish nothing new.
+        for minute in [1, 30, 59] {
+            clock = start.addingTimeInterval(TimeInterval(minute * 60))
+            router.flushOutbox(for: peerID)
+        }
+        #expect(internet.sentPrivateMessages.count == 1)
+
+        // Hourly, well past maxSendAttempts (8): one resend each, none drops.
+        for hour in 1...10 {
+            clock = start.addingTimeInterval(TimeInterval(hour * 3_600 + 60))
+            router.flushOutbox(for: peerID)
+            router.flushOutbox(for: peerID)
+        }
+        #expect(dropped.isEmpty)
+        #expect(internet.sentPrivateMessages.count == 11)
+
+        // Past the 24h TTL the copy is dropped and the failure reported.
+        clock = start.addingTimeInterval(25 * 3_600)
+        router.flushOutbox(for: peerID)
+        #expect(dropped == ["in1"])
+        #expect(internet.sentPrivateMessages.count == 11)
+    }
+
+    /// An erase leaves no pacing state behind: a message queued after the wipe goes out on the
+    /// next flush instead of being held back by a timestamp from before it.
+    @Test @MainActor
+    func wipeOutbox_forgetsInternetResendPacing() async {
+        let peerID = PeerID(str: "00000000000000af")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start
+        let router = MessageRouter(transports: [internet], now: { clock })
+
+        router.sendPrivate("Before", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        #expect(router.wipeOutbox())
+
+        internet.reachablePeers.remove(peerID)
+        clock = start.addingTimeInterval(60)
+        router.sendPrivate("After", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        internet.reachablePeers.insert(peerID)
+        clock = start.addingTimeInterval(120)
+        router.flushOutbox(for: peerID)
+
+        #expect(internet.sentPrivateMessages.count == 2)
+    }
+
     @Test @MainActor
     func authenticationRetry_capsActualSecureTransmissions() async {
         let peerID = PeerID(str: "00000000000000ad")

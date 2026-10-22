@@ -190,7 +190,6 @@ private final class ClockVerificationContext: ChatVerificationContext {
     func setStoredVerified(_ fingerprint: String, verified: Bool) { verificationWrites += 1 }
     func isVerifiedFingerprint(_ fingerprint: String) -> Bool { false }
     func saveIdentityState() { verificationWrites += 1 }
-    func vouchToConnectedVerifiedPeers() {}
     func setEncryptionStatus(_ status: EncryptionStatus?, for peerID: PeerID) {}
     func updateEncryptionStatus(for peerID: PeerID) {}
     func invalidateEncryptionCache(for peerID: PeerID?) {}

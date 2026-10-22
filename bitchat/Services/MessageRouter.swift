@@ -122,6 +122,10 @@ final class MessageRouter {
     // Connected pre-handshake sends are transport-owned and do not burn this
     // cap because BLE queues/drains them itself.
     private static let maxSendAttempts = 8
+    // Internet resends are not capped by count (see `Transport.unackedSendsAreBounded`) but
+    // paced: at most one relay publication per message per hour, so at most 24 before the TTL.
+    private static let internetResendInterval: TimeInterval = 60 * 60
+    private var lastInternetSendAt: [String: Date] = [:]
     // Redundant couriers improve delivery odds; receivers dedup by message ID.
     private static let maxCouriersPerMessage = 3
 
@@ -236,6 +240,7 @@ final class MessageRouter {
             SecureLogger.debug("Routing PM via \(type(of: transport)) (reachable) to \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
             enqueue(message, for: peerID)
             transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
+            if !transport.unackedSendsAreBounded { recordInternetSend(messageID) }
             // "Reachable" without prompt delivery means the send only joined
             // a queue (Nostr with relays down): also hand a sealed copy to
             // any connected couriers rather than waiting for internet that
@@ -467,6 +472,19 @@ final class MessageRouter {
         return true
     }
 
+    /// Remembers an Internet publication for pacing. Only messages still in the outbox are
+    /// kept, so the map never outlives them (and an erase clears it with the outbox).
+    private func recordInternetSend(_ messageID: String) {
+        forgetInternetSendsOutsideOutbox()
+        lastInternetSendAt[messageID] = now()
+    }
+
+    private func forgetInternetSendsOutsideOutbox() {
+        guard !lastInternetSendAt.isEmpty else { return }
+        let queued = Set(outbox.values.flatMap { $0.map(\.messageID) })
+        lastInternetSendAt = lastInternetSendAt.filter { queued.contains($0.key) }
+    }
+
     @discardableResult
     private func incrementSendAttemptsIfQueued(_ messageID: String, for peerID: PeerID) -> Bool {
         guard var queue = outbox[peerID],
@@ -527,6 +545,7 @@ final class MessageRouter {
     func wipeOutbox() -> Bool {
         outbox.removeAll()
         secureTransmissions.removeAll()
+        lastInternetSendAt.removeAll()
         return outboxStore?.wipe() ?? true
     }
 
@@ -737,8 +756,9 @@ final class MessageRouter {
                 // Reachability without a connection is a freshness heuristic,
                 // so the send can silently go nowhere: send but keep retaining
                 // until an ack clears it, bounded by attempt count for peers
-                // that never ack.
-                guard message.sendAttempts < Self.maxSendAttempts else {
+                // that never ack (Internet: by the 24h TTL only, see
+                // `Transport.unackedSendsAreBounded`).
+                guard !transport.unackedSendsAreBounded || message.sendAttempts < Self.maxSendAttempts else {
                     SecureLogger.warning("📤 Dropping unacked PM for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))… after \(message.sendAttempts) attempts", category: .session)
                     if removeQueuedMessage(message.messageID, for: peerID) {
                         dropMessage(message.messageID, for: peerID)
@@ -746,16 +766,26 @@ final class MessageRouter {
                     }
                     continue
                 }
+                if !transport.unackedSendsAreBounded,
+                   let last = lastInternetSendAt[message.messageID],
+                   now.timeIntervalSince(last) < Self.internetResendInterval {
+                    continue
+                }
                 SecureLogger.debug("Outbox -> \(type(of: transport)) (reachable) for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…", category: .session)
                 transport.sendPrivateMessage(message.content, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
-                outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
+                if transport.unackedSendsAreBounded {
+                    outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
+                } else {
+                    recordInternetSend(message.messageID)
+                }
             }
         }
 
         if outboxChanged {
             persistOutbox()
         }
+        forgetInternetSendsOutsideOutbox()
     }
 
     func flushAllOutbox() {
