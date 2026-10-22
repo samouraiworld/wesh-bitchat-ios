@@ -368,6 +368,31 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertTrue(flushed)
     }
 
+    /// Turning Internet off drops sends still waiting for a relay, so nothing queued before the
+    /// switch leaves when Internet comes back on (the app outbox keeps the message itself).
+    func test_discardPendingSends_dropsQueuedEventsBeforeTheyFlush() async throws {
+        let relayURL = "wss://queue-discard.example"
+        let context = makeContext(
+            defaultRelaysAllowed: false,
+            userTorEnabled: true,
+            torEnforced: true,
+            torIsReady: true,
+            torIsForeground: false
+        )
+        let event = try makeSignedEvent(content: "queued before off")
+
+        context.manager.sendEvent(event, to: [relayURL])
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        context.manager.discardPendingSends()
+
+        context.torForeground.value = true
+        context.manager.ensureConnections(to: [relayURL])
+        let connected = await waitUntil { context.sessionFactory.latestConnection(for: relayURL) != nil }
+        XCTAssertTrue(connected)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(context.sessionFactory.latestConnection(for: relayURL)?.sentStrings.count ?? 0, 0)
+    }
+
     func test_sendEvent_sendFailureDoesNotIncrementMessageCount() async throws {
         let relayURL = "wss://send-failure.example"
         let context = makeContext(defaultRelaysAllowed: false)

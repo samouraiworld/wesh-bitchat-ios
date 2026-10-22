@@ -182,6 +182,8 @@ final class NetworkReachabilityGateTests: XCTestCase {
             relayController: relayController,
             proxyController: proxyController
         )
+        // These tests are about reachability: Internet itself is opted in (it is off by default).
+        service.setUserInternetEnabled(true)
         return Context(
             service: service,
             reachability: reachability,
@@ -245,6 +247,7 @@ private final class GateMockRelayController: NetworkActivationRelayControlling {
     private(set) var disconnectCallCount = 0
     func connect() { connectCallCount += 1 }
     func disconnect() { disconnectCallCount += 1 }
+    func discardPendingSends() {}
 }
 
 private final class GateMockProxyController: NetworkActivationProxyControlling {

@@ -100,9 +100,49 @@ private final class MockNetworkActivationTorController: NetworkActivationTorCont
 }
 
 @MainActor
+struct NetworkActivationInternetOffTests {
+    private func makeService() -> (NetworkActivationService, MockNetworkActivationRelayController, MockNetworkActivationReachability) {
+        let relay = MockNetworkActivationRelayController()
+        let reachability = MockNetworkActivationReachability()
+        let service = NetworkActivationService(storage: GeographicNetworkMemoryDefaults(),
+            reachabilityMonitor: reachability, torController: MockNetworkActivationTorController(),
+            relayController: relay, proxyController: MockNetworkActivationProxyController())
+        return (service, relay, reachability)
+    }
+
+    @Test
+    func internetStaysOffUntilTheUserTurnsItOn() {
+        let (service, relay, _) = makeService()
+        defer { service.stopForPanic() }
+        service.start()
+
+        #expect(!service.userInternetEnabled)
+        #expect(!service.activationAllowed)
+        #expect(relay.connectCallCount == 0)
+    }
+
+    @Test
+    func onlyTheUsersOffDiscardsSendsWaitingForARelay() {
+        let (service, relay, reachability) = makeService()
+        defer { service.stopForPanic() }
+        service.start()
+        service.setUserInternetEnabled(true)
+
+        // Losing the network keeps them: they leave when it comes back.
+        reachability.set(false)
+        reachability.set(true)
+        #expect(relay.discardCallCount == 0)
+
+        service.setUserInternetEnabled(false)
+        #expect(relay.discardCallCount == 1)
+    }
+}
+
+@MainActor
 private final class MockNetworkActivationRelayController: NetworkActivationRelayControlling {
     private(set) var connectCallCount = 0
     private(set) var disconnectCallCount = 0
+    private(set) var discardCallCount = 0
 
     func connect() {
         connectCallCount += 1
@@ -110,6 +150,10 @@ private final class MockNetworkActivationRelayController: NetworkActivationRelay
 
     func disconnect() {
         disconnectCallCount += 1
+    }
+
+    func discardPendingSends() {
+        discardCallCount += 1
     }
 }
 
