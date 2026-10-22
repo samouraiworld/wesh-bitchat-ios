@@ -4823,36 +4823,19 @@
         }
       }
     },
-    "pave.wesh.delivery.carried" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confié à un relais · réception non confirmée"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Handed to a relay · receipt unconfirmed"
-          }
-        }
-      }
-    },
     "pave.wesh.delivery.delivered" : {
       "extractionState" : "manual",
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Réception confirmée"
+            "value" : "Distribué"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Receipt confirmed"
+            "value" : "Delivered"
           }
         }
       }
@@ -4863,115 +4846,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Échec d’envoi"
+            "value" : "Échec"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Send failed"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.partial" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transmission partielle"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Partial transmission"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.publicFailed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Échec de diffusion"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Broadcast failed"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.publicPartial" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transmission partielle · réception non confirmée"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Partial transmission · receipt unconfirmed"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.publicSending" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diffusion en cours"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Broadcasting"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.publicUnconfirmed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diffusion publique · réception non confirmée"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Public broadcast · receipt unconfirmed"
-          }
-        }
-      }
-    },
-    "pave.wesh.delivery.publicWaiting" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "En attente de diffusion"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting to broadcast"
+            "value" : "Failed"
           }
         }
       }
@@ -4993,36 +4874,19 @@
         }
       }
     },
-    "pave.wesh.delivery.sending" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "En cours d’envoi"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sending"
-          }
-        }
-      }
-    },
     "pave.wesh.delivery.sent" : {
       "extractionState" : "manual",
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Transmission non confirmée"
+            "value" : "Envoyé"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Transmission unconfirmed"
+            "value" : "Sent"
           }
         }
       }
@@ -5033,13 +4897,30 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "En attente d’envoi"
+            "value" : "En attente"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Waiting to send"
+            "value" : "Waiting"
+          }
+        }
+      }
+    },
+    "pave.wesh.delivery.withTransport" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
           }
         }
       }

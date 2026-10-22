@@ -1069,9 +1069,9 @@ private struct WeshMessageBubble: View {
     private var isSystem: Bool { WeshMessageActions.isLocalSystem(message) }
     @ViewBuilder private var metadata: some View {
         Text(message.timestamp, style: .time)
-        if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus)) }
+        if own, privateChat { Text(WeshDelivery.label(message.deliveryStatus, transport: isSystem ? nil : message.transport)) }
         else if own { Text(WeshDelivery.publicLabel(message.deliveryStatus)) }
-        if privateChat, !isSystem, let transport = message.transport { Text(WeshDelivery.transportLabel(transport)) }
+        else if privateChat, !isSystem, let transport = message.transport { Text(WeshDelivery.transportLabel(transport)) }
     }
     var body: some View {
         HStack {
@@ -1094,13 +1094,12 @@ private struct WeshMessageBubble: View {
 }
 
 enum WeshDelivery {
+    /// The public room has no receipts: En attente, Envoyé or Échec, as on Android.
     static func publicLabel(_ status: DeliveryStatus, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         switch status {
-        case .notSentYet: return PaveCopy.text("pave.wesh.delivery.publicWaiting", bundle: bundle, locale: locale)
-        case .sending: return PaveCopy.text("pave.wesh.delivery.publicSending", bundle: bundle, locale: locale)
-        case .failed: return PaveCopy.text("pave.wesh.delivery.publicFailed", bundle: bundle, locale: locale)
-        case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.publicPartial", bundle: bundle, locale: locale)
-        default: return PaveCopy.text("pave.wesh.delivery.publicUnconfirmed", bundle: bundle, locale: locale)
+        case .notSentYet, .sending: return PaveCopy.text("pave.wesh.delivery.waiting", bundle: bundle, locale: locale)
+        case .failed: return PaveCopy.text("pave.wesh.delivery.failed", bundle: bundle, locale: locale)
+        default: return PaveCopy.text("pave.wesh.delivery.sent", bundle: bundle, locale: locale)
         }
     }
 
@@ -1112,17 +1111,21 @@ enum WeshDelivery {
         }
     }
 
-    static func label(_ status: DeliveryStatus, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+    /// A private message's state in the spec's words (§3): En attente, Envoyé, Distribué, Lu, Échec.
+    /// A courier hand-off is « Envoyé ». With a transport, « Envoyé · Internet », as on Android.
+    static func label(_ status: DeliveryStatus, transport: MessageTransport? = nil,
+                      bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+        let word: String
         switch status {
-        case .notSentYet: return PaveCopy.text("pave.wesh.delivery.waiting", bundle: bundle, locale: locale)
-        case .sending: return PaveCopy.text("pave.wesh.delivery.sending", bundle: bundle, locale: locale)
-        case .sent: return PaveCopy.text("pave.wesh.delivery.sent", bundle: bundle, locale: locale)
-        case .carried: return PaveCopy.text("pave.wesh.delivery.carried", bundle: bundle, locale: locale)
-        case .delivered: return PaveCopy.text("pave.wesh.delivery.delivered", bundle: bundle, locale: locale)
-        case .read: return PaveCopy.text("pave.wesh.delivery.read", bundle: bundle, locale: locale)
-        case .failed: return PaveCopy.text("pave.wesh.delivery.failed", bundle: bundle, locale: locale)
-        case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.partial", bundle: bundle, locale: locale)
+        case .notSentYet, .sending: word = PaveCopy.text("pave.wesh.delivery.waiting", bundle: bundle, locale: locale)
+        case .sent, .carried, .partiallyDelivered: word = PaveCopy.text("pave.wesh.delivery.sent", bundle: bundle, locale: locale)
+        case .delivered: word = PaveCopy.text("pave.wesh.delivery.delivered", bundle: bundle, locale: locale)
+        case .read: word = PaveCopy.text("pave.wesh.delivery.read", bundle: bundle, locale: locale)
+        case .failed: word = PaveCopy.text("pave.wesh.delivery.failed", bundle: bundle, locale: locale)
         }
+        guard let transport else { return word }
+        return PaveCopy.text("pave.wesh.delivery.withTransport", bundle: bundle, locale: locale,
+                             word, transportLabel(transport, bundle: bundle, locale: locale))
     }
 }
 
