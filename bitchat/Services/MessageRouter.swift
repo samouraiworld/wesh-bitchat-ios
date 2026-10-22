@@ -53,10 +53,6 @@ final class MessageRouter {
     }
 
     private struct PeerMessageKey: Hashable {
-        // periphery:ignore - read only via the synthesized Hashable
-        // conformance (dictionary-key identity), which the indexer
-        // cannot attribute; see retain_codable_properties in .periphery.yml
-        // for the same class of false positive.
         let peerID: PeerID
         let messageID: String
     }
@@ -157,6 +153,12 @@ final class MessageRouter {
     }
     /// By message ID, for messages still in the outbox (an erase clears it with the outbox).
     private var internetResends: [String: InternetResend] = [:]
+    /// Rule 4: a Bluetooth message still without an ack this long after its last hand-off is
+    /// resent over Internet once, under the same ID (receivers deduplicate), then follows the
+    /// Internet backoff. Without an Internet route at that moment the Bluetooth write stands.
+    private static let bluetoothAckWindow: TimeInterval = 20
+    /// The wake of each message's latest Bluetooth hand-off; older wakes are stale.
+    private var bluetoothAckWakes: [PeerMessageKey: UInt64] = [:]
     private var lastWakeToken: UInt64 = 0
     private let scheduleAfter: (TimeInterval, @escaping @MainActor () -> Void) -> Void
     // Redundant couriers improve delivery odds; receivers dedup by message ID.
@@ -727,6 +729,7 @@ final class MessageRouter {
         outbox.removeAll()
         secureTransmissions.removeAll()
         internetResends.removeAll()
+        bluetoothAckWakes.removeAll()
         forgetInternetStateOutsideOutbox()
         return outboxStore?.wipe() ?? true
     }
@@ -884,6 +887,39 @@ final class MessageRouter {
     ) {
         onMessageAttempted?(messageID, peerID, transport.messageTransport)
         transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
+        if transport.messageTransport == .bluetooth, queuedMessage(messageID, for: peerID) != nil {
+            armBluetoothAckWindow(messageID, for: peerID)
+        }
+    }
+
+    private func armBluetoothAckWindow(_ messageID: String, for peerID: PeerID) {
+        lastWakeToken &+= 1
+        let token = lastWakeToken
+        let key = PeerMessageKey(peerID: peerID, messageID: messageID)
+        bluetoothAckWakes[key] = token
+        scheduleAfter(Self.bluetoothAckWindow) { [weak self] in
+            self?.bluetoothAckWindowEnded(key, token: token)
+        }
+    }
+
+    private func bluetoothAckWindowEnded(_ key: PeerMessageKey, token: UInt64) {
+        guard bluetoothAckWakes[key] == token else { return }
+        bluetoothAckWakes[key] = nil
+        let peerID = key.peerID
+        // Acked, dropped or erased since; no longer admitted (never over Internet then); past
+        // its TTL; or already on the Internet backoff, which retries it on its own.
+        guard let message = queuedMessage(key.messageID, for: peerID),
+              authorized(message, for: peerID),
+              internetResends[key.messageID] == nil,
+              now().timeIntervalSince(message.timestamp) <= Self.messageTTLSeconds,
+              let internet = transports.first(where: { $0.messageTransport == .internet && $0.isPeerReachable(peerID) })
+        else { return }
+        SecureLogger.debug("Bluetooth ack window ended -> \(type(of: internet)) for \(peerID.id.prefix(8))… id=\(key.messageID.prefix(8))…", category: .session)
+        send(message.content, via: internet, to: peerID, recipientNickname: message.nickname, messageID: key.messageID)
+        metrics?.record(.outboxResent)
+        if queuedMessage(key.messageID, for: peerID) != nil {
+            scheduleInternetRetry(key.messageID, for: peerID)
+        }
     }
 
     func flushOutbox(for peerID: PeerID) {
