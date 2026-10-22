@@ -231,23 +231,23 @@ struct PaveContactInternetBadgeTests {
         let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
         let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
         for status in [PaveInternetStatus.connecting(torProgress: 30), .connected, .paused, .failed] {
-            #expect(PaveContactInternetBadge(contact: enrolled, internet: status) == .reachable)
-            #expect(PaveContactInternetBadge(contact: legacy, internet: status) == .rescanRequired)
+            #expect(PaveContactInternetBadge(contact: enrolled, internet: status, routable: true) == .reachable)
+            #expect(PaveContactInternetBadge(contact: legacy, internet: status, routable: false) == .rescanRequired)
         }
     }
 
     @Test func aBlockedContactIsNeverShownAsReachable() {
         let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
         let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
-        #expect(PaveContactInternetBadge(contact: enrolled, internet: .connected, blocked: true) == nil)
-        #expect(PaveContactInternetBadge(contact: legacy, internet: .connected, blocked: true) == nil)
+        #expect(PaveContactInternetBadge(contact: enrolled, internet: .connected, routable: true, blocked: true) == nil)
+        #expect(PaveContactInternetBadge(contact: legacy, internet: .connected, routable: false, blocked: true) == nil)
     }
 
     @Test func noBadgeWhileInternetIsOff() {
         let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
         let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
-        #expect(PaveContactInternetBadge(contact: enrolled, internet: .off) == nil)
-        #expect(PaveContactInternetBadge(contact: legacy, internet: .off) == nil)
+        #expect(PaveContactInternetBadge(contact: enrolled, internet: .off, routable: true) == nil)
+        #expect(PaveContactInternetBadge(contact: legacy, internet: .off, routable: false) == nil)
     }
 
     @Test func aBindingUnderReviewIsNeverShownAsReachable() {
@@ -255,7 +255,7 @@ struct PaveContactInternetBadgeTests {
         let warning = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true, npubProofWarning: true)
         let malformed = Contact(noiseKeyHex: noise, nickname: "Nora", npub: "npub1")
         for contact in [conflict, warning, malformed] {
-            #expect(PaveContactInternetBadge(contact: contact, internet: .connected) == nil)
+            #expect(PaveContactInternetBadge(contact: contact, internet: .connected, routable: false) == nil)
         }
     }
 

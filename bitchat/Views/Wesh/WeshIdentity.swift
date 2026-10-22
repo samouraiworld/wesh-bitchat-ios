@@ -434,6 +434,12 @@ extension ChatViewModel {
     /// usable npub, while Internet mode is On. No Bluetooth session needed.
     @MainActor
     func canSendWeshInternet(to peerID: PeerID) -> Bool {
+        isWeshInternetContact(peerID) && weshInternetIsOn()
+    }
+
+    /// Every trust check of the Internet route except Internet being on: what the contact
+    /// badge shows, so it can never call reachable a contact the route would refuse.
+    func isWeshInternetContact(_ peerID: PeerID) -> Bool {
         guard weshPrivatePolicyEnabled, !panicRecoveryBlocked,
               let key = peerID.noiseKey, key.count == 32,
               identityManager.isPersistenceAvailable,
@@ -446,7 +452,7 @@ extension ChatViewModel {
               WeshQRTrust.shared.fingerprints.contains(fingerprint),
               let contact = WeshQRTrust.shared.contacts.first(where: { Data(hexString: $0.noiseKeyHex) == key }),
               WeshInternetRoute.deliveryNpub(for: contact) != nil else { return false }
-        return weshInternetIsOn()
+        return true
     }
 
     /// `[FAVORITED]:<my npub>` over the live Noise session with an enrolled

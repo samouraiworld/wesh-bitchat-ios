@@ -544,7 +544,9 @@ private struct WeshInbox: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(PaveDisplayName.safe(row.nickname)).font(.headline)
                                     PaveFingerprintText(fingerprint: PaveFingerprint.short(row.peerID.noiseKey))
-                                    if let badge = PaveContactInternetBadge(contact: row, internet: internetStatus) {
+                                    if let badge = PaveContactInternetBadge(
+                                        contact: row, internet: internetStatus,
+                                        routable: runtime.chatViewModel.isWeshInternetContact(row.peerID)) {
                                         PaveInternetBadge(badge: badge)
                                     }
                                     Text(inbox.messages(for: row.peerID).last.map { WeshIncomingMediaPolicy.displayText($0.content) } ?? PaveCopy.text("pave.wesh.inbox.verified"))
@@ -1354,8 +1356,11 @@ private struct WeshContactDetails: View {
 
     /// The stored record, so a rescan while this page is open updates the badge.
     private var internetBadge: PaveContactInternetBadge? {
-        let current = trust.contacts.first { $0.id == contact.id } ?? contact
-        return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus, blocked: blocked)
+        // Fail closed: a contact removed while this page is open gets no badge.
+        guard let current = trust.contacts.first(where: { $0.id == contact.id }) else { return nil }
+        return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus,
+                                        routable: runtime.chatViewModel.isWeshInternetContact(current.peerID),
+                                        blocked: blocked)
     }
 
     var body: some View {
