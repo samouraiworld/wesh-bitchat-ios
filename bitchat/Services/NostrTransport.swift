@@ -202,6 +202,7 @@ final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Senda
     /// Dropped after a relay refusal so the next retry signs a new wrap.
     @MainActor private var pendingWraps: [String: PendingWrap] = [:]
     @MainActor var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)?
+    @MainActor var onInternetAvailable: (() -> Void)?
     private var favoriteStatusObserver: NSObjectProtocol?
 
     // Reachability Cache (thread-safe)
@@ -236,13 +237,17 @@ final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Senda
             self.dependencies.weshOnline?()
                 .sink { [weak self] online in
                     guard let self else { return }
-                    self.queue.async(flags: .barrier) { self.weshIsOnline = online }
+                    self.queue.async(flags: .barrier) {
+                        let cameOn = online && !self.weshIsOnline
+                        self.weshIsOnline = online
+                        if cameOn { self.announceInternetAvailable() }
+                    }
                 }
                 .store(in: &weshCancellables)
             relayConnectivityCancellable = self.dependencies.relayConnectivity()
                 .sink { [weak self] connected in
                     guard let self else { return }
-                    self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                    self.queue.async(flags: .barrier) { self.noteRelaysConnected(connected) }
                 }
             return
         }
@@ -262,8 +267,20 @@ final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Senda
         relayConnectivityCancellable = self.dependencies.relayConnectivity()
             .sink { [weak self] connected in
                 guard let self else { return }
-                self.queue.async(flags: .barrier) { self.relaysConnected = connected }
+                self.queue.async(flags: .barrier) { self.noteRelaysConnected(connected) }
             }
+    }
+
+    /// Must be called on `queue` (barrier). A relay coming back is a chance to retry early.
+    private func noteRelaysConnected(_ connected: Bool) {
+        let reconnected = connected && !relaysConnected
+        relaysConnected = connected
+        if reconnected { announceInternetAvailable() }
+    }
+
+    /// Called after the new state is stored, so the router's retry already sees it.
+    private func announceInternetAvailable() {
+        Task { @MainActor [weak self] in self?.onInternetAvailable?() }
     }
 
     deinit {

@@ -150,6 +150,8 @@ protocol Transport: AnyObject {
 /// wrap) never outlives the outbox.
 protocol RelayConfirmedTransport: AnyObject {
     @MainActor var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)? { get set }
+    /// Relays reconnected or Internet turned On: pending messages may retry early.
+    @MainActor var onInternetAvailable: (() -> Void)? { get set }
     /// Forgets per-message state for every message not in `messageIDs`.
     @MainActor func retainPendingPrivateMessages(_ messageIDs: Set<String>)
 }

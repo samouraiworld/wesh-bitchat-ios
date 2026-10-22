@@ -84,6 +84,8 @@ final class MockTransport: Transport, MeshIdentityRecovering,
     var onSendPrivateMessage: (@MainActor (_ messageID: String) -> Void)?
     /// Set by the router (`RelayConfirmedTransport`); a test calls it to play a relay `OK`.
     var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)?
+    /// Set by the router; a test calls it to play a relay reconnect or Internet turning On.
+    var onInternetAvailable: (() -> Void)?
     /// The last set of message IDs the router said it still holds.
     private(set) var retainedPendingMessageIDs: Set<String>?
     private let mockKeychain = MockKeychain()

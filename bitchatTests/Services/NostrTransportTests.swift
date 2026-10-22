@@ -674,6 +674,43 @@ struct NostrTransportTests {
         #expect(afterErase.id != afterAck.id)
     }
 
+    @Test("Relays reconnecting or Internet turning On is announced once per rise, after the state is stored")
+    @MainActor
+    func internetAvailabilityIsAnnouncedOnEachRise() async throws {
+        let keychain = MockKeychain()
+        let contactPeer = PeerID(hexData: Data(repeating: 0x55, count: 32))
+        let contactNpub = try NostrIdentity.generate().npub
+        let relays = CurrentValueSubject<Bool, Never>(false)
+        let online = CurrentValueSubject<Bool, Never>(false)
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                relayConnectivity: { relays.eraseToAnyPublisher() },
+                weshRecipients: { Just([contactPeer: contactNpub]).eraseToAnyPublisher() },
+                weshOnline: { online.eraseToAnyPublisher() },
+                weshIsBlocked: { _ in false }
+            )
+        )
+        final class Log { var reachableAtAnnounce: [Bool] = [] }
+        let log = Log()
+        transport.onInternetAvailable = { [weak transport] in
+            log.reachableAtAnnounce.append(transport?.isPeerReachable(contactPeer) ?? false)
+        }
+
+        online.send(true)
+        #expect(await TestHelpers.waitUntil({ log.reachableAtAnnounce.count == 1 }, timeout: TestConstants.settleTimeout))
+        #expect(log.reachableAtAnnounce == [true])
+
+        relays.send(true)
+        relays.send(true)
+        online.send(true)
+        relays.send(false)
+        relays.send(true)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(log.reachableAtAnnounce.count == 3)
+    }
+
     @Test("Wesh: the flush on On runs after the state really is On (Published emits in willSet)")
     @MainActor
     func weshFlushWhenOnSeesTheNewState() async {

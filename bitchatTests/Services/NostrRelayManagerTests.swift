@@ -501,6 +501,79 @@ final class NostrRelayManagerTests: XCTestCase {
         XCTAssertEqual(results, [.unconfirmed])
     }
 
+    /// NIP-01 `OK` false reasons, by machine-readable prefix: `duplicate:` is acceptance,
+    /// passing refusals keep the same event, anything else is a refusal of this event.
+    func test_sendEventImmediately_classifiesOKFalseByReasonPrefix() async throws {
+        let relay = "wss://confirmed-prefixes.example"
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: [relay])
+        let connected = await waitUntil {
+            context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+        }
+        XCTAssertTrue(connected)
+        let cases: [(success: Bool, reason: String, expected: NostrPublishOutcome)] = [
+            (true, "", .accepted),
+            (false, "duplicate: already have this event", .accepted),
+            (false, "rate-limited: slow down", .unconfirmed),
+            (false, "error: could not save", .unconfirmed),
+            (false, "auth-required: sign in first", .unconfirmed),
+            (false, "blocked: not allowed", .rejected),
+            (false, "invalid: bad signature", .rejected),
+            (false, "pow: difficulty 20 required", .rejected),
+            (false, "restricted: members only", .rejected),
+            (false, "mute: unknown prefix", .rejected),
+            (false, "no prefix at all", .rejected),
+            (false, "", .rejected)
+        ]
+        for (index, testCase) in cases.enumerated() {
+            let event = try makeSignedEvent(content: "prefix case \(index)")
+            var results: [NostrPublishOutcome] = []
+            context.manager.sendEventImmediately(event, to: [relay]) { results.append($0) }
+            try context.sessionFactory.latestConnection(for: relay)?.emitOK(
+                eventID: event.id,
+                success: testCase.success,
+                reason: testCase.reason
+            )
+            let settled = await waitUntil { results.count == 1 }
+            XCTAssertTrue(settled, "\(testCase.reason)")
+            XCTAssertEqual(results, [testCase.expected], "\(testCase.reason)")
+        }
+    }
+
+    /// Across relays: any acceptance wins, else any refusal, else no verdict.
+    func test_sendEventImmediately_aggregatesAnswersAcrossRelays() async throws {
+        let relays = ["wss://confirmed-agg-one.example", "wss://confirmed-agg-two.example", "wss://confirmed-agg-three.example"]
+        let context = makeContext(defaultRelaysAllowed: false)
+        context.manager.ensureConnections(to: relays)
+        let connected = await waitUntil {
+            relays.allSatisfy { relay in
+                context.manager.relays.first(where: { $0.url == relay })?.isConnected == true
+            }
+        }
+        XCTAssertTrue(connected)
+        let scenarios: [(reasons: [String], expected: NostrPublishOutcome)] = [
+            (["rate-limited: wait", "blocked: no", "duplicate: have it"], .accepted),
+            (["rate-limited: wait", "invalid: bad", "error: disk"], .rejected),
+            (["error: disk", "auth-required: who", "rate-limited: wait"], .unconfirmed)
+        ]
+        for (index, scenario) in scenarios.enumerated() {
+            let event = try makeSignedEvent(content: "aggregate case \(index)")
+            var results: [NostrPublishOutcome] = []
+            context.manager.sendEventImmediately(event, to: relays) { results.append($0) }
+            for (relay, reason) in zip(relays, scenario.reasons) {
+                try context.sessionFactory.latestConnection(for: relay)?.emitOK(
+                    eventID: event.id,
+                    success: false,
+                    reason: reason
+                )
+            }
+            let settled = await waitUntil { results.count == 1 }
+            XCTAssertTrue(settled)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            XCTAssertEqual(results, [scenario.expected], "\(scenario.reasons)")
+        }
+    }
+
     /// A write that never reached the relay is not a refusal: the caller keeps the same event.
     func test_sendEventImmediately_failedWriteIsUnconfirmedNotRejected() async throws {
         let relay = "wss://confirmed-write-failure.example"

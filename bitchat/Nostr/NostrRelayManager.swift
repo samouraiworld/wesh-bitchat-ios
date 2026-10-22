@@ -633,8 +633,25 @@ final class NostrRelayManager: ObservableObject {
     private enum RelayAnswer {
         case accepted
         case rejected
-        /// Write failed or the socket closed: no `OK` will come from this relay.
+        /// No verdict on the event itself: the write failed, the socket closed, or the relay
+        /// refused for a passing reason (`rate-limited:`, `error:`, `auth-required:`).
         case unanswered
+
+        /// NIP-01 `OK`: the machine-readable prefix before ':' says why a relay said false.
+        /// `duplicate:` means the relay already holds the event. Anything unknown, or no
+        /// prefix at all, is a refusal of this event.
+        static func forOK(success: Bool, reason: String) -> RelayAnswer {
+            if success { return .accepted }
+            guard let colon = reason.firstIndex(of: ":") else { return .rejected }
+            switch reason[..<colon].trimmingCharacters(in: .whitespaces).lowercased() {
+            case "duplicate":
+                return .accepted
+            case "rate-limited", "error", "auth-required":
+                return .unanswered
+            default:
+                return .rejected
+            }
+        }
     }
 
     private func resolveConfirmedSend(
@@ -1348,8 +1365,9 @@ final class NostrRelayManager: ObservableObject {
                 }
             }
         case .ok(let eventId, let success, let reason):
-            resolveConfirmedSend(eventID: eventId, relayURL: relayUrl, answer: success ? .accepted : .rejected)
-            if success {
+            let answer = RelayAnswer.forOK(success: success, reason: reason)
+            resolveConfirmedSend(eventID: eventId, relayURL: relayUrl, answer: answer)
+            if answer == .accepted {
                 _ = Self.pendingGiftWrapIDs.remove(eventId)
                 SecureLogger.debug("✅ Accepted id=\(eventId.prefix(16))… relay=\(relayUrl)", category: .session)
             } else {
