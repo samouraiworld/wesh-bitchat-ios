@@ -1087,6 +1087,34 @@ struct MessageRouterTests {
         withExtendedLifetime(router) {}
     }
 
+    /// Once on the Internet backoff, its wakes publish over Internet even while the contact is
+    /// still connected over Bluetooth: no Bluetooth resend every 30 s, the backoff climbs, and
+    /// the Bluetooth attempt cap never drops the message.
+    @Test @MainActor
+    func internetBackoffAfterARule4ResendStaysOnInternetWhileBluetoothIsConnected() async {
+        let peerID = PeerID(str: "00000000000000e7")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "ladder4")
+        clock.now = clock.now.addingTimeInterval(20)
+        scheduler.run(delay: 20)
+        #expect(internet.sentPrivateMessages.count == 1)
+
+        let delays: [TimeInterval] = [30, 60, 120, 240, 480, 960, 1_800, 1_800, 1_800, 1_800]
+        for (index, delay) in delays.enumerated() {
+            #expect(scheduler.pendingDelays == [delay])
+            clock.now = clock.now.addingTimeInterval(delay)
+            scheduler.run(delay: delay)
+            #expect(internet.sentPrivateMessages.count == index + 2)
+        }
+        #expect(mesh.sentPrivateMessages.count == 1)
+        #expect(dropped.isEmpty)
+    }
+
     @Test @MainActor
     func bluetoothMessageAckedWithin20sNeverGoesOverInternet() async {
         let peerID = PeerID(str: "00000000000000e2")

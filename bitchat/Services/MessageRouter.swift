@@ -226,6 +226,10 @@ final class MessageRouter {
         transports.first { $0.isPeerReachable(peerID) }
     }
 
+    private func reachableInternetTransport(for peerID: PeerID) -> Transport? {
+        transports.first { $0.messageTransport == .internet && $0.isPeerReachable(peerID) }
+    }
+
     private func connectedTransport(for peerID: PeerID) -> Transport? {
         transports.first { $0.isPeerConnected(peerID) }
     }
@@ -586,7 +590,7 @@ final class MessageRouter {
                 let earliest = max(now, gapEnd)
                 guard earliest < resend.nextAttemptAt else { continue }
                 if earliest <= now {
-                    flushOutbox(for: peerID, onlyMessageID: message.messageID, earlyRetry: true)
+                    flushOutbox(for: peerID, onlyMessageID: message.messageID, earlyRetry: true, internetOnly: true)
                 } else {
                     armEarlyInternetRetry(message.messageID, for: peerID, after: earliest.timeIntervalSince(now))
                 }
@@ -615,7 +619,7 @@ final class MessageRouter {
             return
         }
         internetResends[messageID]?.earlyWakeToken = nil
-        flushOutbox(for: peerID, onlyMessageID: messageID, earlyRetry: true)
+        flushOutbox(for: peerID, onlyMessageID: messageID, earlyRetry: true, internetOnly: true)
     }
 
     /// 30 s after the first send, doubling after each later one, capped at 30 min.
@@ -644,7 +648,7 @@ final class MessageRouter {
             armInternetRetry(messageID, for: peerID, after: remaining)
             return
         }
-        flushOutbox(for: peerID, onlyMessageID: messageID)
+        flushOutbox(for: peerID, onlyMessageID: messageID, internetOnly: true)
         // Not published (Internet off, or it went over Bluetooth): look again after the same
         // delay, so retries never depend on some other flush happening.
         if let unsent = internetResends[messageID], unsent.wakeToken == token,
@@ -929,7 +933,7 @@ final class MessageRouter {
         guard authorized(message, for: peerID),
               internetResends[key.messageID] == nil,
               now().timeIntervalSince(message.timestamp) <= Self.messageTTLSeconds,
-              let internet = transports.first(where: { $0.messageTransport == .internet && $0.isPeerReachable(peerID) })
+              let internet = reachableInternetTransport(for: peerID)
         else { return }
         SecureLogger.debug("Bluetooth ack window ended -> \(type(of: internet)) for \(peerID.id.prefix(8))… id=\(key.messageID.prefix(8))…", category: .session)
         send(message.content, via: internet, to: peerID, recipientNickname: message.nickname, messageID: key.messageID)
@@ -945,7 +949,10 @@ final class MessageRouter {
 
     /// `onlyMessageID`: a scheduled Internet retry resends its own message, not the whole queue.
     /// `earlyRetry`: an Internet resend may go before its backoff step, 5 min after the last one.
-    private func flushOutbox(for peerID: PeerID, onlyMessageID: String?, earlyRetry: Bool = false) {
+    /// `internetOnly`: a backoff wake publishes over Internet even while Bluetooth is connected;
+    /// Bluetooth resends come from connections and flushes, so the wake never turns into a
+    /// Bluetooth resend every 30 s that burns the attempt cap.
+    private func flushOutbox(for peerID: PeerID, onlyMessageID: String?, earlyRetry: Bool = false, internetOnly: Bool = false) {
         guard let queued = outbox[peerID], !queued.isEmpty else { return }
         SecureLogger.debug("Flushing outbox for \(peerID.id.prefix(8))… count=\(queued.count)", category: .session)
 
@@ -970,7 +977,7 @@ final class MessageRouter {
                 continue
             }
 
-            if let transport = connectedTransport(for: peerID), transport.canDeliverSecurely(to: peerID) {
+            if !internetOnly, let transport = connectedTransport(for: peerID), transport.canDeliverSecurely(to: peerID) {
                 // A secure session is meaningful enough to retry, but not
                 // proof that this particular ciphertext reached the peer: the
                 // remote app may have restarted while our old session still
@@ -991,7 +998,7 @@ final class MessageRouter {
                 send(message.content, via: transport, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
                 outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
-            } else if let transport = connectedTransport(for: peerID) {
+            } else if !internetOnly, let transport = connectedTransport(for: peerID) {
                 // "Connected" without a secure session — possibly a stolen
                 // binding from a replayed announce: send (a genuine link
                 // finishes the handshake and delivers) but keep retaining
@@ -1008,7 +1015,7 @@ final class MessageRouter {
                 )
                 send(message.content, via: transport, to: peerID, recipientNickname: message.nickname, messageID: message.messageID)
                 metrics?.record(.outboxResent)
-            } else if let transport = reachableTransport(for: peerID) {
+            } else if let transport = internetOnly ? reachableInternetTransport(for: peerID) : reachableTransport(for: peerID) {
                 // Reachability without a connection is a freshness heuristic,
                 // so the send can silently go nowhere: send but keep retaining
                 // until an ack clears it, bounded by attempt count for peers
