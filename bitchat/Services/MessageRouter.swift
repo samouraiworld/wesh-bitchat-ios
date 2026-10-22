@@ -79,6 +79,11 @@ final class MessageRouter {
     /// message until an ack arrives.
     var onMessageCarried: ((_ messageID: String, _ peerID: PeerID) -> Void)?
 
+    /// Invoked when a relay accepted an Internet publication of a message the
+    /// outbox still holds (« Envoyé »). Bluetooth sends are marked by the
+    /// caller at hand-off; an Internet hand-off alone proves nothing.
+    var onMessageSent: ((_ messageID: String, _ peerID: PeerID) -> Void)?
+
     /// Keeps retained private messages from remaining in a stale sending state
     /// for the rest of a long session. The returned task also permits a caller
     /// to cancel maintenance when it owns a shorter router lifetime.
@@ -123,9 +128,21 @@ final class MessageRouter {
     // cap because BLE queues/drains them itself.
     private static let maxSendAttempts = 8
     // Internet resends are not capped by count (see `Transport.unackedSendsAreBounded`) but
-    // paced: at most one relay publication per message per hour, so at most 24 before the TTL.
-    private static let internetResendInterval: TimeInterval = 60 * 60
-    private var lastInternetSendAt: [String: Date] = [:]
+    // backed off per message: the first retry 30 s after the send, then 1, 2, 4, 8, 16 min,
+    // then every 30 min until an ack or the 24h TTL. A scheduled wake drives each retry; any
+    // other flush (reconnect, Internet coming On, a flapping peer) cannot publish earlier.
+    private static let internetFirstRetryDelay: TimeInterval = 30
+    private static let internetMaxRetryDelay: TimeInterval = 30 * 60
+    private struct InternetResend {
+        var sends: Int
+        var nextAttemptAt: Date
+        /// Only the latest scheduled wake for the message acts; older ones are stale.
+        var wakeToken: UInt64
+    }
+    /// By message ID, for messages still in the outbox (an erase clears it with the outbox).
+    private var internetResends: [String: InternetResend] = [:]
+    private var lastWakeToken: UInt64 = 0
+    private let scheduleAfter: (TimeInterval, @escaping @MainActor () -> Void) -> Void
     // Redundant couriers improve delivery odds; receivers dedup by message ID.
     private static let maxCouriersPerMessage = 3
 
@@ -134,16 +151,27 @@ final class MessageRouter {
         now: @escaping () -> Date = Date.init,
         courierDirectory: CourierDirectory? = nil,
         outboxStore: MessageOutboxStore? = nil,
-        metrics: StoreAndForwardMetrics? = nil
+        metrics: StoreAndForwardMetrics? = nil,
+        scheduleAfter: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, action in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                Task { @MainActor in action() }
+            }
+        }
     ) {
         self.transports = transports
         self.now = now
         self.courierDirectory = courierDirectory ?? .favoritesBacked()
         self.outboxStore = outboxStore
         self.metrics = metrics
+        self.scheduleAfter = scheduleAfter
         self.outbox = outboxStore?.load() ?? [:]
         outboxStore?.setRecoveryHandler { [weak self] recovered in
             self?.mergeRecoveredOutbox(recovered)
+        }
+        for case let transport as RelayConfirmedTransport in transports {
+            transport.onPrivateMessageAccepted = { [weak self] messageID, peerID in
+                self?.internetSendAccepted(messageID, for: peerID)
+            }
         }
 
         // Observe favorites changes to learn Nostr mapping and flush queued messages
@@ -240,7 +268,7 @@ final class MessageRouter {
             SecureLogger.debug("Routing PM via \(type(of: transport)) (reachable) to \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
             enqueue(message, for: peerID)
             transport.sendPrivateMessage(content, to: peerID, recipientNickname: recipientNickname, messageID: messageID)
-            if !transport.unackedSendsAreBounded { recordInternetSend(messageID) }
+            if !transport.unackedSendsAreBounded { scheduleInternetRetry(messageID, for: peerID) }
             // "Reachable" without prompt delivery means the send only joined
             // a queue (Nostr with relays down): also hand a sealed copy to
             // any connected couriers rather than waiting for internet that
@@ -472,17 +500,67 @@ final class MessageRouter {
         return true
     }
 
-    /// Remembers an Internet publication for pacing. Only messages still in the outbox are
-    /// kept, so the map never outlives them (and an erase clears it with the outbox).
-    private func recordInternetSend(_ messageID: String) {
-        forgetInternetSendsOutsideOutbox()
-        lastInternetSendAt[messageID] = now()
+    /// Records an Internet publication and schedules the message's next retry.
+    private func scheduleInternetRetry(_ messageID: String, for peerID: PeerID) {
+        let sends = (internetResends[messageID]?.sends ?? 0) + 1
+        let delay = Self.internetRetryDelay(afterSends: sends)
+        internetResends[messageID] = InternetResend(
+            sends: sends,
+            nextAttemptAt: now().addingTimeInterval(delay),
+            wakeToken: 0
+        )
+        armInternetRetry(messageID, for: peerID, after: delay)
     }
 
-    private func forgetInternetSendsOutsideOutbox() {
-        guard !lastInternetSendAt.isEmpty else { return }
+    /// 30 s after the first send, doubling after each later one, capped at 30 min.
+    private static func internetRetryDelay(afterSends sends: Int) -> TimeInterval {
+        let doublings = Double(min(max(sends - 1, 0), 16))
+        return min(internetFirstRetryDelay * pow(2, doublings), internetMaxRetryDelay)
+    }
+
+    private func armInternetRetry(_ messageID: String, for peerID: PeerID, after delay: TimeInterval) {
+        lastWakeToken &+= 1
+        let token = lastWakeToken
+        internetResends[messageID]?.wakeToken = token
+        scheduleAfter(delay) { [weak self] in
+            self?.internetRetryDue(messageID, for: peerID, token: token)
+        }
+    }
+
+    private func internetRetryDue(_ messageID: String, for peerID: PeerID, token: UInt64) {
+        // Acked, dropped or erased since, or superseded by a later send's wake.
+        guard let resend = internetResends[messageID], resend.wakeToken == token,
+              queuedMessage(messageID, for: peerID) != nil else { return }
+        let remaining = resend.nextAttemptAt.timeIntervalSince(now())
+        guard remaining <= 0 else {
+            // Woke before the wall clock reached the deadline: wait the rest.
+            armInternetRetry(messageID, for: peerID, after: remaining)
+            return
+        }
+        flushOutbox(for: peerID, onlyMessageID: messageID)
+        // Not published (Internet off, or it went over Bluetooth): look again after the same
+        // delay, so retries never depend on some other flush happening.
+        if let unsent = internetResends[messageID], unsent.wakeToken == token,
+           queuedMessage(messageID, for: peerID) != nil {
+            armInternetRetry(messageID, for: peerID, after: Self.internetRetryDelay(afterSends: unsent.sends))
+        }
+    }
+
+    /// A relay accepted a publication. A late `OK` for a message already acked, dropped or
+    /// erased changes nothing.
+    private func internetSendAccepted(_ messageID: String, for peerID: PeerID) {
+        guard queuedMessage(messageID, for: peerID) != nil else { return }
+        onMessageSent?(messageID, peerID)
+    }
+
+    /// Internet retry state and the transports' per-message state (signed gift wraps) only
+    /// live as long as the message is in the outbox: ack, drop, TTL or erase forgets them.
+    private func forgetInternetStateOutsideOutbox() {
+        let relayConfirmed = transports.compactMap { $0 as? RelayConfirmedTransport }
+        guard !internetResends.isEmpty || !relayConfirmed.isEmpty else { return }
         let queued = Set(outbox.values.flatMap { $0.map(\.messageID) })
-        lastInternetSendAt = lastInternetSendAt.filter { queued.contains($0.key) }
+        internetResends = internetResends.filter { queued.contains($0.key) }
+        relayConfirmed.forEach { $0.retainPendingPrivateMessages(queued) }
     }
 
     @discardableResult
@@ -507,6 +585,7 @@ final class MessageRouter {
 
     private func persistOutbox() {
         outboxStore?.save(outbox)
+        forgetInternetStateOutsideOutbox()
     }
 
     /// A cold BLE restoration can launch before protected files are readable.
@@ -545,7 +624,8 @@ final class MessageRouter {
     func wipeOutbox() -> Bool {
         outbox.removeAll()
         secureTransmissions.removeAll()
-        lastInternetSendAt.removeAll()
+        internetResends.removeAll()
+        forgetInternetStateOutsideOutbox()
         return outboxStore?.wipe() ?? true
     }
 
@@ -691,6 +771,11 @@ final class MessageRouter {
     }
 
     func flushOutbox(for peerID: PeerID) {
+        flushOutbox(for: peerID, onlyMessageID: nil)
+    }
+
+    /// `onlyMessageID`: a scheduled Internet retry resends its own message, not the whole queue.
+    private func flushOutbox(for peerID: PeerID, onlyMessageID: String?) {
         guard let queued = outbox[peerID], !queued.isEmpty else { return }
         SecureLogger.debug("Flushing outbox for \(peerID.id.prefix(8))… count=\(queued.count)", category: .session)
 
@@ -698,6 +783,7 @@ final class MessageRouter {
         var outboxChanged = false
 
         for message in queued {
+            if let onlyMessageID, message.messageID != onlyMessageID { continue }
             guard authorized(message, for: peerID) else { continue }
             // A synchronous ack from an earlier send in this flush may have
             // removed an entry from the live outbox. The snapshot is only an
@@ -767,8 +853,8 @@ final class MessageRouter {
                     continue
                 }
                 if !transport.unackedSendsAreBounded,
-                   let last = lastInternetSendAt[message.messageID],
-                   now.timeIntervalSince(last) < Self.internetResendInterval {
+                   let resend = internetResends[message.messageID],
+                   now < resend.nextAttemptAt {
                     continue
                 }
                 SecureLogger.debug("Outbox -> \(type(of: transport)) (reachable) for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…", category: .session)
@@ -776,8 +862,8 @@ final class MessageRouter {
                 metrics?.record(.outboxResent)
                 if transport.unackedSendsAreBounded {
                     outboxChanged = incrementSendAttemptsIfQueued(message.messageID, for: peerID) || outboxChanged
-                } else {
-                    recordInternetSend(message.messageID)
+                } else if queuedMessage(message.messageID, for: peerID) != nil {
+                    scheduleInternetRetry(message.messageID, for: peerID)
                 }
             }
         }
@@ -785,7 +871,6 @@ final class MessageRouter {
         if outboxChanged {
             persistOutbox()
         }
-        forgetInternetSendsOutsideOutbox()
     }
 
     func flushAllOutbox() {

@@ -691,67 +691,174 @@ struct MessageRouterTests {
 
     /// An Internet send to a contact whose QR carries an npub but who never turned Internet on
     /// cannot be told from silence. Those resends must not burn the attempt cap and drop the
-    /// message before the two phones meet over Bluetooth; they are paced to one an hour, so a
-    /// flapping peer cannot pump relay publications, and the 24h TTL still ends (and reports) it.
+    /// message before the two phones meet over Bluetooth. They back off per message (30 s after
+    /// the send, then doubling, capped at 30 min) on a scheduled wake, flushes in between
+    /// (a flapping peer, Internet coming back) publish nothing early, and the 24h TTL still ends
+    /// (and reports) the message.
     @Test @MainActor
-    func flushOutbox_internetResendsArePacedAndOnlyTheTTLDropsThem() async {
+    func internetResendsBackOffExponentiallyAndOnlyTheTTLDropsThem() async {
         let peerID = PeerID(str: "00000000000000ae")
         let internet = MockTransport()
         internet.unackedSendsAreBounded = false
         internet.reachablePeers.insert(peerID)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var clock = start
-        let router = MessageRouter(transports: [internet], now: { clock })
+        let scheduler = ManualRetryScheduler()
+        let router = MessageRouter(transports: [internet], now: { clock }, scheduleAfter: scheduler.schedule)
         var dropped: [String] = []
         router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
 
         router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "in1")
-        // Flushes inside the hour publish nothing new.
-        for minute in [1, 30, 59] {
-            clock = start.addingTimeInterval(TimeInterval(minute * 60))
-            router.flushOutbox(for: peerID)
-        }
         #expect(internet.sentPrivateMessages.count == 1)
 
-        // Hourly, well past maxSendAttempts (8): one resend each, none drops.
-        for hour in 1...10 {
-            clock = start.addingTimeInterval(TimeInterval(hour * 3_600 + 60))
+        // 30 s, 1, 2, 4, 8, 16 min, then capped at 30 min: well past maxSendAttempts (8).
+        let expectedDelays: [TimeInterval] = [30, 60, 120, 240, 480, 960, 1_800, 1_800, 1_800, 1_800]
+        for (index, delay) in expectedDelays.enumerated() {
+            #expect(scheduler.pendingDelays == [delay])
+            // A flush storm one second before the deadline publishes nothing.
+            clock = clock.addingTimeInterval(delay - 1)
+            for _ in 0..<5 { router.flushOutbox(for: peerID) }
+            #expect(internet.sentPrivateMessages.count == index + 1)
+            // The scheduled wake publishes on time, without any flush.
+            clock = clock.addingTimeInterval(1)
+            scheduler.runNext()
+            #expect(internet.sentPrivateMessages.count == index + 2)
+            // A flush right after does not publish again.
             router.flushOutbox(for: peerID)
-            router.flushOutbox(for: peerID)
+            #expect(internet.sentPrivateMessages.count == index + 2)
         }
         #expect(dropped.isEmpty)
-        #expect(internet.sentPrivateMessages.count == 11)
+        #expect(internet.sentPrivateMessages.allSatisfy { $0.messageID == "in1" })
 
-        // Past the 24h TTL the copy is dropped and the failure reported.
+        // Past the 24h TTL the pending wake drops the copy and reports the failure.
         clock = start.addingTimeInterval(25 * 3_600)
-        router.flushOutbox(for: peerID)
+        scheduler.runNext()
         #expect(dropped == ["in1"])
-        #expect(internet.sentPrivateMessages.count == 11)
+        #expect(internet.sentPrivateMessages.count == expectedDelays.count + 1)
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(internet.retainedPendingMessageIDs == [])
     }
 
-    /// An erase leaves no pacing state behind: a message queued after the wipe goes out on the
-    /// next flush instead of being held back by a timestamp from before it.
+    /// A wake that fires before the wall clock reaches the deadline waits the rest instead of
+    /// publishing early or going quiet; a wake whose message left the outbox does nothing.
     @Test @MainActor
-    func wipeOutbox_forgetsInternetResendPacing() async {
+    func internetRetryWakeRearmsWhenEarlyAndStopsOnceAcked() async {
+        let peerID = PeerID(str: "00000000000000b1")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start
+        let scheduler = ManualRetryScheduler()
+        let router = MessageRouter(transports: [internet], now: { clock }, scheduleAfter: scheduler.schedule)
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "early")
+        clock = start.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.count == 1)
+        #expect(scheduler.pendingDelays == [10])
+
+        clock = start.addingTimeInterval(30)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.count == 2)
+        #expect(scheduler.pendingDelays == [60])
+
+        router.markDelivered("early")
+        clock = start.addingTimeInterval(120)
+        scheduler.runNext()
+        router.flushOutbox(for: peerID)
+        #expect(internet.sentPrivateMessages.count == 2)
+        #expect(scheduler.pendingDelays.isEmpty)
+    }
+
+    /// A wake that finds Internet off publishes nothing and keeps the retry alive, so the
+    /// message goes out once Internet is back even if no other flush happens.
+    @Test @MainActor
+    func internetRetryWakeKeepsWaitingWhileInternetIsOff() async {
+        let peerID = PeerID(str: "00000000000000b3")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var clock = start
+        let scheduler = ManualRetryScheduler()
+        let router = MessageRouter(transports: [internet], now: { clock }, scheduleAfter: scheduler.schedule)
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "off")
+        internet.reachablePeers.remove(peerID)
+        clock = start.addingTimeInterval(30)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.count == 1)
+        #expect(scheduler.pendingDelays == [30])
+
+        internet.reachablePeers.insert(peerID)
+        clock = start.addingTimeInterval(60)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.count == 2)
+        #expect(scheduler.pendingDelays == [60])
+    }
+
+    /// « Envoyé » for Internet comes from a relay OK for a message still in the outbox. A
+    /// hand-off alone reports nothing, and a late OK after the ack (or a drop) changes nothing.
+    @Test @MainActor
+    func relayAcceptanceReportsSentOnlyForQueuedMessages() async {
+        let peerID = PeerID(str: "00000000000000b2")
+        let internet = MockTransport()
+        internet.unackedSendsAreBounded = false
+        internet.reachablePeers.insert(peerID)
+        let router = MessageRouter(transports: [internet], scheduleAfter: ManualRetryScheduler().schedule)
+        var sent: [String] = []
+        router.onMessageSent = { messageID, _ in sent.append(messageID) }
+
+        router.sendPrivate("Hello", to: peerID, recipientNickname: "Peer", messageID: "ok1")
+        #expect(internet.sentPrivateMessages.count == 1)
+        #expect(sent.isEmpty)
+
+        internet.onPrivateMessageAccepted?("ok1", peerID)
+        #expect(sent == ["ok1"])
+
+        router.markDelivered("ok1")
+        internet.onPrivateMessageAccepted?("ok1", peerID)
+        internet.onPrivateMessageAccepted?("never-queued", peerID)
+        #expect(sent == ["ok1"])
+    }
+
+    /// Per-message Internet state (backoff here, the signed gift wrap in the transport) lives
+    /// only while the message is in the outbox: an ack forgets it, and so does an erase, after
+    /// which a message queued again goes out on the next flush.
+    @Test @MainActor
+    func internetStateIsForgottenOnAckAndOnErase() async {
         let peerID = PeerID(str: "00000000000000af")
         let internet = MockTransport()
         internet.unackedSendsAreBounded = false
         internet.reachablePeers.insert(peerID)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var clock = start
-        let router = MessageRouter(transports: [internet], now: { clock })
+        let scheduler = ManualRetryScheduler()
+        let router = MessageRouter(transports: [internet], now: { clock }, scheduleAfter: scheduler.schedule)
 
-        router.sendPrivate("Before", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        router.sendPrivate("First", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        router.sendPrivate("Second", to: peerID, recipientNickname: "Peer", messageID: "w2")
+        router.markDelivered("w1")
+        #expect(internet.retainedPendingMessageIDs == ["w2"])
+
         #expect(router.wipeOutbox())
+        #expect(internet.retainedPendingMessageIDs == [])
 
         internet.reachablePeers.remove(peerID)
-        clock = start.addingTimeInterval(60)
-        router.sendPrivate("After", to: peerID, recipientNickname: "Peer", messageID: "w1")
+        clock = start.addingTimeInterval(5)
+        router.sendPrivate("After", to: peerID, recipientNickname: "Peer", messageID: "w2")
         internet.reachablePeers.insert(peerID)
-        clock = start.addingTimeInterval(120)
+        clock = start.addingTimeInterval(10)
         router.flushOutbox(for: peerID)
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["w1", "w2", "w2"])
 
-        #expect(internet.sentPrivateMessages.count == 2)
+        // Wakes armed before the erase are stale; only the new send's wake acts.
+        clock = start.addingTimeInterval(40)
+        #expect(scheduler.pendingDelays == [30, 30, 30])
+        for _ in 0..<3 { scheduler.runNext() }
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["w1", "w2", "w2", "w2"])
+        #expect(scheduler.pendingDelays == [60])
     }
 
     @Test @MainActor
@@ -1306,4 +1413,24 @@ struct MessageRouterTests {
 /// without real waiting.
 private final class MutableTestClock {
     var now = Date(timeIntervalSince1970: 1_700_000_000)
+}
+
+/// Holds the router's scheduled Internet retry wakes until the test runs them.
+private final class ManualRetryScheduler {
+    private var pending: [(delay: TimeInterval, action: @MainActor () -> Void)] = []
+
+    var pendingDelays: [TimeInterval] { pending.map(\.delay) }
+
+    func schedule(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        pending.append((delay, action))
+    }
+
+    /// Runs the oldest wake; false when none is pending.
+    @MainActor
+    @discardableResult
+    func runNext() -> Bool {
+        guard !pending.isEmpty else { return false }
+        pending.removeFirst().action()
+        return true
+    }
 }

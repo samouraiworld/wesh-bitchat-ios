@@ -133,6 +133,14 @@ private extension ChatViewModelBootstrapper {
                 viewModel.conversations.setDeliveryStatus(.carried, forMessageID: messageID)
             }
         }
+        // « Envoyé » for an Internet send: a relay answered OK. The store's
+        // no-downgrade rule keeps carried/delivered/read; a failure shown
+        // already is not taken back by a late relay answer.
+        viewModel.messageRouter.onMessageSent = { [weak viewModel] messageID, _ in
+            guard let viewModel else { return }
+            if case .failed = viewModel.conversations.deliveryStatus(forMessageID: messageID) { return }
+            viewModel.conversations.setDeliveryStatus(.sent, forMessageID: messageID)
+        }
         viewModel.commandProcessor.contextProvider = viewModel
         viewModel.commandProcessor.meshService = viewModel.meshService
     }

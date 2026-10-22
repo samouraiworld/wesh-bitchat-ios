@@ -4,7 +4,7 @@ import Foundation
 import Combine
 
 // Minimal Nostr transport conforming to Transport for offline sending
-final class NostrTransport: Transport, @unchecked Sendable {
+final class NostrTransport: Transport, RelayConfirmedTransport, @unchecked Sendable {
     struct Dependencies {
         let notificationCenter: NotificationCenter
         let loadFavorites: @MainActor () -> [Data: FavoritesPersistenceService.FavoriteRelationship]
@@ -13,6 +13,9 @@ final class NostrTransport: Transport, @unchecked Sendable {
         let currentIdentity: @MainActor () throws -> NostrIdentity?
         let registerPendingGiftWrap: @MainActor (String) -> Void
         let sendEvent: @MainActor (NostrEvent) -> Void
+        /// Publishes a private message and reports the relays' answer
+        /// (`NostrRelayManager.sendEventImmediately`): « Envoyé » needs a relay `OK`.
+        let publishEvent: @MainActor (NostrEvent, @escaping @MainActor (NostrPublishOutcome) -> Void) -> Void
         /// Emits whether a relay that carries private messages is up
         /// (fail-closed behind Tor). A connected geohash/custom relay alone
         /// doesn't count: DM sends target the default relay set and would
@@ -38,6 +41,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             currentIdentity: @escaping @MainActor () throws -> NostrIdentity?,
             registerPendingGiftWrap: @escaping @MainActor (String) -> Void,
             sendEvent: @escaping @MainActor (NostrEvent) -> Void,
+            publishEvent: @escaping @MainActor (NostrEvent, @escaping @MainActor (NostrPublishOutcome) -> Void) -> Void,
             scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void,
             relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never>,
             ackPacer: AckPacer? = nil,
@@ -52,6 +56,7 @@ final class NostrTransport: Transport, @unchecked Sendable {
             self.currentIdentity = currentIdentity
             self.registerPendingGiftWrap = registerPendingGiftWrap
             self.sendEvent = sendEvent
+            self.publishEvent = publishEvent
             self.relayConnectivity = relayConnectivity
             // Default pacer drives its throttle through the same injected
             // scheduler, so tests that step scheduleAfter manually keep
@@ -86,6 +91,11 @@ final class NostrTransport: Transport, @unchecked Sendable {
                 currentIdentity: { idBridge.messagingIdentity() },
                 registerPendingGiftWrap: { NostrRelayManager.registerPendingGiftWrap(id: $0) },
                 sendEvent: { NostrRelayManager.shared.sendEvent($0) },
+                publishEvent: { event, completion in
+                    NostrRelayManager.shared.sendEventImmediately(event) { outcome in
+                        Task { @MainActor in completion(outcome) }
+                    }
+                },
                 scheduleAfter: { delay, action in
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
                 },
@@ -177,6 +187,21 @@ final class NostrTransport: Transport, @unchecked Sendable {
     }
     static let sharedAckPacer = AckPacer()
     private let dependencies: Dependencies
+
+    /// A signed gift wrap kept so a retry republishes the same event (same id): relays answer
+    /// `duplicate` and the recipient sees one message. Memory only, never written to disk.
+    private struct PendingWrap {
+        let event: NostrEvent
+        let recipientHex: String
+        let senderPubkey: String
+        /// Erase epoch the wrap was signed under; an erase makes it unusable.
+        let epoch: UInt64
+    }
+
+    /// By message ID, for messages the router still holds (`retainPendingPrivateMessages`).
+    /// Dropped after a relay refusal so the next retry signs a new wrap.
+    @MainActor private var pendingWraps: [String: PendingWrap] = [:]
+    @MainActor var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)?
     private var favoriteStatusObserver: NSObjectProtocol?
 
     // Reachability Cache (thread-safe)
@@ -339,13 +364,72 @@ final class NostrTransport: Transport, @unchecked Sendable {
             guard let recipientNpub = resolveRecipientNpub(for: peerID),
                   let recipientHex = npubToHex(recipientNpub),
                   let senderIdentity = try? dependencies.currentIdentity() else { return }
-            SecureLogger.debug("NostrTransport: preparing PM to \(recipientNpub.prefix(16))… id=\(messageID.prefix(8))…", category: .session)
-            guard let embedded = NostrEmbeddedBitChat.encodePMForNostr(content: content, messageID: messageID, recipientPeerID: peerID, senderPeerID: senderPeerID) else {
-                SecureLogger.error("NostrTransport: failed to embed PM packet", category: .session)
-                return
+            guard let event = privateMessageWrap(
+                content: content,
+                to: peerID,
+                recipientHex: recipientHex,
+                senderIdentity: senderIdentity,
+                messageID: messageID,
+                epoch: epoch
+            ) else { return }
+            dependencies.publishEvent(event) { outcome in
+                guard epoch == self.dependencies.ackPacer.eraseEpoch else { return }
+                switch outcome {
+                case .accepted:
+                    self.onPrivateMessageAccepted?(messageID, peerID)
+                case .rejected:
+                    // Refused: the next retry signs a new wrap. Only this one is forgotten,
+                    // in case a newer wrap replaced it meanwhile.
+                    if self.pendingWraps[messageID]?.event.id == event.id {
+                        self.pendingWraps.removeValue(forKey: messageID)
+                    }
+                case .unconfirmed:
+                    // No answer is not a refusal: the retry republishes this same event.
+                    break
+                }
             }
-            sendWrappedMessage(content: embedded, recipientHex: recipientHex, senderIdentity: senderIdentity)
         }
+    }
+
+    /// The cached wrap for a retry, or a newly signed one.
+    @MainActor
+    private func privateMessageWrap(
+        content: String,
+        to peerID: PeerID,
+        recipientHex: String,
+        senderIdentity: NostrIdentity,
+        messageID: String,
+        epoch: UInt64
+    ) -> NostrEvent? {
+        if let cached = pendingWraps[messageID],
+           cached.epoch == epoch,
+           cached.recipientHex == recipientHex,
+           cached.senderPubkey == senderIdentity.publicKeyHex {
+            SecureLogger.debug("NostrTransport: republishing PM id=\(messageID.prefix(8))…", category: .session)
+            return cached.event
+        }
+        SecureLogger.debug("NostrTransport: preparing PM id=\(messageID.prefix(8))…", category: .session)
+        guard let embedded = NostrEmbeddedBitChat.encodePMForNostr(content: content, messageID: messageID, recipientPeerID: peerID, senderPeerID: senderPeerID) else {
+            SecureLogger.error("NostrTransport: failed to embed PM packet", category: .session)
+            return nil
+        }
+        guard let event = try? NostrProtocol.createPrivateMessage(content: embedded, recipientPubkey: recipientHex, senderIdentity: senderIdentity) else {
+            SecureLogger.error("NostrTransport: failed to build Nostr event", category: .session)
+            return nil
+        }
+        pendingWraps[messageID] = PendingWrap(
+            event: event,
+            recipientHex: recipientHex,
+            senderPubkey: senderIdentity.publicKeyHex,
+            epoch: epoch
+        )
+        return event
+    }
+
+    @MainActor
+    func retainPendingPrivateMessages(_ messageIDs: Set<String>) {
+        guard !pendingWraps.isEmpty else { return }
+        pendingWraps = pendingWraps.filter { messageIDs.contains($0.key) }
     }
 
     func sendReadReceipt(_ receipt: ReadReceipt, to peerID: PeerID) {

@@ -357,8 +357,6 @@ final class ChatPrivateConversationCoordinator {
         let isReachable = context.isPeerReachable(peerID)
         let favoriteStatus = noiseKey.flatMap { context.favoriteRelationship(forNoiseKey: $0) }
             ?? context.favoriteRelationship(forPeerID: peerID)
-        let isMutualFavorite = favoriteStatus?.isMutual ?? false
-        let hasNostrKey = favoriteStatus?.peerNostrPublicKey != nil
 
         // "anon" matches the app's default-nickname convention; "user" is
         // banned copy.
@@ -397,12 +395,15 @@ final class ChatPrivateConversationCoordinator {
             recipientNickname: recipientNickname,
             messageID: messageID
         )
-        if isConnected || isReachable || (isMutualFavorite && hasNostrKey) {
+        // Bluetooth: the hand-off to a live or reachable link is « Envoyé ».
+        if isConnected || isReachable {
             context.setPrivateDeliveryStatus(.sent, forMessageID: messageID, peerID: peerID)
         }
         // Otherwise the message stays "sending"; router callbacks move it to
-        // carried (📦) when a courier/bridge copy ships, delivered/read on
-        // acks, or failed when the outbox TTL expires.
+        // sent once a relay accepts an Internet publication (a hand-off to
+        // the relay layer alone proves nothing), carried (📦) when a
+        // courier/bridge copy ships, delivered/read on acks, or failed when
+        // the outbox TTL expires.
     }
 
     func handlePrivateMessage(

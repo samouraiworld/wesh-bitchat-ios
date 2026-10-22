@@ -4,6 +4,17 @@ import Network
 import Combine
 import Tor
 
+/// How the relays answered a `sendEventImmediately` publication.
+enum NostrPublishOutcome: Equatable, Sendable {
+    /// A relay answered `OK` true.
+    case accepted
+    /// No relay accepted and at least one answered `OK` false: this event was refused.
+    case rejected
+    /// No relay answered either way (timeout, failed write, disconnect, no relay up,
+    /// network fenced). The same event may still be accepted on a retry.
+    case unconfirmed
+}
+
 protocol NostrRelayConnectionProtocol: AnyObject {
     func resume()
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
@@ -264,7 +275,9 @@ final class NostrRelayManager: ObservableObject {
     private struct ConfirmedSendState {
         let token: UUID
         var awaitingRelays: Set<String>
-        let completion: (Bool) -> Void
+        /// A relay answered `OK` false; the outcome is `.rejected` unless another accepts.
+        var sawRejection = false
+        let completion: (NostrPublishOutcome) -> Void
     }
     private var confirmedSends: [String: ConfirmedSendState] = [:]
     // Total pending sends dropped at the queue cap; drives the sampled
@@ -439,7 +452,7 @@ final class NostrRelayManager: ObservableObject {
         }
         let confirmed = confirmedSends.values.map(\.completion)
         confirmedSends.removeAll()
-        confirmed.forEach { $0(false) }
+        confirmed.forEach { $0(.unconfirmed) }
         pendingTorConnectionURLs.removeAll()
         awaitingTorForConnections = false
         torReadyWaitAttempts = 0
@@ -554,18 +567,20 @@ final class NostrRelayManager: ObservableObject {
     /// `OK`. A successful WebSocket write alone is not durable acceptance.
     /// Unlike `sendEvent`, this never enters the process-local pending queue;
     /// callers use it when success unlocks durable state or user-visible
-    /// delivery progress.
+    /// delivery progress. `.rejected` (a relay answered `OK` false) is told
+    /// apart from `.unconfirmed` (no answer) so a caller can keep republishing
+    /// the same event after a timeout and rebuild it only after a refusal.
     func sendEventImmediately(
         _ event: NostrEvent,
         to relayUrls: [String]? = nil,
-        completion: @escaping (Bool) -> Void
+        completion: @escaping (NostrPublishOutcome) -> Void
     ) {
         guard dependencies.activationAllowed() else {
-            completion(false)
+            completion(.unconfirmed)
             return
         }
         guard !(shouldUseTor && dependencies.torEnforced() && !dependencies.torIsReady()) else {
-            completion(false)
+            completion(.unconfirmed)
             return
         }
 
@@ -576,14 +591,14 @@ final class NostrRelayManager: ObservableObject {
             return (relayUrl, connection)
         }
         guard !connectedTargets.isEmpty else {
-            completion(false)
+            completion(.unconfirmed)
             return
         }
 
         let token = UUID()
         let eventID = event.id
         if let replaced = confirmedSends.removeValue(forKey: eventID) {
-            replaced.completion(false)
+            replaced.completion(.unconfirmed)
         }
         confirmedSends[eventID] = ConfirmedSendState(
             token: token,
@@ -601,12 +616,12 @@ final class NostrRelayManager: ObservableObject {
                 guard let self else { return }
                 // Success only means the bytes reached the socket; wait for
                 // the matching relay OK. A failed write settles this target
-                // as rejected because no OK can arrive for it.
+                // (no OK can arrive for it) without counting as a refusal.
                 if !succeeded {
                     self.resolveConfirmedSend(
                         eventID: eventID,
                         relayURL: relayUrl,
-                        accepted: false,
+                        answer: .unanswered,
                         token: token
                     )
                 }
@@ -614,21 +629,30 @@ final class NostrRelayManager: ObservableObject {
         }
     }
 
+    /// What one relay did with a confirmed send.
+    private enum RelayAnswer {
+        case accepted
+        case rejected
+        /// Write failed or the socket closed: no `OK` will come from this relay.
+        case unanswered
+    }
+
     private func resolveConfirmedSend(
         eventID: String,
         relayURL: String,
-        accepted: Bool,
+        answer: RelayAnswer,
         token: UUID? = nil
     ) {
         guard var state = confirmedSends[eventID],
               token == nil || state.token == token,
               state.awaitingRelays.remove(relayURL) != nil else { return }
-        if accepted {
+        if answer == .rejected { state.sawRejection = true }
+        if answer == .accepted {
             confirmedSends.removeValue(forKey: eventID)
-            state.completion(true)
+            state.completion(.accepted)
         } else if state.awaitingRelays.isEmpty {
             confirmedSends.removeValue(forKey: eventID)
-            state.completion(false)
+            state.completion(state.sawRejection ? .rejected : .unconfirmed)
         } else {
             confirmedSends[eventID] = state
         }
@@ -637,7 +661,7 @@ final class NostrRelayManager: ObservableObject {
     private func timeoutConfirmedSend(eventID: String, token: UUID) {
         guard let state = confirmedSends[eventID], state.token == token else { return }
         confirmedSends.removeValue(forKey: eventID)
-        state.completion(false)
+        state.completion(state.sawRejection ? .rejected : .unconfirmed)
     }
 
     private func enqueuePendingSend(_ event: NostrEvent, pendingRelays: Set<String>) {
@@ -1324,7 +1348,7 @@ final class NostrRelayManager: ObservableObject {
                 }
             }
         case .ok(let eventId, let success, let reason):
-            resolveConfirmedSend(eventID: eventId, relayURL: relayUrl, accepted: success)
+            resolveConfirmedSend(eventID: eventId, relayURL: relayUrl, answer: success ? .accepted : .rejected)
             if success {
                 _ = Self.pendingGiftWrapIDs.remove(eventId)
                 SecureLogger.debug("✅ Accepted id=\(eventId.prefix(16))… relay=\(relayUrl)", category: .session)
@@ -1442,7 +1466,7 @@ final class NostrRelayManager: ObservableObject {
             state.awaitingRelays.contains(relayUrl) ? eventID : nil
         }
         for eventID in awaitingConfirmation {
-            resolveConfirmedSend(eventID: eventID, relayURL: relayUrl, accepted: false)
+            resolveConfirmedSend(eventID: eventID, relayURL: relayUrl, answer: .unanswered)
         }
         updateRelayStatus(relayUrl, isConnected: false, error: error)
         settleEOSETrackers(droppingRelay: relayUrl)
