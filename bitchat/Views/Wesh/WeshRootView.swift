@@ -1094,13 +1094,12 @@ private struct WeshMessageBubble: View {
 }
 
 enum WeshDelivery {
+    /// The public room has no receipts: En attente, Envoyé or Échec, as on Android.
     static func publicLabel(_ status: DeliveryStatus, bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         switch status {
-        case .notSentYet: return PaveCopy.text("pave.wesh.delivery.publicWaiting", bundle: bundle, locale: locale)
-        case .sending: return PaveCopy.text("pave.wesh.delivery.publicSending", bundle: bundle, locale: locale)
-        case .failed: return PaveCopy.text("pave.wesh.delivery.publicFailed", bundle: bundle, locale: locale)
-        case .partiallyDelivered: return PaveCopy.text("pave.wesh.delivery.publicPartial", bundle: bundle, locale: locale)
-        default: return PaveCopy.text("pave.wesh.delivery.publicUnconfirmed", bundle: bundle, locale: locale)
+        case .notSentYet, .sending: return PaveCopy.text("pave.wesh.delivery.waiting", bundle: bundle, locale: locale)
+        case .failed: return PaveCopy.text("pave.wesh.delivery.failed", bundle: bundle, locale: locale)
+        default: return PaveCopy.text("pave.wesh.delivery.sent", bundle: bundle, locale: locale)
         }
     }
 

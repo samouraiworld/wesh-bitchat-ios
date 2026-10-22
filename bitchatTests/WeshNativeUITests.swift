@@ -1150,9 +1150,13 @@ struct WeshNativeUITests {
         let bundle = try #require(Bundle(path: path))
         let publicLabel: (DeliveryStatus) -> String = { WeshDelivery.publicLabel($0, bundle: bundle, locale: Locale(identifier: "fr")) }
         let label: (DeliveryStatus) -> String = { WeshDelivery.label($0, bundle: bundle, locale: Locale(identifier: "fr")) }
-        #expect(publicLabel(.notSentYet) == "En attente de diffusion")
-        #expect(publicLabel(.failed(reason: "offline")) == "Échec de diffusion")
-        #expect(publicLabel(.read(by: "Nora", at: Date())).contains("non confirmée"))
+        // The public room has no receipts: En attente / Envoyé / Échec only, as on Android.
+        #expect(publicLabel(.notSentYet) == "En attente")
+        #expect(publicLabel(.sending) == "En attente")
+        #expect(publicLabel(.sent) == "Envoyé")
+        #expect(publicLabel(.partiallyDelivered(reached: 1, total: 3)) == "Envoyé")
+        #expect(publicLabel(.read(by: "Nora", at: Date())) == "Envoyé")
+        #expect(publicLabel(.failed(reason: "offline")) == "Échec")
         // Spec §3: En attente / Envoyé / Distribué / Lu / Échec. A courier hand-off is « Envoyé ».
         #expect(label(.notSentYet) == "En attente")
         #expect(label(.sending) == "En attente")
