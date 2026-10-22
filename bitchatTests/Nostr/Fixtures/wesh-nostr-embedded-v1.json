@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "embedded": "bitchat1:AREHAAABi8_laAABAEoBAgMEBQYHCDAMnJYDuSpLAQAkOEY3RTRDMkEtMUIzRC00RTVGLTlBNkItN0M4RDlFMEYxQTJCASFTYWx1dCBOb3JhLCByZW5kZXotdm91cyDDoCAxOCBoID-YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmA",
+      "name": "privateMessage",
+      "noisePayloadType": 1,
+      "packetHex": "0111070000018bcfe5680001004a0102030405060708300c9c9603b92a4b01002438463745344332412d314233442d344535462d394136422d374338443945304631413242012153616c7574204e6f72612c2072656e64657a2d766f757320c3a02031382068203f9898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898989898",
+      "payloadHex": "01002438463745344332412d314233442d344535462d394136422d374338443945304631413242012153616c7574204e6f72612c2072656e64657a2d766f757320c3a02031382068203f"
+    },
+    {
+      "embedded": "bitchat1:AREHAAABi8_laAABACUBAgMEBQYHCDAMnJYDuSpLAzhGN0U0QzJBLTFCM0QtNEU1Ri05QTZCLTdDOEQ5RTBGMUEyQr29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vQ",
+      "name": "delivered",
+      "noisePayloadType": 3,
+      "packetHex": "0111070000018bcfe568000100250102030405060708300c9c9603b92a4b0338463745344332412d314233442d344535462d394136422d374338443945304631413242bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+      "payloadHex": "0338463745344332412d314233442d344535462d394136422d374338443945304631413242"
+    },
+    {
+      "embedded": "bitchat1:AREHAAABi8_laAABACUBAgMEBQYHCDAMnJYDuSpLAjhGN0U0QzJBLTFCM0QtNEU1Ri05QTZCLTdDOEQ5RTBGMUEyQr29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vQ",
+      "name": "readReceipt",
+      "noisePayloadType": 2,
+      "packetHex": "0111070000018bcfe568000100250102030405060708300c9c9603b92a4b0238463745344332412d314233442d344535462d394136422d374338443945304631413242bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+      "payloadHex": "0238463745344332412d314233442d344535462d394136422d374338443945304631413242"
+    }
+  ],
+  "content": "Salut Nora, rendez-vous à 18 h ?",
+  "description": "Synthetic public test material only. Same immutable fixture in iOS and Android tests: the « bitchat1: » content a Wesh contact puts inside a Nostr gift wrap (spec §2-§3), for a private message, a DELIVERED ack and a READ receipt. Version 1 packet, type noiseEncrypted, TTL 7, recipient ID derived from the recipient's Noise key, padded to 256 bytes, never compressed. The gift wrap layer has its own frozen fixture.",
+  "messageID": "8F7E4C2A-1B3D-4E5F-9A6B-7C8D9E0F1A2B",
+  "recipientNoiseKeyHex": "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+  "recipientPeerID": "300c9c9603b92a4b",
+  "senderPeerID": "0102030405060708",
+  "timestampMs": 1700000000000
+}
