@@ -1,4 +1,6 @@
 #include "Release.xcconfig"
 
+WESH_INTERNET_AVAILABLE = YES
+
 // Optional include of local configs
 #include? "Local.xcconfig"

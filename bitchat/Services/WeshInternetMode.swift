@@ -183,6 +183,8 @@ final class WeshInternetMode: ObservableObject {
 
     private var machine: WeshInternetStateMachine
     private let defaults: UserDefaults
+    /// False in a build shipped without Internet: turning on is always refused.
+    private let available: Bool
     private let dependencies: Dependencies
     private var cancellables = Set<AnyCancellable>()
     private var started = false
@@ -224,10 +226,11 @@ final class WeshInternetMode: ObservableObject {
         ))
     }
 
-    init(defaults: UserDefaults, dependencies: Dependencies) {
+    init(defaults: UserDefaults, dependencies: Dependencies, available: Bool = WeshInternetSettings.isAvailable) {
         self.defaults = defaults
         self.dependencies = dependencies
-        machine = WeshInternetStateMachine(enabled: WeshInternetSettings.isEnabled(in: defaults))
+        self.available = available
+        machine = WeshInternetStateMachine(enabled: WeshInternetSettings.isEnabled(in: defaults, available: available))
         state = machine.state
         disclosureAccepted = defaults.bool(forKey: WeshInternetSettings.disclosureAcceptedKey)
     }
@@ -265,12 +268,12 @@ final class WeshInternetMode: ObservableObject {
         defaults.set(true, forKey: WeshInternetSettings.disclosureAcceptedKey)
     }
 
-    /// Returns false when turning on is refused: no disclosure yet, Tor could
-    /// not be forced, or no Nostr identity could be stored (the network then stays off).
+    /// Returns false when turning on is refused: Internet not in this build, no disclosure yet,
+    /// Tor could not be forced, or no Nostr identity could be stored (the network then stays off).
     @discardableResult
     func setEnabled(_ enabled: Bool) -> Bool {
         if enabled {
-            guard disclosureAccepted, dependencies.forceTor(), dependencies.ensureNostrIdentity() else { return false }
+            guard available, disclosureAccepted, dependencies.forceTor(), dependencies.ensureNostrIdentity() else { return false }
         }
         defaults.set(enabled, forKey: WeshInternetSettings.enabledKey)
         apply(.toggle(enabled))

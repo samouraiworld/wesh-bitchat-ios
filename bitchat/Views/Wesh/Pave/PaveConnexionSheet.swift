@@ -133,6 +133,8 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
     let peersInRange: Int
     @ObservedObject var internet: InternetMode
     let onClose: () -> Void
+    /// False in a build shipped without Internet: no switch, no disclosure.
+    var internetAvailable = WeshInternetSettings.isAvailable
 
     @Environment(\.paveTheme) private var theme
     @Environment(\.openURL) private var openURL
@@ -147,7 +149,7 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
                     .paveText(.headline)
                     .accessibilityAddTraits(.isHeader)
                 bluetoothCard
-                internetCard
+                if internetAvailable { internetCard }
                 Label(PaveCopy.text("pave.connexion.visibility"), systemImage: "exclamationmark.triangle.fill")
                     .paveText(.caption)
                     .foregroundStyle(theme[.ink])

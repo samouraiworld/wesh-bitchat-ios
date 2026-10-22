@@ -13,4 +13,14 @@ struct WeshInternetSettingsTests {
         defaults.set(true, forKey: WeshInternetSettings.enabledKey)
         #expect(WeshInternetSettings.isEnabled(in: defaults))
     }
+
+    @Test func aBuildWithoutInternetIgnoresAStoredOn() throws {
+        let suite = "wesh.internet.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: WeshInternetSettings.enabledKey)
+        #expect(!WeshInternetSettings.isEnabled(in: defaults, available: false))
+        // Debug and test builds keep Internet available.
+        #expect(WeshInternetSettings.isAvailable)
+    }
 }
