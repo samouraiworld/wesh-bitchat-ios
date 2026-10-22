@@ -66,8 +66,8 @@ final class NostrIdentityBridge {
 
     /// The identity BitChat messaging paths (favorite notices, Nostr DMs and
     /// acks) may use. In Wesh: read-only, and only while Internet mode is on,
-    /// so no key exists outside the opt-in and none is revealed while it is
-    /// off. Outside Wesh: upstream get-or-create.
+    /// so the key (made at the end of the welcome and shown in my QR) is never
+    /// used on the network while it is off. Outside Wesh: upstream get-or-create.
     func messagingIdentity(weshActive: Bool = WeshModeFlag.isActive,
                            internetEnabled: Bool = WeshInternetSettings.isEnabled()) -> NostrIdentity? {
         guard weshActive else { return try? getCurrentNostrIdentity() }

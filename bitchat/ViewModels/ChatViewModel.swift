@@ -845,6 +845,17 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
     }
 
+    /// Wesh: my QR always carries my npub, so the Nostr key exists once the welcome is done.
+    /// It is made here, locally, and is not used on the network while Internet is off. A locked
+    /// Keychain or an unconfirmed erase makes nothing; the next start or welcome tries again.
+    /// Returns whether a key exists afterwards.
+    @MainActor
+    @discardableResult
+    func ensureWeshNostrIdentity(welcomeDone: Bool = WeshWelcome.isDone()) -> Bool {
+        guard welcomeDone, networkActivationAllowed else { return false }
+        return (try? idBridge.getCurrentNostrIdentity()) != nil
+    }
+
     @MainActor
     func configureBootstrapIfNeeded() {
         guard networkActivationAllowed, !bootstrapConfigured else { return }

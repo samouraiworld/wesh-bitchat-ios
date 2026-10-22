@@ -105,6 +105,8 @@ final class AppRuntime: ObservableObject {
     func welcomeFinished() {
         NotificationService.shared.requestAuthorization()
         guard WeshMode.isActive, chatViewModel.networkActivationAllowed else { return }
+        // The key my QR shows from now on, Internet on or off.
+        chatViewModel.ensureWeshNostrIdentity(welcomeDone: true)
         // After a wipe the mesh stayed stopped through the welcome (`AppChromeModel.panicClearAllData`),
         // also when the runtime never started because a wipe had to be resumed by hand.
         chatViewModel.meshService.startServices()
@@ -147,6 +149,8 @@ final class AppRuntime: ObservableObject {
         started = true
         NotificationDelegate.shared.runtime = self
         VerificationService.shared.configure(with: chatViewModel.meshService)
+        // Phones whose welcome ended before the key was made at onboarding get it now.
+        if WeshMode.isActive { chatViewModel.ensureWeshNostrIdentity() }
 
         Task(priority: .utility) { [weak self] in
             guard let self else { return }

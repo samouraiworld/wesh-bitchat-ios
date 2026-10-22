@@ -44,7 +44,6 @@ final class VerificationModel: ObservableObject {
         // Read-only: showing a QR never creates Nostr key material.
         let bridge = chatViewModel.idBridge
         guard let identity = WeshQRNpub.identityForMyQR(
-            internetEnabled: WeshInternetSettings.isEnabled(),
             panicFenced: !chatViewModel.networkActivationAllowed,
             storedIdentity: { try? bridge.storedNostrIdentity() }
         ) else {
