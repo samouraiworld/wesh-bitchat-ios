@@ -1152,6 +1152,82 @@ struct MessageRouterTests {
         #expect(internet.sentPrivateMessages.isEmpty)
     }
 
+    /// Lead decision 22/10: when the copy of a message written over a Bluetooth session expires
+    /// unacked, the Bluetooth write stands and the message keeps « Envoyé »; no failure is
+    /// reported. A message whose Bluetooth hand-off had no session can still fail.
+    @Test @MainActor
+    func expiredMessageWrittenOverABluetoothSessionReportsNoFailure() async {
+        let peerID = PeerID(str: "00000000000000e6")
+        let scheduler = ManualRetryScheduler()
+        let clock = MutableTestClock()
+        let start = clock.now
+        let (router, mesh, internet) = bluetoothAndInternetRouter(peerID: peerID, scheduler: scheduler, clock: clock)
+        var dropped: [String] = []
+        router.onMessageDropped = { messageID, _ in dropped.append(messageID) }
+
+        router.sendPrivate("Written", to: peerID, recipientNickname: "Peer", messageID: "written")
+        clock.now = start.addingTimeInterval(20)
+        scheduler.runNext()
+        #expect(internet.sentPrivateMessages.map(\.messageID) == ["written"])
+
+        mesh.securePeers = []
+        router.sendPrivate("Handshake pending", to: peerID, recipientNickname: "Peer", messageID: "pending")
+        internet.reachablePeers.remove(peerID)
+        clock.now = start.addingTimeInterval(40)
+        scheduler.run(delay: 20)
+
+        clock.now = start.addingTimeInterval(25 * 3_600)
+        router.cleanupExpiredMessages()
+        #expect(dropped == ["pending"])
+    }
+
+    /// The flag that keeps « Envoyé » survives a relaunch (the outbox is stored), and an
+    /// outbox written before it existed decodes without it.
+    @Test
+    func queuedMessageKeepsItsBluetoothWriteAcrossEncoding() throws {
+        var message = MessageRouter.QueuedMessage(content: "Hi", nickname: "Peer", messageID: "m", timestamp: Date())
+        message.afterBluetoothWrite = true
+        let data = try JSONEncoder().encode(message)
+        #expect(try JSONDecoder().decode(MessageRouter.QueuedMessage.self, from: data).afterBluetoothWrite)
+
+        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "afterBluetoothWrite")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        #expect(try JSONDecoder().decode(MessageRouter.QueuedMessage.self, from: legacyData).afterBluetoothWrite == false)
+    }
+
+    /// Lead decision 22/10, as on Android: an early retry leaves the backoff where it was. Its
+    /// next step stays at the scheduled time (at least 30 s after the early retry), instead of
+    /// moving 5 min out.
+    @Test @MainActor
+    func earlyRetryShortlyBeforeTheNextStepLeavesThatStepInPlace() async {
+        let scheduler = ManualRetryScheduler()
+        let (router, internet, clock, last) = internetMessageOnLadder(sends: 6, peerID: PeerID(str: "00000000000000c6"), scheduler: scheduler)
+        #expect(scheduler.pendingDelays == [960])
+
+        clock.now = last.addingTimeInterval(900)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.count == 7)
+
+        clock.now = last.addingTimeInterval(960)
+        scheduler.run(delay: 960)
+        #expect(internet.sentPrivateMessages.count == 8)
+        #expect(scheduler.pendingDelays == [1_800])
+
+        // An early retry 10 s before a step pushes that step to 30 s after itself.
+        clock.now = last.addingTimeInterval(960 + 1_790)
+        internet.onInternetAvailable?()
+        #expect(internet.sentPrivateMessages.count == 9)
+        clock.now = last.addingTimeInterval(960 + 1_800)
+        scheduler.run(delay: 1_800)
+        #expect(internet.sentPrivateMessages.count == 9)
+        #expect(scheduler.pendingDelays == [20])
+        clock.now = last.addingTimeInterval(960 + 1_820)
+        scheduler.run(delay: 20)
+        #expect(internet.sentPrivateMessages.count == 10)
+        withExtendedLifetime(router) {}
+    }
+
     /// Rule 3: out of Bluetooth range with Internet off the message waits in the outbox; it is
     /// published once Internet comes on, then follows the Internet backoff.
     @Test @MainActor

@@ -66,7 +66,8 @@ final class MessageRouter {
     /// Invoked whenever a retained private message is dropped without a
     /// delivery ack (attempt cap, TTL expiry, or per-peer overflow eviction)
     /// so the UI can surface the failure instead of leaving the message in a
-    /// stale "sending/sent" state forever.
+    /// stale "sending/sent" state forever. Not invoked for a message written over a Bluetooth
+    /// session (`afterBluetoothWrite`): that write stands and the message keeps « Envoyé ».
     var onMessageDropped: ((_ messageID: String, _ peerID: PeerID) -> Void)?
 
     /// Invoked when a message with no reachable transport was handed to at
@@ -495,6 +496,7 @@ final class MessageRouter {
         // or the replacement re-burns the same courier slots.
         if let existing = queue.firstIndex(where: { $0.messageID == message.messageID }) {
             message.depositedCourierKeys.formUnion(queue[existing].depositedCourierKeys)
+            message.afterBluetoothWrite = message.afterBluetoothWrite || queue[existing].afterBluetoothWrite
             queue.remove(at: existing)
         }
         queue.append(message)
@@ -503,7 +505,7 @@ final class MessageRouter {
         if queue.count > Self.maxMessagesPerPeer {
             let evicted = queue.removeFirst()
             SecureLogger.warning("📤 Outbox overflow for \(peerID.id.prefix(8))… - evicted oldest message: \(evicted.messageID.prefix(8))…", category: .session)
-            dropMessage(evicted.messageID, for: peerID)
+            dropMessage(evicted, for: peerID)
         }
         outbox[peerID] = queue
         metrics?.record(.outboxQueued)
@@ -543,8 +545,9 @@ final class MessageRouter {
         }
     }
 
-    /// Records an early retry: the ladder stays where it was, but its next step keeps the
-    /// 5 min gap (the pending wake re-arms itself if it now fires too soon).
+    /// Records an early retry: the backoff stays where it was. Its next step keeps its time,
+    /// only pushed to 30 s after this publication if it was due sooner (the pending wake
+    /// re-arms itself if it now fires too soon).
     private func recordEarlyInternetSend(_ messageID: String) {
         guard var resend = internetResends[messageID] else { return }
         let now = now()
@@ -552,7 +555,7 @@ final class MessageRouter {
         resend.lastPublishedAt = now
         resend.lastPublishWasEarly = true
         resend.earlyWakeToken = nil
-        resend.nextAttemptAt = max(resend.nextAttemptAt, now.addingTimeInterval(Self.internetMinPublishGap))
+        resend.nextAttemptAt = max(resend.nextAttemptAt, now.addingTimeInterval(Self.internetFirstRetryDelay))
         internetResends[messageID] = resend
     }
 
@@ -681,10 +684,15 @@ final class MessageRouter {
         return true
     }
 
-    private func dropMessage(_ messageID: String, for peerID: PeerID) {
-        secureTransmissions.remove(PeerMessageKey(peerID: peerID, messageID: messageID))
+    private func dropMessage(_ message: QueuedMessage, for peerID: PeerID) {
+        secureTransmissions.remove(PeerMessageKey(peerID: peerID, messageID: message.messageID))
         metrics?.record(.outboxDropped)
-        onMessageDropped?(messageID, peerID)
+        // Its Bluetooth write stands (lead decision 22/10): it keeps « Envoyé ».
+        if message.afterBluetoothWrite {
+            SecureLogger.debug("📤 Dropped unacked PM id=\(message.messageID.prefix(8))… after its Bluetooth write; no failure shown", category: .session)
+            return
+        }
+        onMessageDropped?(message.messageID, peerID)
     }
 
     private func persistOutbox() {
@@ -704,6 +712,7 @@ final class MessageRouter {
                 if let index = queue.firstIndex(where: { $0.messageID == recoveredMessage.messageID }) {
                     recoveredMessage.sendAttempts = max(recoveredMessage.sendAttempts, queue[index].sendAttempts)
                     recoveredMessage.depositedCourierKeys.formUnion(queue[index].depositedCourierKeys)
+                    recoveredMessage.afterBluetoothWrite = recoveredMessage.afterBluetoothWrite || queue[index].afterBluetoothWrite
                     queue[index] = recoveredMessage
                 } else {
                     queue.append(recoveredMessage)
@@ -713,7 +722,7 @@ final class MessageRouter {
             if queue.count > Self.maxMessagesPerPeer {
                 let overflow = queue.count - Self.maxMessagesPerPeer
                 for dropped in queue.prefix(overflow) {
-                    dropMessage(dropped.messageID, for: peerID)
+                    dropMessage(dropped, for: peerID)
                 }
                 queue.removeFirst(overflow)
             }
@@ -838,7 +847,7 @@ final class MessageRouter {
 
             if currentDate.timeIntervalSince(message.timestamp) > Self.messageTTLSeconds {
                 if removeQueuedMessage(message.messageID, for: peerID) {
-                    dropMessage(message.messageID, for: peerID)
+                    dropMessage(message, for: peerID)
                     outboxChanged = true
                 }
                 continue
@@ -850,7 +859,7 @@ final class MessageRouter {
                     category: .session
                 )
                 if removeQueuedMessage(message.messageID, for: peerID) {
-                    dropMessage(message.messageID, for: peerID)
+                    dropMessage(message, for: peerID)
                     outboxChanged = true
                 }
                 continue
@@ -906,10 +915,18 @@ final class MessageRouter {
         guard bluetoothAckWakes[key] == token else { return }
         bluetoothAckWakes[key] = nil
         let peerID = key.peerID
-        // Acked, dropped or erased since; no longer admitted (never over Internet then); past
-        // its TTL; or already on the Internet backoff, which retries it on its own.
-        guard let message = queuedMessage(key.messageID, for: peerID),
-              authorized(message, for: peerID),
+        // Acked, dropped or erased since.
+        guard let message = queuedMessage(key.messageID, for: peerID) else { return }
+        // Sent over an established session: the Bluetooth write stands, whatever follows.
+        if secureTransmissions.contains(key), !message.afterBluetoothWrite,
+           var queue = outbox[peerID], let index = queue.firstIndex(where: { $0.messageID == key.messageID }) {
+            queue[index].afterBluetoothWrite = true
+            outbox[peerID] = queue
+            persistOutbox()
+        }
+        // No longer admitted (never over Internet then); past its TTL; or already on the
+        // Internet backoff, which retries it on its own.
+        guard authorized(message, for: peerID),
               internetResends[key.messageID] == nil,
               now().timeIntervalSince(message.timestamp) <= Self.messageTTLSeconds,
               let internet = transports.first(where: { $0.messageTransport == .internet && $0.isPeerReachable(peerID) })
@@ -947,7 +964,7 @@ final class MessageRouter {
             if now.timeIntervalSince(message.timestamp) > Self.messageTTLSeconds {
                 SecureLogger.debug("⏰ Expired queued message for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))… (age: \(Int(now.timeIntervalSince(message.timestamp)))s)", category: .session)
                 if removeQueuedMessage(message.messageID, for: peerID) {
-                    dropMessage(message.messageID, for: peerID)
+                    dropMessage(message, for: peerID)
                     outboxChanged = true
                 }
                 continue
@@ -962,7 +979,7 @@ final class MessageRouter {
                 guard message.sendAttempts < Self.maxSendAttempts else {
                     SecureLogger.warning("📤 Dropping unacked PM for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))… after \(message.sendAttempts) attempts", category: .session)
                     if removeQueuedMessage(message.messageID, for: peerID) {
-                        dropMessage(message.messageID, for: peerID)
+                        dropMessage(message, for: peerID)
                         outboxChanged = true
                     }
                     continue
@@ -1000,7 +1017,7 @@ final class MessageRouter {
                 guard !transport.unackedSendsAreBounded || message.sendAttempts < Self.maxSendAttempts else {
                     SecureLogger.warning("📤 Dropping unacked PM for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))… after \(message.sendAttempts) attempts", category: .session)
                     if removeQueuedMessage(message.messageID, for: peerID) {
-                        dropMessage(message.messageID, for: peerID)
+                        dropMessage(message, for: peerID)
                         outboxChanged = true
                     }
                     continue
@@ -1043,18 +1060,18 @@ final class MessageRouter {
         let now = now()
         var droppedAny = false
         for peerID in Array(outbox.keys) {
-            var expiredMessageIDs: [String] = []
+            var expiredMessages: [QueuedMessage] = []
             outbox[peerID]?.removeAll { message in
                 guard now.timeIntervalSince(message.timestamp) > Self.messageTTLSeconds else { return false }
-                expiredMessageIDs.append(message.messageID)
+                expiredMessages.append(message)
                 return true
             }
             if outbox[peerID]?.isEmpty == true {
                 outbox.removeValue(forKey: peerID)
             }
-            for messageID in expiredMessageIDs {
-                SecureLogger.debug("⏰ Expired queued message for \(peerID.id.prefix(8))… id=\(messageID.prefix(8))…", category: .session)
-                dropMessage(messageID, for: peerID)
+            for message in expiredMessages {
+                SecureLogger.debug("⏰ Expired queued message for \(peerID.id.prefix(8))… id=\(message.messageID.prefix(8))…", category: .session)
+                dropMessage(message, for: peerID)
                 droppedAny = true
             }
         }
