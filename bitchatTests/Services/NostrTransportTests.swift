@@ -606,6 +606,111 @@ struct NostrTransportTests {
         #expect(await TestHelpers.waitUntil({ probe.sentEvents.count == 1 }, timeout: TestConstants.settleTimeout))
     }
 
+    @Test("Wesh PM: « Envoyé » only on relay OK; a retry republishes the same event until a refusal or an erase")
+    @MainActor
+    func privateMessageWrapIsReusedUntilRefusedOrErased() async throws {
+        let keychain = MockKeychain()
+        let sender = try NostrIdentity.generate()
+        let contactNpub = try NostrIdentity.generate()
+        let contactPeer = PeerID(hexData: Data(repeating: 0x44, count: 32))
+        let relays = RelayAnswerProbe()
+        let pacer = NostrTransport.AckPacer(scheduleAfter: { _, _ in })
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                currentIdentity: { sender },
+                publishEvent: relays.publish,
+                relayConnectivity: { Just(true).eraseToAnyPublisher() },
+                weshRecipients: { Just([contactPeer: contactNpub.npub]).eraseToAnyPublisher() },
+                weshOnline: { Just(true).eraseToAnyPublisher() },
+                weshIsBlocked: { _ in false },
+                ackPacer: pacer
+            )
+        )
+        transport.senderPeerID = PeerID(str: "0123456789abcdef")
+        var accepted: [String] = []
+        transport.onPrivateMessageAccepted = { messageID, _ in accepted.append(messageID) }
+        #expect(await TestHelpers.waitUntil({ transport.isPeerReachable(contactPeer) }, timeout: TestConstants.settleTimeout))
+
+        func send() async -> NostrEvent? {
+            let before = relays.events.count
+            transport.sendPrivateMessage("salut", to: contactPeer, recipientNickname: "QR", messageID: "pm-1")
+            guard await TestHelpers.waitUntil({ relays.events.count == before + 1 }, timeout: TestConstants.settleTimeout) else { return nil }
+            return relays.events.last
+        }
+
+        // Handed to the relays, no answer yet, then a timeout: not « Envoyé », not refused.
+        let first = try #require(await send())
+        #expect(accepted.isEmpty)
+        relays.answerLast(.unconfirmed)
+        #expect(accepted.isEmpty)
+
+        // The retry republishes the very same signed event.
+        let retry = try #require(await send())
+        #expect(retry.id == first.id)
+
+        // An explicit refusal: the next retry signs a new wrap for the same message.
+        relays.answerLast(.rejected)
+        let rewrapped = try #require(await send())
+        #expect(rewrapped.id != first.id)
+        let payload = try decodeEmbeddedPayload(from: rewrapped, recipient: contactNpub).payload
+        #expect(try decodePrivateMessage(from: payload).messageID == "pm-1")
+
+        // A relay OK is what reports « Envoyé ».
+        relays.answerLast(.accepted)
+        #expect(accepted == ["pm-1"])
+
+        // Once the router no longer holds the message, its wrap is forgotten.
+        transport.retainPendingPrivateMessages([])
+        let afterAck = try #require(await send())
+        #expect(afterAck.id != rewrapped.id)
+
+        // An erase makes the wrap unusable, and a late OK from before it reports nothing.
+        pacer.discardWorkBeforeErase()
+        relays.answerLast(.accepted)
+        #expect(accepted == ["pm-1"])
+        let afterErase = try #require(await send())
+        #expect(afterErase.id != afterAck.id)
+    }
+
+    @Test("Relays reconnecting or Internet turning On is announced once per rise, after the state is stored")
+    @MainActor
+    func internetAvailabilityIsAnnouncedOnEachRise() async throws {
+        let keychain = MockKeychain()
+        let contactPeer = PeerID(hexData: Data(repeating: 0x55, count: 32))
+        let contactNpub = try NostrIdentity.generate().npub
+        let relays = CurrentValueSubject<Bool, Never>(false)
+        let online = CurrentValueSubject<Bool, Never>(false)
+        let transport = NostrTransport(
+            keychain: keychain,
+            idBridge: NostrIdentityBridge(keychain: keychain),
+            dependencies: makeDependencies(
+                relayConnectivity: { relays.eraseToAnyPublisher() },
+                weshRecipients: { Just([contactPeer: contactNpub]).eraseToAnyPublisher() },
+                weshOnline: { online.eraseToAnyPublisher() },
+                weshIsBlocked: { _ in false }
+            )
+        )
+        final class Log { var reachableAtAnnounce: [Bool] = [] }
+        let log = Log()
+        transport.onInternetAvailable = { [weak transport] in
+            log.reachableAtAnnounce.append(transport?.isPeerReachable(contactPeer) ?? false)
+        }
+
+        online.send(true)
+        #expect(await TestHelpers.waitUntil({ log.reachableAtAnnounce.count == 1 }, timeout: TestConstants.settleTimeout))
+        #expect(log.reachableAtAnnounce == [true])
+
+        relays.send(true)
+        relays.send(true)
+        online.send(true)
+        relays.send(false)
+        relays.send(true)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(log.reachableAtAnnounce.count == 3)
+    }
+
     @Test("Wesh: the flush on On runs after the state really is On (Published emits in willSet)")
     @MainActor
     func weshFlushWhenOnSeesTheNewState() async {
@@ -660,6 +765,7 @@ struct NostrTransportTests {
         currentIdentity: @escaping @MainActor () throws -> NostrIdentity? = { nil },
         registerPendingGiftWrap: @escaping @MainActor (String) -> Void = { _ in },
         sendEvent: @escaping @MainActor (NostrEvent) -> Void = { _ in },
+        publishEvent: (@MainActor (NostrEvent, @escaping @MainActor (NostrPublishOutcome) -> Void) -> Void)? = nil,
         scheduleAfter: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { _, _ in },
         relayConnectivity: @escaping @MainActor () -> AnyPublisher<Bool, Never> = { Just(false).eraseToAnyPublisher() },
         weshRecipients: (@MainActor () -> AnyPublisher<[PeerID: String], Never>)? = nil,
@@ -675,6 +781,8 @@ struct NostrTransportTests {
             currentIdentity: currentIdentity,
             registerPendingGiftWrap: registerPendingGiftWrap,
             sendEvent: sendEvent,
+            // Private messages reach `sendEvent` too unless a test plays the relays' answers.
+            publishEvent: publishEvent ?? { event, _ in sendEvent(event) },
             scheduleAfter: scheduleAfter,
             relayConnectivity: relayConnectivity,
             ackPacer: ackPacer,
@@ -846,5 +954,21 @@ struct NostrAckPacerResetTests {
         pacer.enqueue { sent.record(4) }
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(sent.all == [1, 4])
+    }
+}
+
+/// Plays the relays: records each publication and lets the test answer it.
+@MainActor
+private final class RelayAnswerProbe {
+    private(set) var events: [NostrEvent] = []
+    private var answers: [@MainActor (NostrPublishOutcome) -> Void] = []
+
+    func publish(_ event: NostrEvent, _ answer: @escaping @MainActor (NostrPublishOutcome) -> Void) {
+        events.append(event)
+        answers.append(answer)
+    }
+
+    func answerLast(_ outcome: NostrPublishOutcome) {
+        answers.last?(outcome)
     }
 }

@@ -144,6 +144,18 @@ protocol Transport: AnyObject {
     func sendDeliveryAck(for messageID: String, to peerID: PeerID)
 }
 
+/// A transport whose private sends are confirmed later by the network rather than by a local
+/// write (Internet: a relay `OK`). The router learns which sends were accepted (« Envoyé ») and
+/// tells the transport which messages it still holds, so per-message state (the signed gift
+/// wrap) never outlives the outbox.
+protocol RelayConfirmedTransport: AnyObject {
+    @MainActor var onPrivateMessageAccepted: ((_ messageID: String, _ peerID: PeerID) -> Void)? { get set }
+    /// Relays reconnected or Internet turned On: pending messages may retry early.
+    @MainActor var onInternetAvailable: (() -> Void)? { get set }
+    /// Forgets per-message state for every message not in `messageIDs`.
+    @MainActor func retainPendingPrivateMessages(_ messageIDs: Set<String>)
+}
+
 /// A carried public mesh message from the store-and-forward window, decoded
 /// for display. `packetIdHex` is stable across launches so echo rows keep a
 /// deterministic message ID.
