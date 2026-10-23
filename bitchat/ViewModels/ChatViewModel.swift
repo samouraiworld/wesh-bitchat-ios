@@ -542,13 +542,14 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         conversations.upsertByID(message, in: .directPeer(peerID))
     }
 
-    /// Applies a delivery status to a private message by ID. Returns `false`
-    /// when the message is unknown or the update would downgrade the status
-    /// (read beats delivered beats sent).
+    /// Applies a delivery status to one of our outgoing private messages by ID.
+    /// Returns `false` when the message is unknown, was received rather than sent,
+    /// or the update would downgrade the status (read beats delivered beats sent).
     @MainActor
     @discardableResult
     func setPrivateDeliveryStatus(_ status: DeliveryStatus, forMessageID messageID: String, peerID: PeerID) -> Bool {
-        conversations.setDeliveryStatus(status, forMessageID: messageID, in: .directPeer(peerID))
+        guard isOutgoingPrivateMessage(messageID, toAny: [peerID]) else { return false }
+        return conversations.setDeliveryStatus(status, forMessageID: messageID, in: .directPeer(peerID))
     }
 
     /// Labels one of our private messages with the transport its ack came over. An ack naming

@@ -1,5 +1,5 @@
 MARKETING_VERSION = 1.0.0
-CURRENT_PROJECT_VERSION = 101
+CURRENT_PROJECT_VERSION = 103
 
 IPHONEOS_DEPLOYMENT_TARGET = 16.0
 MACOSX_DEPLOYMENT_TARGET = 13.0
@@ -13,9 +13,10 @@ CODE_SIGN_STYLE = Automatic
 PRODUCT_BUNDLE_IDENTIFIER = org.samouraiworld.wesh.ios
 APP_GROUP_ID = group.org.samouraiworld.wesh.ios
 
-// Beta 2 ships without Internet mode: Info.plist WeshInternetAvailable hides
-// the switch and keeps the mode off. Debug keeps it for tests.
-WESH_INTERNET_AVAILABLE = NO
+// Beta 3 offers the Internet opt-in: Info.plist WeshInternetAvailable shows
+// the switch, while the mode stays off until the disclosure is accepted and
+// the user turns it on.
+WESH_INTERNET_AVAILABLE = YES
 
 // Optional developer-local override (for example the internal .dev
 // identity), shared by build and archive. It stays untracked.

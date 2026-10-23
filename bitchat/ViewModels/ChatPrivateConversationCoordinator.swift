@@ -503,6 +503,15 @@ final class ChatPrivateConversationCoordinator {
         context.notifyUIChanged()
     }
 
+    /// True only when `peerID`'s chat holds `messageID` as one of our own outgoing messages.
+    /// An ack naming a message we received must never update its status, label, or alias routing.
+    private func hasOutgoingPrivateMessage(_ messageID: String, in peerID: PeerID) -> Bool {
+        guard context.privateChat(peerID, containsMessageWithID: messageID) else { return false }
+        return context.privateMessages(for: peerID).contains {
+            $0.id == messageID && $0.senderPeerID == context.myPeerID
+        }
+    }
+
     func handleDelivered(_ payload: NoisePayload, senderPubkey: String, convKey: PeerID) {
         guard context.admitsPrivateSender(convKey),
               let messageID = String(data: payload.data, encoding: .utf8) else { return }
@@ -512,7 +521,7 @@ final class ChatPrivateConversationCoordinator {
             ? context.markMessageDelivered(messageID, for: aliases)
             : false
         let hasConversationMessage = aliases.contains {
-            context.privateChat($0, containsMessageWithID: messageID)
+            hasOutgoingPrivateMessage(messageID, in: $0)
         }
         if hasConversationMessage {
             let conversationPeerID = consolidateAccountConversationAliases(for: convKey)
@@ -551,7 +560,7 @@ final class ChatPrivateConversationCoordinator {
             ? context.markMessageDelivered(messageID, for: aliases)
             : false
         let hasConversationMessage = aliases.contains {
-            context.privateChat($0, containsMessageWithID: messageID)
+            hasOutgoingPrivateMessage(messageID, in: $0)
         }
         if hasConversationMessage {
             let conversationPeerID = consolidateAccountConversationAliases(for: convKey)

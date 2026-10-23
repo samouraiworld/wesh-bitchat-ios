@@ -20,7 +20,26 @@ struct WeshInternetSettingsTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(true, forKey: WeshInternetSettings.enabledKey)
         #expect(!WeshInternetSettings.isEnabled(in: defaults, available: false))
-        // Debug and test builds keep Internet available.
+        // This build offers the Internet opt-in, still off until the user accepts the disclosure and turns it on.
         #expect(WeshInternetSettings.isAvailable)
+    }
+
+    @Test func releaseConfigShipsBeta3Build103WithInternetOptInAvailable() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let xcconfig = try String(
+            contentsOf: root.appendingPathComponent("Configs/Release.xcconfig"),
+            encoding: .utf8
+        )
+        let uncommented = xcconfig
+            .split(whereSeparator: \.isNewline)
+            .map { $0.split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false)[0] }
+            .joined(separator: "\n")
+        #expect(uncommented.contains("MARKETING_VERSION = 1.0.0"))
+        #expect(uncommented.contains("CURRENT_PROJECT_VERSION = 103"))
+        #expect(uncommented.contains("WESH_INTERNET_AVAILABLE = YES"))
+        #expect(!uncommented.contains("WESH_INTERNET_AVAILABLE = NO"))
     }
 }
