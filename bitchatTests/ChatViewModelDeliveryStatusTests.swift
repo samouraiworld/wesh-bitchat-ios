@@ -307,6 +307,38 @@ struct ChatViewModelDeliveryStatusTests {
     }
 
     @Test @MainActor
+    func setPrivateDeliveryStatus_rejectsIncomingMessage() async {
+        let (viewModel, _) = makeTestableViewModel()
+        let peerID = PeerID(str: "0102030405060708")
+        let incomingID = "incoming-msg-1"
+        let incoming = BitchatMessage(
+            id: incomingID,
+            sender: "Peer",
+            content: "From peer",
+            timestamp: Date(),
+            isRelay: false,
+            isPrivate: true,
+            recipientNickname: viewModel.nickname,
+            senderPeerID: peerID,
+            deliveryStatus: .delivered(to: viewModel.nickname, at: Date()),
+            transport: .internet
+        )
+        viewModel.seedPrivateChat([incoming], for: peerID)
+
+        let changedToRead = viewModel.setPrivateDeliveryStatus(
+            .read(by: "Peer", at: Date()),
+            forMessageID: incomingID,
+            peerID: peerID
+        )
+        #expect(!changedToRead)
+        if case .delivered(let recipient, _)? = viewModel.privateChats[peerID]?.first?.deliveryStatus {
+            #expect(recipient == viewModel.nickname)
+        } else {
+            Issue.record("Expected incoming message deliveryStatus to remain unchanged")
+        }
+    }
+
+    @Test @MainActor
     func authenticatedNoiseAckCannotClearAnotherPeersRetryState() async {
         let (viewModel, transport) = makeTestableViewModel()
         let intendedPeer = PeerID(str: "0102030405060708")

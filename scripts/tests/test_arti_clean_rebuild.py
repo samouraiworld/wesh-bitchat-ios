@@ -142,6 +142,16 @@ class CleanRebuildComparisonTests(unittest.TestCase):
                                              mock.call(12345, rebuild.signal.SIGKILL)])
         self.assertEqual(process.wait.call_args_list, [mock.call(timeout=10), mock.call()])
 
+    def test_rebuild_timeout_defaults_above_1800s_and_honors_env_override(self):
+        self.assertGreaterEqual(rebuild.DEFAULT_TIMEOUT_SECONDS, 1800)
+        with mock.patch.dict(rebuild.os.environ, {}, clear=False):
+            rebuild.os.environ.pop("ARTI_CLEAN_REBUILD_TIMEOUT_SECONDS", None)
+            self.assertEqual(rebuild.rebuild_timeout_seconds(), rebuild.DEFAULT_TIMEOUT_SECONDS)
+        with mock.patch.dict(rebuild.os.environ, {"ARTI_CLEAN_REBUILD_TIMEOUT_SECONDS": "1800"}):
+            self.assertEqual(rebuild.rebuild_timeout_seconds(), 1800)
+        with self.assertRaisesRegex(ValueError, "positive"):
+            rebuild.rebuild_timeout_seconds(0)
+
     def test_child_exiting_between_poll_and_signal_is_still_reaped(self):
         process = mock.Mock(pid=12345)
         process.poll.return_value = None

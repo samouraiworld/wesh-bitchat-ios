@@ -78,13 +78,16 @@ private final class MockChatPrivateConversationContext: ChatPrivateConversationC
     }
 
     func setPrivateMessageTransport(_ transport: MessageTransport, forMessageID messageID: String, peerID: PeerID) {
-        privateChats[peerID]?.first { $0.id == messageID }?.transport = transport
+        guard let message = privateChats[peerID]?.first(where: { $0.id == messageID }),
+              message.senderPeerID == myPeerID else { return }
+        message.transport = transport
     }
 
     @discardableResult
     func setPrivateDeliveryStatus(_ status: DeliveryStatus, forMessageID messageID: String, peerID: PeerID) -> Bool {
         guard let chat = privateChats[peerID],
-              let index = chat.firstIndex(where: { $0.id == messageID }) else {
+              let index = chat.firstIndex(where: { $0.id == messageID }),
+              chat[index].senderPeerID == myPeerID else {
             return false
         }
         if Conversation.shouldSkipStatusUpdate(current: chat[index].deliveryStatus, new: status) {
@@ -316,7 +319,7 @@ private func makeIncomingMessage(
         isRelay: false,
         isPrivate: true,
         recipientNickname: recipientNickname,
-        senderPeerID: senderPeerID,
+        senderPeerID: senderPeerID ?? (sender == "me" ? PeerID(str: "0011223344556677") : nil),
         deliveryStatus: .delivered(to: "me", at: timestamp)
     )
 }
@@ -447,6 +450,50 @@ struct ChatPrivateConversationCoordinatorContextTests {
 
         #expect(context.privateChats[convKey]?.first?.deliveryStatus == before)
         #expect(context.deliveryAckAttempts.isEmpty)
+        #expect(context.notifyUIChangedCount == 0)
+    }
+
+    @Test @MainActor
+    func deliveredAndReadAcksNamingIncomingMessagesAreIgnored() {
+        let context = MockChatPrivateConversationContext()
+        let coordinator = ChatPrivateConversationCoordinator(context: context)
+        let noiseKey = Data(repeating: 0xAE, count: 32)
+        let stablePeerID = PeerID(hexData: noiseKey)
+        let shortPeerID = stablePeerID.toShort()
+        let senderPubkey = "feedface00112233"
+        context.displayNamesByPubkey[senderPubkey] = "alice"
+        // Incoming message from the peer (even if the peer's nickname collides with ours).
+        let incoming = BitchatMessage(
+            id: "peer-sent-1",
+            sender: context.nickname,
+            content: "from peer",
+            timestamp: Date(),
+            isRelay: false,
+            isPrivate: true,
+            recipientNickname: context.nickname,
+            senderPeerID: shortPeerID,
+            deliveryStatus: .sending,
+            transport: .bluetooth
+        )
+        context.privateChats[shortPeerID] = [incoming]
+        context.selectedPrivateChatPeer = shortPeerID
+
+        coordinator.handleDelivered(
+            NoisePayload(type: .delivered, data: Data("peer-sent-1".utf8)),
+            senderPubkey: senderPubkey,
+            convKey: stablePeerID
+        )
+        coordinator.handleReadReceipt(
+            NoisePayload(type: .readReceipt, data: Data("peer-sent-1".utf8)),
+            senderPubkey: senderPubkey,
+            convKey: stablePeerID
+        )
+
+        // Neither status, transport label, nor alias consolidation may fire for an incoming message.
+        #expect(context.privateChats[shortPeerID]?.first?.deliveryStatus == .sending)
+        #expect(context.privateChats[shortPeerID]?.first?.transport == .bluetooth)
+        #expect(context.privateChats[stablePeerID] == nil)
+        #expect(context.migratedChats.isEmpty)
         #expect(context.notifyUIChangedCount == 0)
     }
 

@@ -36,6 +36,7 @@ TARGETS = (
     "aarch64-apple-ios", "aarch64-apple-ios-sim", "x86_64-apple-ios",
     "aarch64-apple-darwin", "x86_64-apple-darwin",
 )
+DEFAULT_TIMEOUT_SECONDS = 115 * 60  # Leave cleanup time within the 120-minute job.
 INITIAL_FREE = 12 * 1024**3
 MINIMUM_FREE = 11 * 1024**3 // 2
 
@@ -152,8 +153,19 @@ def check_checkout(checkout, commit):
         raise ValueError("Tracked checkout must remain unchanged")
 
 
-def rebuild(checkout, work, report):
-    deadline = time.monotonic() + 115 * 60  # Leave cleanup time within the 120-minute job.
+def rebuild_timeout_seconds(explicit=None):
+    if explicit is not None:
+        value = int(explicit)
+    else:
+        raw = os.environ.get("ARTI_CLEAN_REBUILD_TIMEOUT_SECONDS", "").strip()
+        value = int(raw) if raw else DEFAULT_TIMEOUT_SECONDS
+    if value <= 0:
+        raise ValueError("Native rebuild timeout must be positive")
+    return value
+
+
+def rebuild(checkout, work, report, timeout=None):
+    deadline = time.monotonic() + rebuild_timeout_seconds(timeout)
     commit = output(["git", "rev-parse", "HEAD"], checkout)
     check_checkout(checkout, commit)
     document = checked_path(checkout, "docs/ARTI-BINARY-PROVENANCE.md")
