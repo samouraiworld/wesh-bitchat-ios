@@ -31,6 +31,10 @@ final class PreviewKeychainManager: KeychainManagerProtocol {
         installAccessGate.allowsAccess(reconcile: reconcileInstallAccess)
     }
 
+    func retryInstallLifecycleCleanup() -> Bool {
+        installAccessAllowed()
+    }
+
     func saveIdentityKey(_ keyData: Data, forKey key: String) -> Bool {
         guard installAccessAllowed() else { return false }
         lock.lock()

@@ -96,6 +96,7 @@ final class KeychainManager: KeychainManagerProtocol {
     /// by older releases. Keep custom services here so one-time security
     /// migrations and panic deletion cannot silently miss them.
     private static let additionalApplicationOwnedServices = [
+        "chat.bitchat",
         "chat.bitchat.nostr",
         "chat.bitchat.favorites",
         "chat.bitchat.outbox",
@@ -105,6 +106,8 @@ final class KeychainManager: KeychainManagerProtocol {
         "chat.bitchat.passwords",
         "bitchat.keychain",
         "bitchat",
+        "Bitchat",
+        "BitChat",
         "com.bitchat"
     ]
     // AfterFirstUnlock, not WhenUnlocked: the mesh keeps running with the
@@ -187,6 +190,31 @@ final class KeychainManager: KeychainManagerProtocol {
         ) {
             let status = deleteService(serviceName)
             if status != errSecSuccess && status != errSecItemNotFound {
+                completed = false
+            }
+        }
+        return completed
+    }
+
+    /// Reinstall cleanup is already authorized by the surviving install
+    /// marker. Delete and independently confirm every declared app-owned
+    /// service without first enumerating the whole access group: an unrelated
+    /// protected row must not make this idempotent, service-scoped purge
+    /// impossible forever.
+    static func deleteAndConfirmApplicationOwnedKeychainServices(
+        primaryService: String,
+        deleteService: (String) -> OSStatus,
+        inspectService: (String) -> OSStatus
+    ) -> Bool {
+        var completed = true
+        for serviceName in applicationOwnedKeychainServices(
+            primaryService: primaryService
+        ) {
+            let deleteStatus = deleteService(serviceName)
+            let deletionAccepted = deleteStatus == errSecSuccess
+                || deleteStatus == errSecItemNotFound
+            let absenceConfirmed = inspectService(serviceName) == errSecItemNotFound
+            if !deletionAccepted || !absenceConfirmed {
                 completed = false
             }
         }
@@ -346,7 +374,7 @@ final class KeychainManager: KeychainManagerProtocol {
                 return false
             }
 
-            guard deleteAllKeychainData() else {
+            guard deleteAndConfirmReinstallKeychainData() else {
                 SecureLogger.error(
                     "Reinstall keychain cleanup incomplete; retry remains pending",
                     category: .security
@@ -388,6 +416,47 @@ final class KeychainManager: KeychainManagerProtocol {
             // distinguish bootstrap from reinstall.
             return containerKnowsMarker
         }
+    }
+
+    /// The surviving install marker authorizes deletion only within the
+    /// complete, declared Wesh service set. Panic deletion remains broader and
+    /// continues to require its global inventory; reinstall recovery does not.
+    private func deleteAndConfirmReinstallKeychainData() -> Bool {
+        let servicesCompleted = Self.deleteAndConfirmApplicationOwnedKeychainServices(
+            primaryService: service,
+            deleteService: { serviceName in
+                SecItemDelete([
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: serviceName
+                ] as CFDictionary)
+            },
+            inspectService: { serviceName in
+                var result: CFTypeRef?
+                return SecItemCopyMatching([
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: serviceName,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                    kSecReturnAttributes as String: true
+                ] as CFDictionary, &result)
+            }
+        )
+
+        let groupStatus = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccessGroup as String: appGroup
+        ] as CFDictionary)
+        let groupCompleted = Self.completedApplicationGroupDelete(status: groupStatus)
+
+        let markerCompleted: Bool
+        if case .success = saveDataWithResult(
+            Data([1]),
+            forKey: Self.installMarkerAccount
+        ) {
+            markerCompleted = true
+        } else {
+            markerCompleted = false
+        }
+        return servicesCompleted && groupCompleted && markerCompleted
     }
 
     /// One-time upgrade of items created under WhenUnlocked. New saves get
@@ -442,6 +511,10 @@ final class KeychainManager: KeychainManagerProtocol {
         #else
         return true
         #endif
+    }
+
+    func retryInstallLifecycleCleanup() -> Bool {
+        installAccessAllowed()
     }
 
     // MARK: - Identity Keys

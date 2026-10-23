@@ -10,6 +10,7 @@ import Testing
 @Suite(.serialized)
 struct StartupCleanupRetryTests {
     private final class Fixture {
+        let keychain = MockKeychain()
         var locked = true
         var pending = false
         var events: [String] = []
@@ -17,7 +18,6 @@ struct StartupCleanupRetryTests {
 
     @MainActor
     private func makeBlockedViewModel(_ fixture: Fixture) -> (ChatViewModel, MockTransport) {
-        let keychain = MockKeychain()
         let transport = MockTransport()
         let wipes = PanicPersistentStoreWipes(
             courier: { true }, bridge: { true }, publicArchive: { true }, prekeys: { true },
@@ -34,12 +34,31 @@ struct StartupCleanupRetryTests {
             complete: { fixture.events.append("complete"); fixture.pending = false }
         )
         let viewModel = ChatViewModel(
-            keychain: keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
-            identityManager: MockIdentityManager(keychain), transport: transport,
+            keychain: fixture.keychain, idBridge: NostrIdentityBridge(keychain: MockKeychainHelper()),
+            identityManager: MockIdentityManager(fixture.keychain), transport: transport,
             panicRecoveryOperations: operations, panicPersistentStoreWipes: wipes,
             startupRetirementBlocked: true
         )
         return (viewModel, transport)
+    }
+
+    @Test @MainActor
+    func retryReconcilesPendingInstallLifecycleBeforeGroupKeyRetirement() {
+        let fixture = Fixture()
+        fixture.locked = false
+        fixture.keychain.simulatedInstallLifecycleCleanupResult = false
+        let (viewModel, _) = makeBlockedViewModel(fixture)
+
+        #expect(!viewModel.retryStartupRetirement())
+        #expect(viewModel.startupRetirementBlocked)
+        #expect(viewModel.startupRetirementDiagnosticCode == "startup_cleanup/failed/group_keys")
+        #expect(fixture.keychain.installLifecycleCleanupRetryCount == 1)
+
+        fixture.keychain.simulatedInstallLifecycleCleanupResult = true
+        #expect(viewModel.retryStartupRetirement())
+        #expect(!viewModel.startupRetirementBlocked)
+        #expect(viewModel.startupRetirementDiagnosticCode == nil)
+        #expect(fixture.keychain.installLifecycleCleanupRetryCount == 2)
     }
 
     @Test @MainActor

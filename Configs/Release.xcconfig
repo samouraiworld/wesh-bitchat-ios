@@ -1,5 +1,5 @@
 MARKETING_VERSION = 1.0.0
-CURRENT_PROJECT_VERSION = 103
+CURRENT_PROJECT_VERSION = 104
 
 IPHONEOS_DEPLOYMENT_TARGET = 16.0
 MACOSX_DEPLOYMENT_TARGET = 13.0
@@ -13,7 +13,7 @@ CODE_SIGN_STYLE = Automatic
 PRODUCT_BUNDLE_IDENTIFIER = org.samouraiworld.wesh.ios
 APP_GROUP_ID = group.org.samouraiworld.wesh.ios
 
-// Beta 3 offers the Internet opt-in: Info.plist WeshInternetAvailable shows
+// The release candidate offers the Internet opt-in: Info.plist WeshInternetAvailable shows
 // the switch, while the mode stays off until the disclosure is accepted and
 // the user turns it on.
 WESH_INTERNET_AVAILABLE = YES

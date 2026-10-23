@@ -98,6 +98,56 @@ struct PreviewKeychainManagerTests {
         ))
     }
 
+    @Test("Reinstall cleanup deletes and verifies every declared service without a global inventory")
+    func reinstallCleanupIsServiceScopedAndReadBack() {
+        let primaryService = "chat.bitchat.test-primary"
+        let services = KeychainManager.applicationOwnedKeychainServices(
+            primaryService: primaryService
+        )
+        #expect(services == [
+            primaryService,
+            "chat.bitchat",
+            "chat.bitchat.nostr",
+            "chat.bitchat.favorites",
+            "chat.bitchat.outbox",
+            "com.bitchat.passwords",
+            "com.bitchat.deviceidentity",
+            "com.bitchat.noise.identity",
+            "chat.bitchat.passwords",
+            "bitchat.keychain",
+            "bitchat",
+            "Bitchat",
+            "BitChat",
+            "com.bitchat"
+        ])
+        var deleted: [String] = []
+        var inspected: [String] = []
+
+        let refused = KeychainManager.deleteAndConfirmApplicationOwnedKeychainServices(
+            primaryService: primaryService,
+            deleteService: { service in
+                deleted.append(service)
+                return errSecSuccess
+            },
+            inspectService: { service in
+                inspected.append(service)
+                return service == "chat.bitchat.outbox"
+                    ? errSecInteractionNotAllowed
+                    : errSecItemNotFound
+            }
+        )
+        #expect(!refused)
+        #expect(deleted == services)
+        #expect(inspected == services)
+
+        let confirmed = KeychainManager.deleteAndConfirmApplicationOwnedKeychainServices(
+            primaryService: primaryService,
+            deleteService: { _ in errSecItemNotFound },
+            inspectService: { _ in errSecItemNotFound }
+        )
+        #expect(confirmed)
+    }
+
     @Test("Preview keychain manager stores identity and service-scoped data in memory")
     func previewKeychainManagerRoundTripsData() {
         let manager = PreviewKeychainManager()

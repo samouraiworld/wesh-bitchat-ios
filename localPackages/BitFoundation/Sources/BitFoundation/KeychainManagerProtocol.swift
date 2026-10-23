@@ -11,6 +11,11 @@ import class CoreFoundation.CFString
 import typealias Darwin.OSStatus
 
 public protocol KeychainManagerProtocol {
+    /// Retries any fail-closed install/reinstall reconciliation before
+    /// startup retirement inspects the Keychain. Implementations without an
+    /// install lifecycle have no pending work and use the default below.
+    func retryInstallLifecycleCleanup() -> Bool
+
     func saveIdentityKey(_ keyData: Data, forKey key: String) -> Bool
     func getIdentityKey(forKey key: String) -> Data?
     func deleteIdentityKey(forKey key: String) -> Bool
@@ -43,6 +48,8 @@ public protocol KeychainManagerProtocol {
 }
 
 public extension KeychainManagerProtocol {
+    func retryInstallLifecycleCleanup() -> Bool { true }
+
     /// Source-compatible fallback for lightweight/test implementations. The
     /// production manager overrides this with the underlying OSStatus.
     func loadWithResult(key: String, service: String) -> KeychainReadResult {
