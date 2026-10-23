@@ -73,7 +73,19 @@ struct SharedContentHandoffTests {
         for key in Self.keys { #expect(context.defaults.data(forKey: key) == bytes) }
     }
 
-    @Test("A failed locked preference flush restores every key for checked erasure retry")
+    @Test("An empty retired mailbox succeeds without opening its obsolete lock or flushing")
+    func emptyMailboxDoesNotDependOnLockOrSynchronize() throws {
+        let context = try fixture()
+        defer { cleanup(context) }
+        let missing = context.root.appendingPathComponent("missing/lock")
+        context.defaults.synchronizeResults = [false]
+        let store = SharedContentStore(defaults: context.defaults, lockURL: missing)
+
+        #expect(store.discardAll())
+        #expect(context.defaults.synchronizeResults == [false])
+    }
+
+    @Test("A failed post-delete flush restores every key for a checked retry")
     func failedFlushRestoresEveryLegacyKey() throws {
         let context = try fixture()
         defer { cleanup(context) }
