@@ -15,6 +15,11 @@ struct WeshRootMountTests {
         #expect(WeshRootScreen(panicRecoveryBlocked: false, welcomed: WeshWelcome.isDone(in: fresh)) == .tabs)
         // An unfinished erase outranks everything, the welcome included.
         #expect(WeshRootScreen(panicRecoveryBlocked: true, welcomed: false) == .eraseRecovery)
+        #expect(WeshRootScreen(
+            panicRecoveryBlocked: false,
+            panicNetworkFenced: true,
+            welcomed: true
+        ) == .eraseRecovery)
     }
 
     @Test func bluetoothWaitsForTheWelcomeOnlyInWesh() {

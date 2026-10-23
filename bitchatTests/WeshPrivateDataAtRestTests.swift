@@ -471,10 +471,14 @@ struct WeshPrivateDataAtRestTests {
         #expect(UserDefaults.standard.object(forKey: "wesh.appearance.v1") == nil)
         // The welcome and its terms come back, like on a new phone.
         #expect(!WeshWelcome.isDone())
-        // An unconfirmed store leaves the intent for the next launch, never a dead end.
-        #expect(WeshRootScreen(panicRecoveryBlocked: vm.panicRecoveryBlocked, welcomed: WeshWelcome.isDone()) == .welcome)
+        // An unconfirmed store stays in recovery and can retry in-process.
+        #expect(WeshRootScreen(
+            panicRecoveryBlocked: vm.panicRecoveryBlocked,
+            panicNetworkFenced: vm.panicNetworkFenced,
+            welcomed: WeshWelcome.isDone()
+        ) == (failContacts ? .eraseRecovery : .welcome))
         #expect(committed == (failContacts ? 0 : 1))
-        #expect(!vm.panicRecoveryBlocked)
+        #expect(vm.panicRecoveryBlocked == failContacts)
     }
 
     @Test func panicWipeCommitsOnlyOnceTheIdentityCacheIsWritableAgain() {

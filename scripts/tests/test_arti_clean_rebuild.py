@@ -187,7 +187,7 @@ class CleanRebuildComparisonTests(unittest.TestCase):
             return "27.0"
         if command[-1] == "--version":
             if command[0] == "/synthetic/rustup" and len(command) == 2:
-                return "rustup 1.29.0 (28d1352db 2026-03-05)"
+                return "rustup 1.29.2 (d8c92c676 2026-10-21)"
             if command[-2] == "rustc":
                 return "rustc 1.96.0 (ac68faa20 2026-05-25)"
             if command[-2] == "cargo":
@@ -241,7 +241,7 @@ class CleanRebuildComparisonTests(unittest.TestCase):
                     if matching:
                         rebuild.rebuild(checkout, work, report)
                         result = json.loads(report.read_text())
-                        self.assertEqual(result["tools"]["rustup"], "rustup 1.29.0 (28d1352db 2026-03-05)")
+                        self.assertEqual(result["tools"]["rustup"], "rustup 1.29.2 (d8c92c676 2026-10-21)")
                         self.assertEqual(result["actual_artifacts"], {
                             name: hashlib.sha256((work / "source" / name).read_bytes()).hexdigest()
                             for name in rebuild.ARTIFACTS

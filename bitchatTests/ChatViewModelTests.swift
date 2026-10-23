@@ -1298,8 +1298,9 @@ struct ChatViewModelPanicTests {
         // The intent stays on disk, so the next launch erases again before startup.
         #expect(!completed)
         #expect(events == ["stop", "begin", "wipe"])
-        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.panicRecoveryBlocked)
         #expect(!viewModel.networkActivationAllowed)
+        #expect(viewModel.panicEraseDiagnosticCode == "panic_erase/failed/network")
     }
 
     @Test @MainActor
@@ -1336,12 +1337,13 @@ struct ChatViewModelPanicTests {
         #expect(events == ["stop", "begin", "wipe"])
         #expect(keychain.deleteAllCallCount == 1)
         #expect(transport.startServicesCallCount == startsBeforePanic)
-        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.panicRecoveryBlocked)
         #expect(!viewModel.networkActivationAllowed)
+        #expect(viewModel.panicEraseDiagnosticCode == "panic_erase/failed/keychain")
     }
 
     @Test @MainActor
-    func unconfirmedPanicKeepsTheNetworkOffUntilAWipeIsConfirmed() {
+    func unconfirmedPanicRetriesInProcessUntilAWipeIsConfirmed() {
         let keychain = MockKeychain()
         keychain.simulatedDeleteAllResult = false
         var pending = false
@@ -1366,21 +1368,21 @@ struct ChatViewModelPanicTests {
         )
 
         #expect(!viewModel.panicClearAllData())
-        // The screen goes back to the welcome, but no radio and no Internet; the tabs say why.
-        #expect(!viewModel.panicRecoveryBlocked)
+        // Recovery stays visible and neither radio nor Internet can start.
+        #expect(viewModel.panicRecoveryBlocked)
         #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
         #expect(restarts == 0)
         #expect(pending)
 
-        // Next launch: the pending intent replays first and, once confirmed, lets the network start.
+        // Retry is the already-authorized recovery transaction, not a second
+        // confirmation or a required process relaunch.
         keychain.simulatedDeleteAllResult = true
-        let (relaunched, _) = makeTestableViewModel(
-            keychain: keychain,
-            panicRecoveryOperations: operations,
-            panicNetworkLifecycle: lifecycle
-        )
+        #expect(viewModel.retryPendingPanicRecovery())
         #expect(!pending)
-        #expect(relaunched.networkActivationAllowed && !relaunched.panicNetworkFenced)
+        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.networkActivationAllowed && !viewModel.panicNetworkFenced)
+        #expect(viewModel.panicEraseDiagnosticCode == nil)
+        #expect(restarts == 1)
     }
 
     @Test @MainActor
@@ -1435,8 +1437,9 @@ struct ChatViewModelPanicTests {
         #expect(!completedMarker)
         #expect(transport.emergencyDisconnectCallCount == 1)
         #expect(transport.startServicesCallCount == 0)
-        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.panicRecoveryBlocked)
         #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
+        #expect(viewModel.panicEraseDiagnosticCode == "panic_erase/failed/media_drafts")
         #expect(!viewModel.bootstrapConfigured)
     }
 
@@ -1467,8 +1470,9 @@ struct ChatViewModelPanicTests {
         #expect(keychain.deleteAllCallCount == 1)
         #expect(transport.emergencyDisconnectCallCount == 1)
         #expect(transport.startServicesCallCount == 0)
-        #expect(!viewModel.panicRecoveryBlocked)
+        #expect(viewModel.panicRecoveryBlocked)
         #expect(!viewModel.networkActivationAllowed && viewModel.panicNetworkFenced)
+        #expect(viewModel.panicEraseDiagnosticCode == "panic_erase/failed/keychain")
         #expect(!viewModel.bootstrapConfigured)
     }
 

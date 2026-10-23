@@ -57,13 +57,15 @@ The October 2026 artifact below was rebuilt from the reviewed source and lockfil
 ```text
 rustc 1.96.0 (ac68faa20 2026-05-25)
 cargo 1.96.0 (30a34c682 2026-05-25)
-rustup 1.29.0 (28d1352db 2026-03-05)
+rustup 1.29.2 (d8c92c676 2026-10-21)
 cbindgen 0.29.4
 Xcode 27.0
 Build version 27A266a
 ```
 
 The earlier July audit found Rust 1.86.0 unable to build this graph because `typed-index-collections@3.4.0` requires Rust 1.90.0 or newer. The refreshed selected graph still declares a maximum dependency MSRV of 1.90.0; the validated rebuild uses the pinned 1.96.0 toolchain.
+
+The 24 October CI refresh accepts rustup 1.29.2, the bootstrap shipped by the pinned GitHub Actions image. This security release updates the bootstrap certificate-validation dependencies; the compiled Rust 1.96.0 toolchain, Cargo, cbindgen, Xcode and SDK pins remain unchanged, and the clean rebuild still compares every generated artifact byte-for-byte.
 
 The 18 October refresh uses `--locked`, one Cargo job, the same shipping release flags and neutral Rust/C source-path maps. It compiled all five targets and packaged their iOS device, universal simulator and universal macOS libraries. The preceding partial attempt stopped after three targets when macOS rejected a build-time macro; that incomplete attempt is not a validated artifact.
 

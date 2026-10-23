@@ -419,8 +419,10 @@ final class KeychainManager: KeychainManagerProtocol {
     }
 
     /// The surviving install marker authorizes deletion only within the
-    /// complete, declared Wesh service set. Panic deletion remains broader and
-    /// continues to require its global inventory; reinstall recovery does not.
+    /// complete, declared Wesh service set. Panic deletion uses the same
+    /// authoritative scope: an unscoped inventory can include a protected row
+    /// that cannot be decoded or deleted and must not permanently veto an
+    /// otherwise confirmed Wesh purge.
     private func deleteAndConfirmReinstallKeychainData() -> Bool {
         let servicesCompleted = Self.deleteAndConfirmApplicationOwnedKeychainServices(
             primaryService: service,
@@ -611,18 +613,10 @@ final class KeychainManager: KeychainManagerProtocol {
         ]
 
         var result: AnyObject?
-        func attempt(withAccessGroup: Bool) -> OSStatus {
-            var q = base
-            if withAccessGroup { q[kSecAttrAccessGroup as String] = appGroup }
-            return SecItemCopyMatching(q as CFDictionary, &result)
-        }
-
-        #if os(iOS)
-        var status = attempt(withAccessGroup: true)
-        if status == -34018 { status = attempt(withAccessGroup: false) }
-        #else
-        let status = attempt(withAccessGroup: false)
-        #endif
+        // App Groups and Keychain access groups are different entitlement
+        // domains. This target has no keychain-sharing entitlement, so every
+        // item belongs to the implicit application access group.
+        let status = SecItemCopyMatching(base as CFDictionary, &result)
 
         // Classify the result
         let readResult = classifyReadStatus(status, data: result as? Data)
@@ -724,19 +718,7 @@ final class KeychainManager: KeychainManagerProtocol {
             kSecAttrAccessible as String: Self.itemAccessibility,
             kSecAttrLabel as String: "bitchat-\(key)"
         ]
-        func attempt(withAccessGroup: Bool) -> OSStatus {
-            var scopedQuery = query
-            if withAccessGroup { scopedQuery[kSecAttrAccessGroup as String] = appGroup }
-            return Self.updateOrAddItem(query: scopedQuery, attributes: attributes)
-        }
-        #if os(iOS)
-        let status = attempt(withAccessGroup: true)
-        // Preserve the existing app/default-group fallback; never retry a
-        // permission, lock or authentication failure in a different scope.
-        return status == -34018 ? attempt(withAccessGroup: false) : status
-        #else
-        return attempt(withAccessGroup: false)
-        #endif
+        return Self.updateOrAddItem(query: query, attributes: attributes)
     }
 
     private func saveData(_ data: Data, forKey key: String) -> Bool {
@@ -758,18 +740,7 @@ final class KeychainManager: KeychainManagerProtocol {
         ]
 
         var result: AnyObject?
-        func attempt(withAccessGroup: Bool) -> OSStatus {
-            var q = base
-            if withAccessGroup { q[kSecAttrAccessGroup as String] = appGroup }
-            return SecItemCopyMatching(q as CFDictionary, &result)
-        }
-
-        #if os(iOS)
-        var status = attempt(withAccessGroup: true)
-        if status == -34018 { status = attempt(withAccessGroup: false) }
-        #else
-        let status = attempt(withAccessGroup: false)
-        #endif
+        let status = SecItemCopyMatching(base as CFDictionary, &result)
 
         if status == errSecSuccess { return result as? Data }
         if status == -34018 {
@@ -786,18 +757,7 @@ final class KeychainManager: KeychainManagerProtocol {
             kSecAttrService as String: service
         ]
 
-        func attempt(withAccessGroup: Bool) -> OSStatus {
-            var q = base
-            if withAccessGroup { q[kSecAttrAccessGroup as String] = appGroup }
-            return SecItemDelete(q as CFDictionary)
-        }
-
-        #if os(iOS)
-        var status = attempt(withAccessGroup: true)
-        if status == -34018 { status = attempt(withAccessGroup: false) }
-        #else
-        let status = attempt(withAccessGroup: false)
-        #endif
+        let status = SecItemDelete(base as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
     
@@ -807,93 +767,14 @@ final class KeychainManager: KeychainManagerProtocol {
     func deleteAllKeychainData() -> Bool {
         SecureLogger.warning("Panic mode - deleting all keychain data", category: .security)
 
-        let ownedServices = Set(
-            Self.applicationOwnedKeychainServices(
-                primaryService: service
-            )
-        )
-        var enumerationCompleted = true
-        let searchQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnAttributes as String: true
-        ]
-        var result: AnyObject?
-        let searchStatus = SecItemCopyMatching(
-            searchQuery as CFDictionary,
-            &result
-        )
-        switch searchStatus {
-        case errSecSuccess:
-            guard let items = result as? [[String: Any]] else {
-                enumerationCompleted = false
-                SecureLogger.error(
-                    "Unable to decode application-owned keychain inventory",
-                    category: .security
-                )
-                break
-            }
-
-            // Preserve the access-group sweep for custom services that are
-            // not yet in the declared legacy-service list.
-            for item in items {
-                let account =
-                    item[kSecAttrAccount as String] as? String ?? ""
-                let itemService =
-                    item[kSecAttrService as String] as? String ?? ""
-                let accessGroup =
-                    item[kSecAttrAccessGroup as String] as? String
-                guard accessGroup == appGroup
-                        || ownedServices.contains(itemService)
-                else {
-                    continue
-                }
-
-                var deleteQuery: [String: Any] = [
-                    kSecClass as String: kSecClassGenericPassword
-                ]
-                if !account.isEmpty {
-                    deleteQuery[kSecAttrAccount as String] = account
-                }
-                if !itemService.isEmpty {
-                    deleteQuery[kSecAttrService as String] = itemService
-                }
-                if let accessGroup,
-                   !accessGroup.isEmpty,
-                   accessGroup != "test" {
-                    deleteQuery[kSecAttrAccessGroup as String] = accessGroup
-                }
-
-                let status = SecItemDelete(deleteQuery as CFDictionary)
-                if status != errSecSuccess && status != errSecItemNotFound {
-                    enumerationCompleted = false
-                    SecureLogger.error(
-                        NSError(domain: "Keychain", code: Int(status)),
-                        context: "Unable to delete enumerated application-owned keychain item",
-                        category: .keychain
-                    )
-                }
-            }
-
-        case errSecItemNotFound:
-            break
-
-        default:
-            enumerationCompleted = false
-            SecureLogger.error(
-                NSError(domain: "Keychain", code: Int(searchStatus)),
-                context: "Unable to enumerate application-owned keychain items",
-                category: .keychain
-            )
-        }
-
-        // Bulk deletion by every application-owned service is authoritative
-        // and idempotent. It also verifies that every known service scope is
-        // empty even when the inventory pass found no items.
+        // Every custom service is registered in one explicit inventory. Delete
+        // and independently read back each scope. This remains fail closed for
+        // Wesh data without relying on a process-wide generic-password listing,
+        // which iOS may refuse because of an unrelated protected row.
         let servicesCompleted =
-            Self.deleteApplicationOwnedKeychainServices(
-                primaryService: service
-            ) { serviceName in
+            Self.deleteAndConfirmApplicationOwnedKeychainServices(
+                primaryService: service,
+                deleteService: { serviceName in
                 let query: [String: Any] = [
                     kSecClass as String: kSecClassGenericPassword,
                     kSecAttrService as String: serviceName
@@ -907,7 +788,15 @@ final class KeychainManager: KeychainManagerProtocol {
                     )
                 }
                 return status
-            }
+            }, inspectService: { serviceName in
+                var result: CFTypeRef?
+                return SecItemCopyMatching([
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: serviceName,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                    kSecReturnAttributes as String: true
+                ] as CFDictionary, &result)
+            })
 
         // Historical builds attempted this application-group identifier as a
         // keychain access group. It is not currently entitled, so -34018
@@ -934,10 +823,13 @@ final class KeychainManager: KeychainManagerProtocol {
         // later uninstall/reinstall can still be distinguished from an in-place
         // upgrade. Do not commit the container-side marker here: reinstall
         // reconciliation may still need to retry an incomplete cleanup.
+        let marker = Data([1])
         if case .success = saveDataWithResult(
-            Data([1]),
+            marker,
             forKey: Self.installMarkerAccount
-        ) {
+        ), case .success(let storedMarker) = retrieveDataWithResult(
+            forKey: Self.installMarkerAccount
+        ), storedMarker == marker {
             markerCompleted = true
         } else {
             markerCompleted = false
@@ -949,8 +841,7 @@ final class KeychainManager: KeychainManagerProtocol {
         #endif
 
         let completed =
-            enumerationCompleted
-            && servicesCompleted
+            servicesCompleted
             && groupCompleted
             && markerCompleted
         if completed {

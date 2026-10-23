@@ -32,8 +32,15 @@ protocol PanicResettingTransport: AnyObject {
     func suspendForPanicReset()
     /// Finishes a panic wipe, optionally restarting services.
     func completePanicReset(restartServices: Bool)
-    /// Rotates the transport identity as part of a panic reset.
-    func resetIdentityForPanic(currentNickname: String, restartServices: Bool)
+    /// Rotates the transport identity as part of a panic reset and confirms
+    /// that the replacement is persisted and usable. When the application
+    /// Keychain purge has already confirmed the identity service empty, the
+    /// transport must not make redundant deletes a second failure gate.
+    func resetIdentityForPanic(
+        currentNickname: String,
+        persistentIdentityAlreadyCleared: Bool,
+        restartServices: Bool
+    ) -> Bool
 }
 
 /// Courier store-and-forward: seal a message to the recipient's static

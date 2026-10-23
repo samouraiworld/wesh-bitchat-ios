@@ -172,6 +172,7 @@ struct LocalNicknamePanicTests {
         keychain.identityReadFault = { key, _ in key == LocalNicknameStore.keychainKey ? .deviceLocked : nil }
         #expect(!vm.panicClearAllData())
         #expect(committed() == 0)
-        #expect(!vm.panicRecoveryBlocked)
+        #expect(vm.panicRecoveryBlocked)
+        #expect(vm.panicEraseDiagnosticCode == "panic_erase/failed/nickname")
     }
 }

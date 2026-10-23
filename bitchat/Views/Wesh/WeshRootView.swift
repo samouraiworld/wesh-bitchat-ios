@@ -319,25 +319,40 @@ struct WeshRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            switch WeshRootScreen(panicRecoveryBlocked: viewModel.panicRecoveryBlocked, welcomed: welcomed) {
+            switch WeshRootScreen(
+                panicRecoveryBlocked: viewModel.panicRecoveryBlocked,
+                panicNetworkFenced: viewModel.panicNetworkFenced,
+                welcomed: welcomed
+            ) {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        // An erase never stops here: only legacy cleanup before startup does.
                         Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
                             .font(.headline).accessibilityAddTraits(.isHeader)
-                        Text(PaveCopy.text("pave.cleanup.body"))
-                        if let code = viewModel.startupRetirementDiagnosticCode {
+                        Text(viewModel.panicNetworkFenced
+                             ? WeshFeedbackCopy.eraseOutcome(false)
+                             : PaveCopy.text("pave.cleanup.body"))
+                        if let code = viewModel.panicNetworkFenced
+                            ? viewModel.panicEraseDiagnosticCode
+                            : viewModel.startupRetirementDiagnosticCode {
                             Text(verbatim: "Diagnostic \(code)")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
-                        Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
-                            .frame(minHeight: 44)
-                        Button(PaveCopy.text("pave.wesh.erase.confirmAction"), role: .destructive) {
-                            chrome.requestPanicWipe()
+                        Button(PaveCopy.text("pave.action.retry")) {
+                            if viewModel.panicNetworkFenced {
+                                _ = runtime.retryPendingPanicRecovery()
+                            } else {
+                                runtime.retryStartupRetirement()
+                            }
                         }
-                        .frame(minHeight: 44)
+                            .frame(minHeight: 44)
+                        if !viewModel.panicNetworkFenced {
+                            Button(PaveCopy.text("pave.wesh.erase.confirmAction"), role: .destructive) {
+                                chrome.requestPanicWipe()
+                            }
+                            .frame(minHeight: 44)
+                        }
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:

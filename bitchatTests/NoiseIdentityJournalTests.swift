@@ -328,6 +328,24 @@ struct NoiseIdentityJournalTests {
             #expect(!service.retryIdentityPersistence())
         }
     }
+
+    @Test func confirmedServicePurgeDoesNotRepeatIdentityDeletes() {
+        let storage = MockKeychain()
+        let service = NoiseEncryptionService(keychain: storage)
+        var attempted: [String] = []
+        storage.identityDeleteFault = { key, _ in
+            attempted.append(key)
+            return false
+        }
+
+        #expect(service.clearPersistentIdentity(
+            persistentStoreAlreadyCleared: true
+        ))
+        #expect(service.identityAvailability == .invalidated)
+        #expect(!attempted.contains(journalKey))
+        #expect(!attempted.contains(noiseKey))
+        #expect(!attempted.contains(signingKey))
+    }
 }
 
 /// Parks a Keychain call on a plain thread until released; never used from

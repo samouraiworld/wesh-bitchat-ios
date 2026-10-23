@@ -670,7 +670,9 @@ final class NoiseEncryptionService {
 
     /// Clear persistent identity (for panic mode)
     @discardableResult
-    func clearPersistentIdentity() -> Bool {
+    func clearPersistentIdentity(
+        persistentStoreAlreadyCleared: Bool = false
+    ) -> Bool {
         identityLock.lock()
         persistenceLock.lock()
         defer { persistenceLock.unlock() }
@@ -684,10 +686,19 @@ final class NoiseEncryptionService {
         // Clear from keychain
         // Attempt every deletion even if one fails. A surviving journal must
         // not authorize resurrecting this invalidated instance after panic.
-        let deletedJournal = keychain.deleteIdentityKey(forKey: Self.pendingIdentityKey)
-        let deletedStatic = keychain.deleteIdentityKey(forKey: "noiseStaticKey")
-        let deletedSigning = keychain.deleteIdentityKey(forKey: "ed25519SigningKey")
-        let deletedIdentity = deletedJournal && deletedStatic && deletedSigning
+        let deletedIdentity: Bool
+        if persistentStoreAlreadyCleared {
+            // The application owner has already deleted and read back the
+            // complete Keychain service. Repeating account-level deletes here
+            // can fail transiently after the authoritative purge and strand
+            // this service in `.invalidated` despite no old key surviving.
+            deletedIdentity = true
+        } else {
+            let deletedJournal = keychain.deleteIdentityKey(forKey: Self.pendingIdentityKey)
+            let deletedStatic = keychain.deleteIdentityKey(forKey: "noiseStaticKey")
+            let deletedSigning = keychain.deleteIdentityKey(forKey: "ed25519SigningKey")
+            deletedIdentity = deletedJournal && deletedStatic && deletedSigning
+        }
         SecureLogger.logKeyOperation(.delete, keyType: "identity keys", success: deletedIdentity)
         // One-time prekey privates go with the identity they were bound to.
         localPrekeys.wipe()

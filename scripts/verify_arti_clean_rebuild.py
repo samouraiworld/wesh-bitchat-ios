@@ -225,7 +225,7 @@ def rebuild(checkout, work, report, timeout=None):
         raise ValueError("Exact audited SDK versions are unavailable")
     rustup = shutil.which("rustup")
     rustup_version = output([rustup, "--version"], source, env) if rustup else ""
-    if not rustup_version.startswith("rustup 1.29.0 "):
+    if not rustup_version.startswith("rustup 1.29.2 "):
         raise ValueError("Audited rustup bootstrap version is unavailable")
     run_owned([rustup, "toolchain", "install", "1.96.0", "--profile", "minimal", "--no-self-update"],
               source, env, deadline, work)

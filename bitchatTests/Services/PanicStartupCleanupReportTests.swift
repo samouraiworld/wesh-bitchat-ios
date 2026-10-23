@@ -152,3 +152,29 @@ struct PanicStartupCleanupReportTests {
 
     private enum MarkerFailure: Error { case unavailable }
 }
+
+struct PanicEraseReportTests {
+    @Test
+    func everyOwnerHasAStableNonSensitiveDiagnosticIdentifier() {
+        for owner in PanicEraseOwner.allCases {
+            var confirmations = Dictionary(
+                uniqueKeysWithValues: PanicEraseOwner.allCases.map { ($0, true) }
+            )
+            confirmations[owner] = false
+            let report = PanicEraseReport(confirmations: confirmations)
+
+            #expect(report.failedOwners == [owner])
+            #expect(report.diagnosticCode == "panic_erase/failed/\(owner.rawValue)")
+            #expect(!report.diagnosticCode.contains("/Library/"))
+        }
+    }
+
+    @Test
+    func missingConfirmationFailsClosedInDeterministicOrder() {
+        let report = PanicEraseReport(confirmations: [:])
+
+        #expect(!report.allConfirmed)
+        #expect(report.failedOwners == PanicEraseOwner.allCases)
+        #expect(report.diagnosticCode.hasPrefix("panic_erase/failed/network,keychain"))
+    }
+}
