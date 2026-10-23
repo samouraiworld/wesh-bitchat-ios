@@ -93,6 +93,29 @@ struct BLEServiceCoreTests {
         #expect(!ble.isTransportTrafficAllowed)
     }
 
+    @Test @MainActor
+    func confirmedApplicationKeychainPurgeRehydratesNoiseWithoutRedundantDeletes() {
+        let storage = MockKeychain()
+        let ble = makeService(keychain: storage)
+        let original = ble.noiseIdentityFingerprint()
+        #expect(storage.deleteAllKeychainData())
+        storage.identityDeleteFault = { _, _ in false }
+
+        ble.suspendForPanicReset()
+        let replaced = ble.resetIdentityForPanic(
+            currentNickname: "Synthetic",
+            persistentIdentityAlreadyCleared: true,
+            restartServices: false
+        )
+        ble.completePanicReset(restartServices: false)
+
+        #expect(replaced)
+        #expect(ble.noiseIdentityAvailability == .available)
+        #expect(!ble.noiseIdentityFingerprint().isEmpty)
+        #expect(ble.noiseIdentityFingerprint() != original)
+        #expect(!ble.isTransportTrafficAllowed)
+    }
+
     @Test
     func explicitStopDuringProtectedStorageRecoveryPreventsDeferredStartup() async {
         let storage = MockKeychain()

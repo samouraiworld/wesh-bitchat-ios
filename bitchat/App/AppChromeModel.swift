@@ -140,7 +140,7 @@ final class AppChromeModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$torBlocked)
 
-        chatViewModel.$panicRecoveryBlocked
+        chatViewModel.$panicNetworkFenced
             .receive(on: DispatchQueue.main)
             .assign(to: &$panicWipeBlocked)
 

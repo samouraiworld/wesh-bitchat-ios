@@ -142,6 +142,17 @@ final class AppRuntime: ObservableObject {
         start()
     }
 
+    @discardableResult
+    func retryPendingPanicRecovery() -> Bool {
+        let completed = chatViewModel.retryPendingPanicRecovery(
+            restartMesh: !WeshMode.isActive
+        )
+        guard completed else { return false }
+        chatViewModel.configureBootstrapIfNeeded()
+        start()
+        return true
+    }
+
     func start() {
         guard chatViewModel.networkActivationAllowed else { return }
         guard !started else { return }

@@ -151,6 +151,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published private(set) var panicRecoveryBlocked = false
     @Published private(set) var startupRetirementBlocked = false
     @Published private(set) var startupRetirementDiagnosticCode: String?
+    @Published private(set) var panicEraseDiagnosticCode: String?
     @Published private(set) var weshPanicGeneration: UInt64 = 0
     /// An unconfirmed erase keeps Bluetooth and Internet off until a wipe is
     /// confirmed, at the latest when the next launch replays it.
@@ -1322,6 +1323,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         startupRetirementBlocked = false
         startupRetirementDiagnosticCode = nil
+        panicEraseDiagnosticCode = nil
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
@@ -1474,48 +1476,82 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         // Replace the BLE identity while keeping the radio stopped. It may
         // reopen only after the durable panic transaction commits.
+        let transportIdentityWipeCompleted: Bool
         if let panicTransport = meshService as? PanicResettingTransport {
-            panicTransport.resetIdentityForPanic(
+            transportIdentityWipeCompleted = panicTransport.resetIdentityForPanic(
                 currentNickname: nickname,
+                persistentIdentityAlreadyCleared: keychainWipeCompleted,
                 restartServices: false
             )
         } else {
             meshService.setNickname(nickname)
+            transportIdentityWipeCompleted = true
         }
 
         // The wipe must finish before this security action returns. A detached
         // task could otherwise lose a race with a new capture or app exit and
         // leave pre-panic media behind.
-        var panicCompleted = false
-        var draftsWiped = false
+        var mediaAndDraftsWipeCompleted = false
+        var markerCommitCompleted = true
         do {
             try panicRecoveryOperations.wipeMedia(recoveryIntent)
-            draftsWiped = true
-            panicCompleted = try panicRecoveryOperations.completeIfConfirmed(
-                existingStoreResults: [
-                    networkWipeCompleted, keychainWipeCompleted, identityCacheWipeCompleted, nicknameWipeCompleted,
-                    meetingNoteWipeCompleted, qrContactsWipeCompleted, courierWipeCompleted,
-                    bridgeWipeCompleted, outboxWipeCompleted, publicArchiveWipeCompleted,
-                    groupWipeCompleted, prekeysWipeCompleted, boardWipeCompleted, geographyWipeCompleted, sharedContentWipeCompleted
-                ],
-                legacySightingsConfirmed: sightingsWipeCompleted
-            )
-            if panicCompleted {
+            mediaAndDraftsWipeCompleted = true
+        } catch {
+            SecureLogger.error("Panic media or draft step failed: \(error)", category: .security)
+        }
+
+        var confirmations: [PanicEraseOwner: Bool] = [
+            .network: networkWipeCompleted,
+            .keychain: keychainWipeCompleted,
+            .identityCache: identityCacheWipeCompleted,
+            .nickname: nicknameWipeCompleted,
+            .meetingNote: meetingNoteWipeCompleted,
+            .qrContacts: qrContactsWipeCompleted,
+            .courier: courierWipeCompleted,
+            .bridge: bridgeWipeCompleted,
+            .outbox: outboxWipeCompleted,
+            .publicArchive: publicArchiveWipeCompleted,
+            .sightings: sightingsWipeCompleted,
+            .groups: groupWipeCompleted,
+            .prekeys: prekeysWipeCompleted,
+            .board: boardWipeCompleted,
+            .geography: geographyWipeCompleted,
+            .sharedContent: sharedContentWipeCompleted,
+            .mediaAndDrafts: mediaAndDraftsWipeCompleted,
+            .transportIdentity: transportIdentityWipeCompleted,
+            // A retained marker is intentional while an earlier owner is
+            // incomplete, so do not misreport it as another failing owner.
+            .markerCommit: true
+        ]
+        let cleanupConfirmed = PanicEraseReport(
+            confirmations: confirmations
+        ).allConfirmed
+        if cleanupConfirmed {
+            do {
+                try panicRecoveryOperations.complete()
                 SecureLogger.info(
                     "🗑️ Deleted all media files during panic clear",
                     category: .session
                 )
+            } catch {
+                markerCommitCompleted = false
+                SecureLogger.error(
+                    "Panic recovery marker commit failed: \(error)",
+                    category: .security
+                )
             }
-        } catch {
-            SecureLogger.error("Panic media or marker step failed: \(error)", category: .security)
         }
-        // Never a dead end: the app restarts fresh either way. An unconfirmed
-        // store keeps the durable intent, so the next launch erases again
-        // before anything starts; until then nothing goes on the network.
+        confirmations[.markerCommit] = markerCommitCompleted
+        let panicReport = PanicEraseReport(confirmations: confirmations)
+        let panicCompleted = panicReport.allConfirmed
+        panicEraseDiagnosticCode = panicCompleted ? nil : panicReport.diagnosticCode
+        // An unconfirmed owner keeps both the durable intent and the recovery
+        // screen active. Nothing can return to the network until every owner
+        // and the final marker commit have been confirmed.
         if !panicCompleted {
             SecureLogger.error("Panic erase left pending until the next launch; network stays off", category: .security)
         }
-        panicRecoveryBlocked = false
+        panicRecoveryBlocked = !panicCompleted
         panicNetworkFenced = !panicCompleted
 
         // BCH-01-013: Clear iOS app switcher snapshots. Keep tests away from
@@ -1526,16 +1562,17 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
         #endif
 
-        if let panicTransport = meshService as? PanicResettingTransport {
-            // Startup recovery reopens admission but leaves actual service
-            // start to the bootstrapper immediately after this method.
+        if panicCompleted,
+           let panicTransport = meshService as? PanicResettingTransport {
+            // Reopen transport admission only after the whole application-level
+            // transaction commits. A failed retry leaves BLE suspended.
             panicTransport.completePanicReset(
-                restartServices: restartServices && restartMesh && panicCompleted
+                restartServices: restartServices && restartMesh
             )
         }
 
         // A store whose wipe is unconfirmed stays closed so nothing old reloads.
-        if draftsWiped {
+        if mediaAndDraftsWipeCompleted {
             ComposerDraftStore.completePanic(
                 success: true, noiseKey: meshService.noiseStaticPublicKeyData()
             )
@@ -1569,6 +1606,20 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         }
 
         return panicCompleted
+    }
+
+    /// Replays an already authorized, durable panic transaction without
+    /// asking the user to confirm the same destructive action again.
+    @discardableResult
+    func retryPendingPanicRecovery(
+        restartServices: Bool = true,
+        restartMesh: Bool = true
+    ) -> Bool {
+        guard panicNetworkFenced else { return false }
+        return panicClearAllData(
+            restartServices: restartServices,
+            restartMesh: restartMesh
+        )
     }
 
     /// BCH-01-013: Clear iOS app switcher snapshots during panic mode

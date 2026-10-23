@@ -56,8 +56,16 @@ extension PaveSettingsSummary {
 enum WeshRootScreen: Equatable {
     case eraseRecovery, welcome, tabs
 
-    init(panicRecoveryBlocked: Bool, welcomed: Bool) {
-        if panicRecoveryBlocked { self = .eraseRecovery } else { self = welcomed ? .tabs : .welcome }
+    init(
+        panicRecoveryBlocked: Bool,
+        panicNetworkFenced: Bool = false,
+        welcomed: Bool
+    ) {
+        if panicRecoveryBlocked || panicNetworkFenced {
+            self = .eraseRecovery
+        } else {
+            self = welcomed ? .tabs : .welcome
+        }
     }
 }
 

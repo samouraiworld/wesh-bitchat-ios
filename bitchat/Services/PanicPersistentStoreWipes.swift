@@ -93,6 +93,52 @@ struct PanicRecoveryIntent {
     }
 }
 
+/// Stable, payload-free owners participating in the destructive erase. The
+/// identifiers are safe to display in a support diagnostic and deliberately
+/// contain no account, path, key or message data.
+enum PanicEraseOwner: String, CaseIterable, Sendable {
+    case network
+    case keychain
+    case identityCache = "identity_cache"
+    case nickname
+    case meetingNote = "meeting_note"
+    case qrContacts = "qr_contacts"
+    case courier
+    case bridge
+    case outbox
+    case publicArchive = "public_archive"
+    case sightings
+    case groups
+    case prekeys
+    case board
+    case geography
+    case sharedContent = "shared_content"
+    case mediaAndDrafts = "media_drafts"
+    case transportIdentity = "transport_identity"
+    case markerCommit = "marker_commit"
+}
+
+struct PanicEraseReport: Equatable, Sendable {
+    private let confirmations: [PanicEraseOwner: Bool]
+
+    init(confirmations: [PanicEraseOwner: Bool]) {
+        self.confirmations = confirmations
+    }
+
+    var failedOwners: [PanicEraseOwner] {
+        PanicEraseOwner.allCases.filter { confirmations[$0] != true }
+    }
+
+    var allConfirmed: Bool { failedOwners.isEmpty }
+
+    var diagnosticCode: String {
+        let components = failedOwners.map(\.rawValue)
+        return components.isEmpty
+            ? "panic_erase/ok"
+            : "panic_erase/failed/\(components.joined(separator: ","))"
+    }
+}
+
 /// Small, dependency-injectable transaction surface used by ChatViewModel.
 /// Production persists the same intent in two independent locations before
 /// any application state is erased. Tests can inject an ephemeral operation

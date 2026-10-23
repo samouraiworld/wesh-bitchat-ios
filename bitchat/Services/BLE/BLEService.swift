@@ -723,10 +723,12 @@ final class BLEService: NSObject {
         sendAnnounce(forceSend: true)
     }
 
+    @discardableResult
     func resetIdentityForPanic(
         currentNickname: String,
+        persistentIdentityAlreadyCleared: Bool = false,
         restartServices: Bool = true
-    ) {
+    ) -> Bool {
         gossipSyncManager?.retireForPanic()
         gossipSyncManager = nil
         // Discard deferred pre-panic ciphertext behind any in-flight receive
@@ -772,11 +774,13 @@ final class BLEService: NSObject {
         // must never observe the new Noise service alongside the old peer ID
         // (it would sign with the new identity while carrying the old sender).
         // refreshPeerIdentity() executes inline here via its re-entrancy check.
-        onEngine {
+        let identityResetCompleted = onEngine {
             noiseService.clearEphemeralStateForPanic()
-            guard noiseService.clearPersistentIdentity() else {
+            guard noiseService.clearPersistentIdentity(
+                persistentStoreAlreadyCleared: persistentIdentityAlreadyCleared
+            ) else {
                 refreshPeerIdentity()
-                return
+                return false
             }
 
             let newNoise = NoiseEncryptionService(
@@ -786,6 +790,7 @@ final class BLEService: NSObject {
             noiseService = newNoise
             configureNoiseServiceCallbacks(for: newNoise)
             refreshPeerIdentity()
+            return newNoise.isIdentityAvailable
         }
         publishNoiseIdentityAvailability()
         // Keep the transport silent until the application-level transaction
@@ -798,11 +803,12 @@ final class BLEService: NSObject {
             self?.selfBroadcastTracker.removeAll()
         }
         requestPeerDataPublish()
-        if restartServices {
+        if restartServices && identityResetCompleted {
             restartGossipManager()
             startServices()
             sendAnnounce(forceSend: true)
         }
+        return identityResetCompleted
     }
     
     // Ensure this runs on message queue to avoid main thread blocking

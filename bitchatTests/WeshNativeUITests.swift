@@ -201,8 +201,8 @@ struct WeshNativeUITests {
         let starts = transport.startServicesCallCount
         #expect(!vm.panicClearAllData())
         #expect(attempts == ["geography", "courier", "bridge", "archive", "sightings", "groups", "prekeys", "board", "share"])
-        // Back to a fresh start, but the radio stays off until a wipe is confirmed.
-        #expect(committed == 0 && !vm.panicRecoveryBlocked && !vm.networkActivationAllowed)
+        // Stay on recovery; the radio remains off until every owner confirms.
+        #expect(committed == 0 && vm.panicRecoveryBlocked && !vm.networkActivationAllowed)
         #expect(transport.startServicesCallCount == starts)
         failed = false
         files.refuseRemoval = false
@@ -302,8 +302,8 @@ struct WeshNativeUITests {
         chrome.requestPanicWipe()
         #expect(!chrome.panicClearAllData())
         #expect(!chrome.showPanicConfirmation)
-        // Only an unconfirmed note stays closed; the rest resets to a fresh start.
-        #expect(!vm.panicRecoveryBlocked && note.isSuspended == failNote)
+        // The recovery screen and failed owner stay closed until retry succeeds.
+        #expect(vm.panicRecoveryBlocked && note.isSuspended == failNote)
         #expect(note.content.note.isEmpty)
         #expect(committed == 0 && begun == 1 && eraseAttempts == 1)
         #expect(transport.startServicesCallCount == starts)
