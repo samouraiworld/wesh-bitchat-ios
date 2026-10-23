@@ -46,19 +46,23 @@ final class AppRuntime: ObservableObject {
         let conversations = ConversationStore()
         let peerIdentityStore = PeerIdentityStore()
         self.conversations = conversations
-        let resolvedSharedContentStore: SharedContentStore?
-        if let sharedContentStore {
-            resolvedSharedContentStore = sharedContentStore
-        } else if !TestEnvironment.isRunningTests,
-                  let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) {
-            resolvedSharedContentStore = SharedContentStore(defaults: sharedDefaults)
-        } else {
-            resolvedSharedContentStore = nil
-        }
         var persistentWipes = PanicPersistentStoreWipes()
         persistentWipes.sharedContent = {
-            guard let resolvedSharedContentStore else { return TestEnvironment.isRunningTests }
-            return resolvedSharedContentStore.discardAll()
+            if let sharedContentStore { return sharedContentStore.discardAll() }
+            if TestEnvironment.isRunningTests { return true }
+            #if os(iOS)
+            guard UIApplication.shared.isProtectedDataAvailable else { return false }
+            #endif
+            // Resolve the suite and App Group container for every attempt. A
+            // transiently unavailable container at launch must not poison the
+            // same-process Retry button forever.
+            guard let sharedDefaults = UserDefaults(suiteName: BitchatApp.groupID) else {
+                return false
+            }
+            return SharedContentStore(
+                defaults: sharedDefaults,
+                readbackDefaults: { UserDefaults(suiteName: BitchatApp.groupID) }
+            ).discardAll()
         }
         self.chatViewModel = ChatViewModel(
             keychain: keychain,
