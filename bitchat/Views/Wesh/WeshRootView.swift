@@ -327,8 +327,17 @@ struct WeshRootView: View {
                         Label(PaveCopy.text("pave.cleanup.title"), systemImage: "exclamationmark.triangle")
                             .font(.headline).accessibilityAddTraits(.isHeader)
                         Text(PaveCopy.text("pave.cleanup.body"))
+                        if let code = viewModel.startupRetirementDiagnosticCode {
+                            Text(verbatim: "Diagnostic \(code)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
                         Button(PaveCopy.text("pave.action.retry")) { runtime.retryStartupRetirement() }
                             .frame(minHeight: 44)
+                        Button(PaveCopy.text("pave.wesh.erase.confirmAction"), role: .destructive) {
+                            chrome.requestPanicWipe()
+                        }
+                        .frame(minHeight: 44)
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .welcome:

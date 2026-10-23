@@ -27,7 +27,14 @@ final class MockKeychain: KeychainManagerProtocol {
     var simulatedSaveError: KeychainSaveResult?
     var simulatedGenericReadError: KeychainReadResult?
     var simulatedDeleteAllResult = true
+    var simulatedInstallLifecycleCleanupResult = true
+    private(set) var installLifecycleCleanupRetryCount = 0
     private(set) var deleteAllCallCount = 0
+
+    func retryInstallLifecycleCleanup() -> Bool {
+        installLifecycleCleanupRetryCount += 1
+        return simulatedInstallLifecycleCleanupResult
+    }
 
     func saveIdentityKey(_ keyData: Data, forKey key: String) -> Bool {
         storage[key] = keyData

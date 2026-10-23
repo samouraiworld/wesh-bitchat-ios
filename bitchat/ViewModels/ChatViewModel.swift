@@ -150,6 +150,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @Published var isConnected = false
     @Published private(set) var panicRecoveryBlocked = false
     @Published private(set) var startupRetirementBlocked = false
+    @Published private(set) var startupRetirementDiagnosticCode: String?
     @Published private(set) var weshPanicGeneration: UInt64 = 0
     /// An unconfirmed erase keeps Bluetooth and Internet off until a wipe is
     /// confirmed, at the latest when the next launch replays it.
@@ -675,17 +676,21 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil
     ) {
         let persistentWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
+        let preflightWipes = Self.installLifecycleAwareWipes(
+            persistentWipes,
+            keychain: keychain
+        )
         let livePanicRecoveryOperations = PanicRecoveryOperations.live()
         let startupDecision = PanicStartupDecision.preflight(
             checkPending: livePanicRecoveryOperations.isPending,
-            wipeSightings: persistentWipes.sightings,
-            wipeGeography: persistentWipes.geography,
-            wipeSharedContent: persistentWipes.sharedContent,
-            wipeBoard: persistentWipes.board,
-            wipeBridge: persistentWipes.bridge,
-            wipeGroups: persistentWipes.legacyGroups,
-            wipeMedia: persistentWipes.legacyMedia,
-            wipeLegacyGroupKeys: persistentWipes.legacyGroupKeys
+            wipeSightings: preflightWipes.sightings,
+            wipeGeography: preflightWipes.geography,
+            wipeSharedContent: preflightWipes.sharedContent,
+            wipeBoard: preflightWipes.board,
+            wipeBridge: preflightWipes.bridge,
+            wipeGroups: preflightWipes.legacyGroups,
+            wipeMedia: preflightWipes.legacyMedia,
+            wipeLegacyGroupKeys: preflightWipes.legacyGroupKeys
         )
         // Preserve the preflight decision used to defer CoreBluetooth. A
         // transiently successful second read must not skip recovery and leave
@@ -722,7 +727,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             panicNetworkLifecycle: .live,
             weshPrivatePolicyEnabled: WeshMode.isActive,
             panicPersistentStoreWipes: persistentWipes,
-            startupRetirementBlocked: startupDecision.blockOrdinaryAdmission
+            startupRetirementBlocked: startupDecision.blockOrdinaryAdmission,
+            startupRetirementDiagnosticCode: startupDecision.blockOrdinaryAdmission
+                ? startupDecision.cleanupReport.diagnosticCode
+                : nil
         )
     }
 
@@ -745,7 +753,8 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         weshPrivatePolicyEnabled: Bool = false,
         weshMeetingNote: WeshMeetingNoteStore? = nil,
         panicPersistentStoreWipes: PanicPersistentStoreWipes? = nil,
-        startupRetirementBlocked: Bool = false
+        startupRetirementBlocked: Bool = false,
+        startupRetirementDiagnosticCode: String? = nil
     ) {
         self.weshPrivatePolicyEnabled = weshPrivatePolicyEnabled
         let conversations = conversations ?? ConversationStore()
@@ -763,7 +772,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         self.panicRecoveryOperations = panicRecoveryOperations
             ?? .ephemeral(wipeMedia: panicMediaWipe ?? {})
         self.panicNetworkLifecycle = panicNetworkLifecycle
-        self.panicPersistentStoreWipes = panicPersistentStoreWipes ?? PanicPersistentStoreWipes()
+        self.panicPersistentStoreWipes = Self.installLifecycleAwareWipes(
+            panicPersistentStoreWipes ?? PanicPersistentStoreWipes(),
+            keychain: keychain
+        )
         self.weshMeetingNote = weshMeetingNote
             ?? (TestEnvironment.isRunningTests
                 ? WeshMeetingNoteStore()
@@ -845,6 +857,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
 
         if !recoveryRequired && startupRetirementBlocked {
             self.startupRetirementBlocked = true
+            self.startupRetirementDiagnosticCode = startupRetirementDiagnosticCode
             panicRecoveryBlocked = true
             observeStartupCleanupRetry()
         }
@@ -852,6 +865,23 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         if networkActivationAllowed {
             configureBootstrapIfNeeded()
         }
+    }
+
+    /// A reinstall cleanup can be waiting behind the Keychain's fail-closed
+    /// access gate. Startup retirement must explicitly retry that lifecycle;
+    /// otherwise its final group-key probe can keep the UI blocked forever
+    /// without any ordinary Keychain access capable of reopening the gate.
+    private static func installLifecycleAwareWipes(
+        _ wipes: PanicPersistentStoreWipes,
+        keychain: KeychainManagerProtocol
+    ) -> PanicPersistentStoreWipes {
+        var resolved = wipes
+        let retireLegacyGroupKeys = wipes.legacyGroupKeys
+        resolved.legacyGroupKeys = {
+            guard keychain.retryInstallLifecycleCleanup() else { return false }
+            return retireLegacyGroupKeys()
+        }
+        return resolved
     }
 
     /// Wesh: my QR always carries my npub, so the Nostr key exists once the welcome is done.
@@ -1265,12 +1295,17 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             wipeLegacyGroupKeys: panicPersistentStoreWipes.legacyGroupKeys
         )
         if decision.replayPanic {
+            startupRetirementDiagnosticCode = nil
             _ = panicClearAllData(restartServices: false)
             configureBootstrapIfNeeded()
             return networkActivationAllowed
         }
-        guard !decision.blockOrdinaryAdmission else { return false }
+        guard !decision.blockOrdinaryAdmission else {
+            startupRetirementDiagnosticCode = decision.cleanupReport.diagnosticCode
+            return false
+        }
         startupRetirementBlocked = false
+        startupRetirementDiagnosticCode = nil
         panicRecoveryBlocked = false
         if let panicTransport = meshService as? PanicResettingTransport {
             panicTransport.completePanicReset(restartServices: false)
@@ -1286,6 +1321,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     /// while the rest of the network lifecycle restarts as usual.
     func panicClearAllData(restartServices: Bool = true, restartMesh: Bool = true) -> Bool {
         startupRetirementBlocked = false
+        startupRetirementDiagnosticCode = nil
         panicRecoveryBlocked = true
         weshPanicGeneration &+= 1
         // A new npub after the wipe must be announced again; nothing from before is reused.
