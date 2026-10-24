@@ -1,0 +1,12 @@
+#include "Release.xcconfig"
+
+// Non-shipping simulator build used only to render deterministic App Store art.
+PRODUCT_BUNDLE_IDENTIFIER = org.samouraiworld.wesh.ios.screenshots
+APP_GROUP_ID = group.org.samouraiworld.wesh.ios.screenshots
+SUPPORTED_PLATFORMS = iphonesimulator
+SDKROOT = iphonesimulator
+CODE_SIGNING_ALLOWED = NO
+CODE_SIGNING_REQUIRED = NO
+SKIP_INSTALL = YES
+ENABLE_PREVIEWS = NO
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) WESH_SCREENSHOT_CAPTURE

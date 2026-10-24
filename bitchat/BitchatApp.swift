@@ -9,6 +9,28 @@
 import SwiftUI
 import UserNotifications
 
+#if WESH_SCREENSHOT_CAPTURE && os(iOS)
+@main
+struct BitchatApp: App {
+    static let bundleID = Bundle.main.bundleIdentifier ?? "org.samouraiworld.wesh.ios.screenshots"
+    static let groupID = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String ?? "group.\(bundleID)"
+
+    var body: some Scene {
+        WindowGroup {
+            ScreenshotCaptureRootView()
+        }
+    }
+}
+
+/// Production sources compile in this target but the static capture entry point never
+/// constructs AppRuntime. This type keeps their compile-time contract without registering
+/// a notification center delegate or performing work.
+final class NotificationDelegate {
+    static let shared = NotificationDelegate()
+    weak var runtime: AppRuntime?
+    private init() {}
+}
+#else
 @main
 struct BitchatApp: App {
     static let bundleID = Bundle.main.bundleIdentifier ?? "chat.bitchat"
@@ -146,3 +168,4 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 }
+#endif
