@@ -24,7 +24,7 @@ struct WeshInternetSettingsTests {
         #expect(WeshInternetSettings.isAvailable)
     }
 
-    @Test func releaseConfigShipsHotfixBuild104WithInternetOptInAvailable() throws {
+    @Test func releaseConfigShipsBuild107WithInternetOptInAvailable() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -38,7 +38,7 @@ struct WeshInternetSettingsTests {
             .map { $0.split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false)[0] }
             .joined(separator: "\n")
         #expect(uncommented.contains("MARKETING_VERSION = 1.0.0"))
-        #expect(uncommented.contains("CURRENT_PROJECT_VERSION = 106"))
+        #expect(uncommented.contains("CURRENT_PROJECT_VERSION = 107"))
         #expect(uncommented.contains("WESH_INTERNET_AVAILABLE = YES"))
         #expect(!uncommented.contains("WESH_INTERNET_AVAILABLE = NO"))
     }

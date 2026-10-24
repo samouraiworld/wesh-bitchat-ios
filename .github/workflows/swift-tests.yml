@@ -20,6 +20,10 @@ jobs:
           persist-credentials: false
       - name: Check share-extension retirement
         run: python3 -m unittest discover -s scripts/tests -p "test_share_extension_retirement.py" -v
+      - name: Check release localization surface
+        run: |
+          python3 -m unittest discover -s scripts/tests -p "test_check_release_localizations.py" -v
+          python3 scripts/check_release_localizations.py .
 
   test:
     name: Run Swift Tests (${{ matrix.name }})
@@ -197,10 +201,22 @@ jobs:
             -configuration Release \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-release-derived" \
             ARCHS='arm64 x86_64' \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Check built iOS localization surface
+        run: |
+          products="$RUNNER_TEMP/ios-release-derived/Build/Products/Release-iphonesimulator"
+          app_count=$(find "$products" -maxdepth 1 -type d -name '*.app' | wc -l | tr -d ' ')
+          if [ "$app_count" -ne 1 ]; then
+            echo "::error::Expected exactly one built iOS app, found $app_count"
+            exit 1
+          fi
+          app=$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)
+          python3 scripts/check_release_localizations.py . --product "$app"
 
       - name: Build macOS (universal, no signing)
         run: |
