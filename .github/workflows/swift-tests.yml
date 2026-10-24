@@ -24,6 +24,13 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p "test_check_release_localizations.py" -v
           python3 scripts/check_release_localizations.py .
+      - name: Check App Store screenshot contracts
+        run: |
+          python3 -m unittest discover -s scripts/tests -p "test_store_screenshot_tooling.py" -v
+          python3 -m unittest discover -s scripts/tests -p "test_screenshot_capture_boundary.py" -v
+          python3 scripts/check_screenshot_capture_boundary.py .
+          python3 scripts/validate_store_screenshots.py StoreAssets/iOS/107 \
+            --candidate-commit "$(python3 -c 'import json; print(json.load(open("StoreAssets/iOS/107/manifest.json"))["candidateSourceCommit"])')"
 
   test:
     name: Run Swift Tests (${{ matrix.name }})
@@ -217,6 +224,30 @@ jobs:
           fi
           app=$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)
           python3 scripts/check_release_localizations.py . --product "$app"
+
+      - name: Build isolated screenshot renderer
+        run: |
+          set -o pipefail
+          xcodebuild -project bitchat.xcodeproj \
+            -scheme "Wesh Store Screenshots" \
+            -configuration Screenshot \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-screenshot-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Prove screenshot fixtures are excluded from Release
+        run: |
+          release_app=$(find "$RUNNER_TEMP/ios-release-derived/Build/Products/Release-iphonesimulator" \
+            -maxdepth 1 -type d -name '*.app' -print -quit)
+          screenshot_app=$(find "$RUNNER_TEMP/ios-screenshot-derived/Build/Products/Screenshot-iphonesimulator" \
+            -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$release_app"
+          test -n "$screenshot_app"
+          python3 scripts/check_screenshot_capture_boundary.py . \
+            --release-product "$release_app" \
+            --screenshot-product "$screenshot_app"
 
       - name: Build macOS (universal, no signing)
         run: |
