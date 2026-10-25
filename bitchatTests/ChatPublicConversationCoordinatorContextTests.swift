@@ -167,6 +167,24 @@ private func makePublicMessage(
 struct ChatPublicConversationCoordinatorContextTests {
 
     @Test @MainActor
+    func rejectionCoversDirectIngressRawSendDelayedCommitAndFormatting() {
+        let context = MockChatPublicConversationContext()
+        let coordinator = ChatPublicConversationCoordinator(context: context, publicContentAllowed: WeshPublicContentPolicy.allows)
+        let message = makePublicMessage(id: "rejected", sender: "system", content: "I will kill you @me")
+        coordinator.handlePublicMessage(message)
+        coordinator.sendPublicRaw(message.content)
+        coordinator.checkForMentions(message)
+        let pipeline = PublicMessagePipeline()
+        #expect(!coordinator.pipeline(pipeline, commit: message, to: .mesh))
+        coordinator.pipelinePrewarmMessage(pipeline, message: message)
+        #expect(context.conversations.isEmpty)
+        #expect(context.enqueuedMessages.isEmpty)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(context.mentionNotifications.isEmpty)
+        #expect(context.prewarmedMessageIDs.isEmpty)
+    }
+
+    @Test @MainActor
     func handlePublicMessage_meshMessage_enqueuesForBatchedStoreCommit() async {
         let context = MockChatPublicConversationContext()
         let coordinator = ChatPublicConversationCoordinator(context: context)

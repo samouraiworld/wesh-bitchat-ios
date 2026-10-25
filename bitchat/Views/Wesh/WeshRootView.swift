@@ -810,7 +810,9 @@ private struct WeshConversation: View {
             return []
         }
         guard publicChat.activeChannel == .mesh else { return [] }
-        return publicChat.messages.filter { !$0.isPrivate && !$0.isBridged }
+        return publicChat.messages.filter {
+            !$0.isPrivate && !$0.isBridged && runtime.chatViewModel.allowsWeshPublicContent($0.content)
+        }
     }
 
     var body: some View {
@@ -829,6 +831,8 @@ private struct WeshConversation: View {
                                         .font(.subheadline.weight(.medium))
                                     if !isPrivate {
                                         Text(PaveCopy.text("pave.wesh.conversation.visible"))
+                                            .font(.footnote).foregroundStyle(theme.secondary)
+                                        Text(PaveCopy.text("pave.publicFilter.status"))
                                             .font(.footnote).foregroundStyle(theme.secondary)
                                     }
                                 }
@@ -1054,6 +1058,11 @@ private struct WeshConversation: View {
         }
         guard let snapshot = composerDrafts.submission(for: draftKey, displayedText: draft, generation: draftGeneration) else {
             showComposerFeedback(WeshFeedbackCopy.composerChanged())
+            return
+        }
+        if peerID == nil, !runtime.chatViewModel.allowsWeshPublicContent(draft) {
+            // Keep the exact text and keyboard focus so the user can edit it.
+            composerFeedback.showAction(PaveCopy.text("pave.publicFilter.rejected"))
             return
         }
         if runtime.chatViewModel.sendWeshDraft(&draft, to: peerID) {
@@ -1314,6 +1323,10 @@ private struct WeshInformationSheet: View {
                         .foregroundStyle(theme.secondary)
                     Text(isPrivate ? PaveCopy.text("pave.wesh.info.privateReceipt") : PaveCopy.text("pave.wesh.info.publicMute"))
                         .font(.subheadline).foregroundStyle(theme.secondary)
+                    if !isPrivate {
+                        Text(PaveCopy.text("pave.publicFilter.help"))
+                            .font(.subheadline).foregroundStyle(theme.secondary)
+                    }
                 }.padding(theme.contentInset)
             }
             .navigationTitle(isPrivate ? PaveCopy.text("pave.wesh.conversation.privateTitle") : PaveCopy.text("pave.wesh.info.roomTitle")).weshInlineTitle()

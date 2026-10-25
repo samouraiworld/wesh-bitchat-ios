@@ -2519,6 +2519,27 @@
         }
       }
     },
+    "pave.publicFilter.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "On this phone, the public room filters some explicit threats, encouragement of suicide, requests for child sexual abuse images and violent hate in English and French. It can miss harmful content or block a quotation. You can still report and block a person. Private messages do not pass through this filter. Other phones may keep or relay public messages." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Sur ce téléphone, le salon filtre certaines menaces explicites, incitations au suicide, sollicitations d’images d’abus sexuels sur enfants et appels haineux violents en français et en anglais. Il peut manquer un contenu ou bloquer une citation. Vous pouvez toujours signaler et bloquer une personne. Les messages privés ne passent pas par ce filtre. D’autres téléphones peuvent conserver ou relayer les messages publics." } }
+      }
+    },
+    "pave.publicFilter.rejected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This wording is blocked by the public room’s local filter. Edit your message to send it. Your draft is kept." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Cette formulation est refusée par le filtre local du salon. Modifiez votre message pour l’envoyer. Votre brouillon est conservé." } }
+      }
+    },
+    "pave.publicFilter.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local filter active · details in the room information" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Filtre local actif · détails dans les informations du salon" } }
+      }
+    },
     "pave.report.copyAddress" : {
       "extractionState" : "manual",
       "localizations" : {

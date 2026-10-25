@@ -575,6 +575,45 @@ struct WeshNativeUITests {
         }
     }
 
+    @Test @MainActor func publicFilterRetainsRejectedDraftWithoutSendingOrEchoing() {
+        let consentKey = "wesh.publicDisclosureAccepted.v1"
+        let previous = UserDefaults.standard.object(forKey: consentKey)
+        UserDefaults.standard.set(true, forKey: consentKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: consentKey) }
+            else { UserDefaults.standard.removeObject(forKey: consentKey) }
+        }
+        let transport = MockTransport()
+        let vm = makeNoiseRecoveryViewModel(transport)
+        vm.bluetoothState = .poweredOn
+        var draft = "Je vais te tuer"
+        #expect(!vm.sendWeshDraft(&draft, to: nil))
+        #expect(draft == "Je vais te tuer")
+        #expect(transport.sentMessages.isEmpty)
+        #expect(vm.publicMessages(for: .mesh).isEmpty)
+    }
+
+    @Test @MainActor func publicFilterRejectsArchivedAndDelayedPublicStoreInsertion() {
+        let vm = makeNoiseRecoveryViewModel(MockTransport())
+        let message = BitchatMessage(id: "synthetic-archive", sender: "system", content: "I will kill you",
+                                    timestamp: Date(), isRelay: false, isPrivate: false)
+        #expect(!vm.appendPublicMessage(message, to: .mesh))
+        #expect(vm.publicMessages(for: .mesh).isEmpty)
+        let pipeline = PublicMessagePipeline()
+        #expect(!vm.publicConversationCoordinator.pipeline(pipeline, commit: message, to: .mesh))
+        #expect(vm.publicMessages(for: .mesh).isEmpty)
+    }
+
+    @Test @MainActor func publicCatalogueDoesNotAlterVerifiedPrivateMessages() async throws {
+        try await withVerifiedPrivateFixture { fixture in
+            let text = "I will kill you"
+            var draft = text
+            #expect(fixture.vm.sendWeshDraft(&draft, to: fixture.peer))
+            #expect(draft.isEmpty)
+            #expect(fixture.transport.sentPrivateMessages.last?.content == text)
+        }
+    }
+
     @MainActor private struct VerifiedPrivateFixture {
         let vm: ChatViewModel
         let transport: MockTransport

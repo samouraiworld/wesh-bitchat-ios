@@ -205,6 +205,30 @@ private func makeMessage(
 struct ChatTransportEventCoordinatorContextTests {
 
     @Test @MainActor
+    func rejectedPublicEventsNeverReachTimelineMentionChecksOrHaptics() {
+        let context = MockChatTransportEventContext()
+        let coordinator = ChatTransportEventCoordinator(context: context, publicContentAllowed: WeshPublicContentPolicy.allows)
+        coordinator.didReceivePublicMessageSynchronously(from: PeerID(str: "1122334455667788"), nickname: "system",
+                                                        content: "I will kill you @me", timestamp: Date(), messageID: "raw")
+        #expect(!coordinator.didReceiveMessageSynchronously(makeMessage(id: "generic", sender: "system", content: "Je vais te tuer")))
+        #expect(context.handledPublicMessages.isEmpty)
+        #expect(context.mentionCheckedMessageIDs.isEmpty)
+        #expect(context.hapticMessageIDs.isEmpty)
+        #expect(context.meshDeliveryAcks.isEmpty)
+    }
+
+    @Test @MainActor
+    func privateIngressNeverPassesTextToThePublicEvaluator() {
+        let context = MockChatTransportEventContext()
+        var evaluations = 0
+        let coordinator = ChatTransportEventCoordinator(context: context, publicContentAllowed: { _ in evaluations += 1; return false })
+        let text = "I will kill you"
+        #expect(coordinator.didReceiveMessageSynchronously(makeMessage(id: "private", content: text, isPrivate: true)))
+        #expect(evaluations == 0)
+        #expect(context.handledPrivateMessages.first?.content == text)
+    }
+
+    @Test @MainActor
     func didReceiveMessage_routesPrivateAndPublic_skipsBlockedAndEmpty() async {
         let context = MockChatTransportEventContext()
         let coordinator = ChatTransportEventCoordinator(context: context)

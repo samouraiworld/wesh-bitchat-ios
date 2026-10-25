@@ -92,6 +92,7 @@ extension ChatViewModel: ChatPublicConversationContext {
     }
 
     func sendMeshMessage(_ content: String, mentions: [String], messageID: String, timestamp: Date) {
+        guard allowsWeshPublicContent(content) else { return }
         meshService.sendMessage(content, mentions: mentions, messageID: messageID, timestamp: timestamp)
     }
 
@@ -127,9 +128,11 @@ extension ChatViewModel: ChatPublicConversationContext {
 @MainActor
 final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     private unowned let context: any ChatPublicConversationContext
+    private let publicContentAllowed: (String) -> Bool
 
-    init(context: any ChatPublicConversationContext) {
+    init(context: any ChatPublicConversationContext, publicContentAllowed: @escaping (String) -> Bool = { _ in true }) {
         self.context = context
+        self.publicContentAllowed = publicContentAllowed
     }
 
     func displayNameForNostrPubkey(_ pubkeyHex: String) -> String {
@@ -185,6 +188,7 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func sendPublicRaw(_ content: String) {
+        guard publicContentAllowed(content) else { return }
         if case .location = context.activeChannel {
             // Retired public channels must not publish or fall back to mesh.
             return
@@ -227,6 +231,7 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func handlePublicMessage(_ message: BitchatMessage, powBits: Int = 0) {
+        guard message.isPrivate || publicContentAllowed(message.content) else { return }
         guard message.senderPeerID?.isGeoChat != true else { return }
         let finalMessage = context.processActionMessage(message)
         if context.isMessageBlocked(finalMessage) { return }
@@ -291,6 +296,7 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func checkForMentions(_ message: BitchatMessage) {
+        guard message.isPrivate || publicContentAllowed(message.content) else { return }
         let myNickname = context.nickname.normalizedNickname
         var myTokens: Set<String> = [myNickname]
         let meshPeers = context.meshPeerNicknames()
@@ -308,6 +314,7 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func sendHapticFeedback(for message: BitchatMessage) {
+        guard message.isPrivate || publicContentAllowed(message.content) else { return }
         #if os(iOS)
         guard UIApplication.shared.applicationState == .active else { return }
 
@@ -350,10 +357,12 @@ final class ChatPublicConversationCoordinator: PublicMessagePipelineDelegate {
     }
 
     func pipeline(_: PublicMessagePipeline, commit message: BitchatMessage, to conversationID: ConversationID) -> Bool {
-        context.appendPublicMessage(message, to: conversationID)
+        guard message.isPrivate || publicContentAllowed(message.content) else { return false }
+        return context.appendPublicMessage(message, to: conversationID)
     }
 
     func pipelinePrewarmMessage(_: PublicMessagePipeline, message: BitchatMessage) {
+        guard message.isPrivate || publicContentAllowed(message.content) else { return }
         context.prewarmMessageFormatting(message)
     }
 

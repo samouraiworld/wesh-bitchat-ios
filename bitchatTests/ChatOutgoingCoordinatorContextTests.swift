@@ -106,6 +106,39 @@ struct GeographicOutgoingRetirementTests {
 
 // MARK: - Helpers
 
+@MainActor
+struct WeshPublicOutgoingContentFilterTests {
+    @Test func rejectedPublicTextHasNoEchoNoDedupMutationAndNoTransportSend() {
+        let context = MockChatOutgoingContext()
+        let coordinator = ChatOutgoingCoordinator(context: context, publicContentAllowed: WeshPublicContentPolicy.allows)
+        coordinator.sendMessage("I will kill you", allowCommands: false)
+        #expect(context.sentMeshMessages.isEmpty)
+        #expect(context.appendedPublicMessages.isEmpty)
+        #expect(context.recordedContentKeys.isEmpty)
+    }
+
+    @Test func privateTextIsNeverPassedToThePublicEvaluator() {
+        let context = MockChatOutgoingContext()
+        let peer = PeerID(str: "aabbccddeeff0011")
+        context.selectedPrivateChatPeer = peer
+        var evaluations = 0
+        let coordinator = ChatOutgoingCoordinator(context: context, publicContentAllowed: { _ in evaluations += 1; return false })
+        coordinator.sendMessage("I will kill you", allowCommands: false)
+        #expect(evaluations == 0)
+        #expect(context.sentPrivateMessages.first?.content == "I will kill you")
+        #expect(context.sentPrivateMessages.first?.peerID == peer)
+        #expect(context.sentMeshMessages.isEmpty)
+    }
+
+    @Test func acceptedPublicTextKeepsItsOriginalWireBytes() {
+        let context = MockChatOutgoingContext()
+        let coordinator = ChatOutgoingCoordinator(context: context, publicContentAllowed: WeshPublicContentPolicy.allows)
+        let text = "  Bonjour 👋 e\u{0301}  "
+        coordinator.sendMessage(text, allowCommands: false)
+        #expect(context.sentMeshMessages.first?.content == text)
+    }
+}
+
 /// Lets the coordinator's internal `Task { @MainActor … }` hops run.
 @MainActor
 private func drainMainActorTasks() async {
