@@ -52,6 +52,42 @@ After rebuilding, verify that:
 
 ## Audited Rebuild
 
+### 25 October: explicit keystore candidate
+
+The current vendored candidate was produced from source
+`90d342023186f0aa8cc2c00fcf8b1a34dedc6d85` by the two fresh, isolated
+five-target jobs in [A/B run 40194292340](https://github.com/samouraiworld/wesh-bitchat-ios/actions/runs/40194292340).
+The comparison passed for all seven xcframework files and the standalone C
+header, with the same twelve source/recipe inputs and exact tool/SDK receipts.
+Only candidate A was downloaded; its ZIP digest was checked against the GitHub
+artifact digest before extraction. Local readback independently checked all
+eight file hashes, the three slices/five architectures, seven C exports per
+architecture, unchanged header and absence of private host paths.
+
+The [machine-readable receipt](provenance/ios-keystore-disabled-2026-10-25.json)
+records the complete source, artifact, tool and SDK identities. They are Rust
+and Cargo 1.96.0, rustup 1.29.2 (2026-10-21), cbindgen 0.29.4, Xcode 27.0
+(27A266a) and macOS/iPhoneOS/iPhoneSimulator SDK 27.0. The existing recipe and
+release flags are unchanged. This is a complete candidate import, not a Store
+distribution or qualification of a future app archive.
+
+The official `arti-client/keymgr` setter is enabled so the wrapper can require
+`BoolOrAuto::Explicit(false)` and effective disablement before bootstrap.
+An implicit or enabled keystore is refused without fallback. The reviewed lock
+adds only `tor-hsclient 0.38.0`; no existing package version, source or checksum
+changes. Five target metadata graphs show additional HS client/common library
+features, but no `arti-client/onion-service-client` API, onion-service publishing,
+relay mode or x509 generation. Generic `hsv3-service` and RSA private-key code
+remain present; this does not close RUSTSEC-2023-0071 or introduce an audit ignore.
+
+The four real inert keystore cases and all 41 native contracts passed in CI.
+The normal provenance, clean-rebuild and integrated app gates remain required
+for the imported source/binary pair. TestFlight 107's physical attestation and
+Android's native hashes do not qualify this candidate. No distribution verdict
+follows from the A/B comparison or this receipt.
+
+### Earlier October refreshes
+
 The October 2026 artifact below was rebuilt from the reviewed source and lockfile with:
 
 ```text
@@ -94,14 +130,14 @@ The 21 October SOCKS refresh changes only the listener, as Android #28 did. The 
 These hashes bind the reviewed source and recipe to this build record. CI compares the complete tracked Arti crate, lockfile and recipe set; changing a source without refreshing this record fails the gate. This consistency check complements binary review and does not independently prove a compilation.
 
 ```text
-da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5  localPackages/Arti/Cargo.lock
+65e09b02e6923026ee4129a7adefadb21e29eb3cf70cf61ee1488e9c0950b40f  localPackages/Arti/Cargo.lock
 9a79b3f9717e29b705bc42e7b889d2fad8d537e141a0df7151e0fee3eacdae3b  localPackages/Arti/Cargo.toml
-77099504353b19d9e20f08685a004fda52a20f69d0c2f7068cc5f709d5fb5793  localPackages/Arti/arti-bitchat/Cargo.toml
+a5a4d67f2c8b678950e7f9be982c8a85aa0f7e90f5aaee079046b392c1cf9d98  localPackages/Arti/arti-bitchat/Cargo.toml
 f96c53d5c449a37739dcb8c2f513fbff2aa7b5ea1c0b9d4963108aa25696be0b  localPackages/Arti/arti-bitchat/cbindgen.toml
 dfd4262666f5555b85c93f88a256f11ed16fdc119a3367c93bfb916416711df4  localPackages/Arti/arti-bitchat/src/connections.rs
 9a7afba1ce0baf6724d85c4c0fe71c86e48d0515d527f11abdf9e945c34e0269  localPackages/Arti/arti-bitchat/src/controller.rs
 0430dc1e3983df03cc9f6ef65098fa34918d7ac29701a65152bb7989e50214ae  localPackages/Arti/arti-bitchat/src/isolation.rs
-87092d7f0b888b33acfb5aaf80f18c2aecf107f9cfef467150b12132e84aacee  localPackages/Arti/arti-bitchat/src/lib.rs
+48ebc1f4cad703b6d5914fa221fd8d9f852b4c0c1ce9ffad9d484a6793810997  localPackages/Arti/arti-bitchat/src/lib.rs
 f70f1f32efcac8cc8ec8e272686a5d1877c8e3bfd4f93eeee0e72e14a15bb912  localPackages/Arti/arti-bitchat/src/lifecycle.rs
 9ced36c42318abd8910984fb12e10f3d2b70af59ec382aceea2c7f26689e8174  localPackages/Arti/arti-bitchat/src/socks.rs
 a7eeae2a6c7d9afd2a288a2f8c106e50e3d6a66e6f28eb12eacb1e4d349c59e3  localPackages/Arti/build-ios.sh
@@ -110,7 +146,7 @@ a7eeae2a6c7d9afd2a288a2f8c106e50e3d6a66e6f28eb12eacb1e4d349c59e3  localPackages/
 
 ## Current Artifact Hashes
 
-Input `Cargo.lock` SHA-256: `da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5`. The source, lockfile, build recipe, header, and vendored libraries must be reviewed together.
+Input `Cargo.lock` SHA-256: `65e09b02e6923026ee4129a7adefadb21e29eb3cf70cf61ee1488e9c0950b40f`. The source, lockfile, build recipe, header, and vendored libraries must be reviewed together.
 
 Run this from the repo root to verify the checked-in artifact:
 
@@ -123,11 +159,11 @@ Current hashes:
 ```text
 cac99db408280bbef15cae8ce64c8ccdbf2e8863c205168d59f83fe8ab680f94  localPackages/Arti/Frameworks/arti.xcframework/Info.plist
 aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/Headers/arti.h
-aa3c7ae2ecbde84ba5f0918a723452547bdc858225566b46a27c0075f242ed58  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
+2a7aeb269d4ccd3b5fb0760270dced44e89e97b6e464e277ded13ecadd62e887  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64/libarti_bitchat.a
 aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/Headers/arti.h
-07397ba815890faee373cd91cb0e905fd4fa097add2cd5b3c10b25ed42d570f9  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
+723f41f862b4a4da397ae36f4a126e8b2601aceac2fcf119d80fe063e2444ddf  localPackages/Arti/Frameworks/arti.xcframework/ios-arm64_x86_64-simulator/libarti_bitchat.a
 aeecab4c48d6aedb7cc7479606f7671a418d4cb6eeec642cf0a46f06a3aebf6c  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/Headers/arti.h
-c5c9827454723d1da5d3f81d7d36c83bd372666a8562bafd78c4070182c44c85  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
+7cfbda7f04baa9b7301429f6b8fde46ca66520a65018191706375a4a47232ced  localPackages/Arti/Frameworks/arti.xcframework/macos-arm64_x86_64/libarti_bitchat.a
 ```
 
 ## Review Checklist
