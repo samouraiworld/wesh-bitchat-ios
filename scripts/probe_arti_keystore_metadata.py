@@ -41,9 +41,14 @@ def additions_only(before, after):
 
 def selected_features(metadata):
     names = {package["id"]: package["name"] for package in metadata["packages"]}
-    return {names[node["id"]]: sorted(node["features"]) for node in metadata["resolve"]["nodes"]
-            if names[node["id"]].startswith(("arti-", "tor-"))
-            or names[node["id"]] in ("rsa", "rustls", "rustls-webpki", "ssh-key")}
+    result = {}
+    for node in metadata["resolve"]["nodes"]:
+        name = names[node["id"]]
+        if name.startswith(("arti-", "tor-")) or name in ("rsa", "rustls", "rustls-webpki", "ssh-key"):
+            if name in result:
+                raise ValueError(f"Ambiguous selected package name: {name}")
+            result[name] = sorted(node["features"])
+    return result
 
 
 def require_client_boundary(features):

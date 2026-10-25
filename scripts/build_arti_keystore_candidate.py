@@ -24,12 +24,48 @@ ARCHITECTURES = {"ios-arm64": {"arm64"}, "ios-arm64_x86_64-simulator": {"arm64",
                  "macos-arm64_x86_64": {"arm64", "x86_64"}}
 
 
-def compare_candidates(first, second):
+def unique_json_object(pairs):
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError("Duplicate JSON key")
+        result[name] = value
+    return result
+
+
+def require_package_inventory(root):
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Candidate must be a regular directory")
+    expected = ARTIFACTS | {HEADER, "candidate.json"}
+    allowed_directories = {parent.as_posix() for name in expected for parent in Path(name).parents
+                           if parent.as_posix() != "."}
+    actual = set()
+    for current, directories, files in os.walk(root, followlinks=False):
+        for name in directories + files:
+            path = Path(current) / name
+            if path.is_symlink():
+                raise ValueError("Symlink refused in candidate package")
+            relative = path.relative_to(root).as_posix()
+            if name in directories and relative not in allowed_directories:
+                raise ValueError("Unexpected candidate directory")
+        actual.update((Path(current) / name).relative_to(root).as_posix() for name in files)
+    if actual != expected:
+        raise ValueError("Candidate package file inventory differs")
+
+
+def compare_candidates(first, second, expected_commit, expected_lock):
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_commit) or not re.fullmatch(r"[0-9a-f]{64}", expected_lock):
+        raise ValueError("Exact reviewed source and lock hashes required")
     receipts = []
     for root in (first, second):
-        receipt = json.loads(checked_path(root, "candidate.json").read_text())
+        require_package_inventory(root)
+        receipt = json.loads(checked_path(root, "candidate.json").read_text(), object_pairs_hook=unique_json_object)
         if receipt.get("status") != "complete-candidate" or receipt.get("targets") != list(TARGETS):
             raise ValueError("Incomplete five-target candidate")
+        if receipt.get("sourceCommit") != expected_commit:
+            raise ValueError("Candidate sourceCommit differs from reviewed selector")
+        if receipt.get("inputs", {}).get(f"{NATIVE}/Cargo.lock") != expected_lock:
+            raise ValueError("Candidate lock differs from reviewed selector")
         if set(receipt.get("artifacts", {})) != ARTIFACTS | {HEADER}:
             raise ValueError("Incomplete candidate artifact set")
         if set(receipt.get("inputs", {})) != INPUTS:
@@ -165,6 +201,8 @@ def main():
     compare.add_argument("first", type=Path)
     compare.add_argument("second", type=Path)
     compare.add_argument("--report", required=True, type=Path)
+    compare.add_argument("--expected-commit", required=True)
+    compare.add_argument("--expected-lock", required=True)
     args = parser.parse_args()
     def interrupted(_signal, _frame):
         raise InterruptedError("Candidate build interrupted")
@@ -173,7 +211,7 @@ def main():
         if args.mode == "build":
             build_candidate(args.checkout.resolve(), args.work.absolute(), args.destination.absolute(), args.expected_commit, args.expected_lock)
         else:
-            result = compare_candidates(args.first.resolve(), args.second.resolve())
+            result = compare_candidates(args.first.absolute(), args.second.absolute(), args.expected_commit, args.expected_lock)
             with args.report.open("x") as stream:
                 json.dump(result, stream, indent=2, sort_keys=True)
                 stream.write("\n")

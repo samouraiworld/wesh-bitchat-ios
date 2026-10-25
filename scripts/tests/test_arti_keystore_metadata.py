@@ -15,6 +15,13 @@ def package(name="existing", version="1.0.0", checksum="a"):
 
 
 class KeystoreMetadataTests(unittest.TestCase):
+    def test_duplicate_selected_names_cannot_hide_service_or_relay_features(self):
+        metadata = {"packages": [{"id": "client-old", "name": "arti-client"}, {"id": "client-new", "name": "arti-client"}],
+                    "resolve": {"nodes": [{"id": "client-old", "features": ["keymgr", "onion-service-service"]},
+                                          {"id": "client-new", "features": ["keymgr"]}]}}
+        with self.assertRaisesRegex(ValueError, "Ambiguous selected package"):
+            probe.selected_features(metadata)
+
     def test_metadata_paths_are_neutralized_and_private_paths_fail_closed(self):
         source = {"id": "path+file:///home/runner/work/_temp/probe/candidate#0.1.0", "nested": ["/home/runner/cargo/registry"]}
         clean = probe.sanitized_metadata(source, [("/home/runner/work/_temp/probe", "/usr/src/probe"), ("/home/runner/cargo", "/usr/local/cargo")])
