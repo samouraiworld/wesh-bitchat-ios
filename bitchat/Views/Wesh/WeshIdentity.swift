@@ -105,6 +105,63 @@ enum WeshDisplayName {
     }
 }
 
+/// Notes chosen on this phone, never a transport nickname or a trust decision.
+/// The local alias matches Android's 15-code-point product bound; QR names keep
+/// their separate protocol rules. Scalar prefixes never split UTF-16 surrogates.
+enum WeshContactNotes {
+    static let maximumAliasScalars = 15
+    static let maximumMemoScalars = 500
+
+    static func prefix(_ value: String, limit: Int) -> String {
+        String(String.UnicodeScalarView(value.unicodeScalars.prefix(limit)))
+    }
+
+    /// Preserve a trailing space/newline while typing, but do not let discarded
+    /// controls or leading padding consume the field's useful scalar budget.
+    static func editingText(_ value: String, limit: Int, multiline: Bool) -> String {
+        let filtered = String(String.UnicodeScalarView(value.unicodeScalars.filter { admitted($0, multiline: multiline) }))
+            .precomposedStringWithCanonicalMapping
+        let leadingTrimmed = filtered.unicodeScalars.drop { CharacterSet.whitespacesAndNewlines.contains($0) }
+        return String(String.UnicodeScalarView(leadingTrimmed.prefix(limit)))
+    }
+
+    static func cleanAlias(_ value: String) -> String? {
+        let cleaned = clean(value, limit: maximumAliasScalars, multiline: false)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    static func cleanMemo(_ value: String) -> String? {
+        let cleaned = clean(value, limit: maximumMemoScalars, multiline: true)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// The UI applies the same reserved-word/name rule to aliases as to QR
+    /// names. Refuse a nonempty alias that would only render as "unnamed".
+    static func canDisplay(alias: String?) -> Bool {
+        guard let alias else { return true }
+        return !PaveDisplayName.remote(alias, unnamed: "", reserved: "",
+                                       skeletons: PaveReservedWords.skeletons).isEmpty
+    }
+
+    private static func clean(_ value: String, limit: Int, multiline: Bool) -> String {
+        // As on Android, clean and normalize before applying the local bound.
+        // A run of stripped controls must not erase useful text that follows it.
+        let scalars = value.unicodeScalars.filter { admitted($0, multiline: multiline) }
+        let normalized = String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+        return prefix(normalized, limit: limit)
+    }
+
+    private static func admitted(_ scalar: Unicode.Scalar, multiline: Bool) -> Bool {
+        if multiline && scalar == "\n" { return true }
+        // Keep emoji joiners; directional controls and other formatting
+        // characters must not steer the contact identity around the note.
+        return scalar.properties.generalCategory != .control
+            && (scalar.properties.generalCategory != .format || scalar.value == 0x200D)
+    }
+}
+
 /// QR enrollment is separate from upstream manual verification and transitive vouches.
 /// Contacts are sealed on this device only. An unreadable record is preserved
 /// and reported, never replaced by an empty list.
@@ -112,7 +169,7 @@ enum WeshDisplayName {
 final class WeshQRTrust: ObservableObject {
     static let shared = TestEnvironment.isRunningTests
         ? WeshQRTrust()
-        : WeshQRTrust(storage: .liveQRContacts(), legacyDefaults: .standard)
+        : WeshQRTrust(storage: .liveQRContacts(), legacyDefaults: .standard, requirePersistence: true)
     struct Contact: Codable, Identifiable, Hashable {
         let noiseKeyHex: String
         let nickname: String
@@ -125,8 +182,12 @@ final class WeshQRTrust: ObservableObject {
         /// A previously proven peer showed a QR without a valid proof; the
         /// proven binding was kept.
         var npubProofWarning: Bool? = nil
+        /// Local-only annotations, sealed with this exact Noise identity.
+        var alias: String? = nil
+        var memo: String? = nil
         var id: String { noiseKeyHex }
         var peerID: PeerID { PeerID(hexData: Data(hexString: noiseKeyHex) ?? Data()) }
+        var displayName: String { alias ?? nickname }
     }
     enum StorageState: Equatable { case available, unavailable, recoveryRequired }
     private struct Snapshot: Codable, Equatable {
@@ -148,14 +209,19 @@ final class WeshQRTrust: ObservableObject {
     @Published private(set) var contacts: [Contact] = []
     @Published private(set) var fingerprints: Set<String> = []
     @Published private(set) var storageState: StorageState = .available
+    /// A removal/wipe fences every editor binding and save callback created
+    /// before it, even if the same identity is enrolled again afterwards.
+    @Published private(set) var noteGeneration: UInt64 = 0
     private let storage: WeshSealedStore?
     private let legacyDefaults: UserDefaults?
+    private let requirePersistence: Bool
     private var intent = Intent()
 
     /// Nil storage is a RAM-only instance (tests, previews).
-    init(storage: WeshSealedStore? = nil, legacyDefaults: UserDefaults? = nil) {
+    init(storage: WeshSealedStore? = nil, legacyDefaults: UserDefaults? = nil, requirePersistence: Bool = false) {
         self.storage = storage
         self.legacyDefaults = legacyDefaults
+        self.requirePersistence = requirePersistence
         load()
     }
 
@@ -173,13 +239,31 @@ final class WeshQRTrust: ObservableObject {
         let npub = npub?.isEmpty == false ? npub : nil
         let hex = sessionKey.hexEncodedString()
         var next = snapshot
-        next.contacts.removeAll { $0.noiseKeyHex == hex }
+        let existing = next.contacts.first { Data(hexString: $0.noiseKeyHex) == sessionKey }
+        next.contacts.removeAll { Data(hexString: $0.noiseKeyHex) == sessionKey }
         next.contacts.append(Contact(noiseKeyHex: hex, nickname: WeshDisplayName.clean(nickname), npub: npub,
                                      npubProven: npub != nil && npubProven ? true : nil,
                                      npubConflict: npubConflict ? true : nil,
-                                     npubProofWarning: npubProofWarning ? true : nil))
+                                     npubProofWarning: npubProofWarning ? true : nil,
+                                     alias: existing?.alias, memo: existing?.memo))
         let fingerprint = sessionKey.sha256Fingerprint()
         if !next.fingerprints.contains(fingerprint) { next.fingerprints.append(fingerprint) }
+        return commit(next)
+    }
+
+    /// Updates only an enrolled canonical identity. Failed reads and writes
+    /// never publish new notes, and an old editor cannot undo removal or wipe.
+    @discardableResult
+    func setNote(sessionKey: Data, alias: String, memo: String, generation: UInt64) -> Bool {
+        guard sessionKey.count == 32, generation == noteGeneration, !intent.wipe else { return false }
+        reloadIfNeeded()
+        guard generation == noteGeneration, storageState == .available, !intent.wipe else { return false }
+        var next = snapshot
+        guard let index = next.contacts.firstIndex(where: { Data(hexString: $0.noiseKeyHex) == sessionKey }) else { return false }
+        let localAlias = WeshContactNotes.cleanAlias(alias)
+        guard WeshContactNotes.canDisplay(alias: localAlias) else { return false }
+        next.contacts[index].alias = localAlias
+        next.contacts[index].memo = WeshContactNotes.cleanMemo(memo)
         return commit(next)
     }
 
@@ -205,9 +289,9 @@ final class WeshQRTrust: ObservableObject {
     @discardableResult
     func remove(sessionKey: Data) -> Bool {
         guard sessionKey.count == 32 else { return false }
-        let hex = sessionKey.hexEncodedString()
+        noteGeneration &+= 1
         let fingerprint = sessionKey.sha256Fingerprint()
-        let known = contacts.contains(where: { $0.noiseKeyHex == hex }) || fingerprints.contains(fingerprint)
+        let known = contacts.contains(where: { Data(hexString: $0.noiseKeyHex) == sessionKey }) || fingerprints.contains(fingerprint)
             || intent.revokedFingerprints.contains(fingerprint)
         // While the list cannot be read, membership is unknown: record the
         // revocation anyway so a later load can never restore this key.
@@ -232,8 +316,14 @@ final class WeshQRTrust: ObservableObject {
     /// marker keeps every later load from applying the old list.
     @discardableResult
     func clear() -> Bool {
+        noteGeneration &+= 1
         apply(Snapshot())
         guard storage != nil else {
+            guard !requirePersistence else {
+                intent.wipe = true
+                storageState = .unavailable
+                return false
+            }
             intent = Intent()
             let erased = removeLegacy()
             storageState = erased ? .available : .unavailable
@@ -326,13 +416,18 @@ final class WeshQRTrust: ObservableObject {
     }
 
     private func apply(_ value: Snapshot) {
-        contacts = value.contacts
+        contacts = value.contacts.map { row in
+            var cleaned = row
+            cleaned.alias = WeshContactNotes.cleanAlias(row.alias ?? "")
+            cleaned.memo = WeshContactNotes.cleanMemo(row.memo ?? "")
+            return cleaned
+        }
         fingerprints = Set(value.fingerprints)
     }
 
     private func load() {
         guard let storage else {
-            storageState = .available
+            storageState = requirePersistence ? .unavailable : .available
             return
         }
         do {
@@ -395,7 +490,8 @@ final class WeshQRTrust: ObservableObject {
             }
             value.contacts = decoded.map {
                 Contact(noiseKeyHex: $0.noiseKeyHex, nickname: WeshDisplayName.clean($0.nickname), npub: $0.npub,
-                        npubProven: $0.npubProven, npubConflict: $0.npubConflict, npubProofWarning: $0.npubProofWarning)
+                        npubProven: $0.npubProven, npubConflict: $0.npubConflict, npubProofWarning: $0.npubProofWarning,
+                        alias: WeshContactNotes.cleanAlias($0.alias ?? ""), memo: WeshContactNotes.cleanMemo($0.memo ?? ""))
             }
         }
         if let prints {

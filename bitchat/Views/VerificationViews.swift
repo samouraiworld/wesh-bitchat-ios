@@ -181,7 +181,17 @@ struct CameraScannerView: NSViewRepresentable {
 }
 #endif
 
+enum CameraAvailability {
+    /// Querying inventory does not construct an input or request capture permission.
+    static var hasVideoDevice: Bool { AVCaptureDevice.default(for: .video) != nil }
+}
+
 final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
+    private let cameraAvailable: () -> Bool
+    private let authorizationStatus: () -> AVAuthorizationStatus
+    private let requestAccess: (@escaping (Bool) -> Void) -> Void
+    /// Synthetic tests replace all capture setup so a regression cannot open a real input.
+    private let configureSession: (() -> Bool)?
     private var onCode: ((String) -> Void)?
     private var onUnavailable: (() -> Void)?
     private let session = AVCaptureSession()
@@ -197,6 +207,19 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
     private var requiresSingleCode = false
     private var layerSize: CGSize = .zero
 
+    init(
+        cameraAvailable: @escaping () -> Bool = { CameraAvailability.hasVideoDevice },
+        authorizationStatus: @escaping () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .video) },
+        requestAccess: @escaping (@escaping (Bool) -> Void) -> Void = { AVCaptureDevice.requestAccess(for: .video, completionHandler: $0) },
+        configureSession: (() -> Bool)? = nil
+    ) {
+        self.cameraAvailable = cameraAvailable
+        self.authorizationStatus = authorizationStatus
+        self.requestAccess = requestAccess
+        self.configureSession = configureSession
+        super.init()
+    }
+
     func setup(
         previewLayer: AVCaptureVideoPreviewLayer,
         onCode: @escaping (String) -> Void,
@@ -211,18 +234,28 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
         self.previewLayer = previewLayer
         previewLayer.session = session
 
+        guard cameraAvailable() else {
+            permissionGranted = false
+            reportUnavailable()
+            return
+        }
         // Check authorization before creating AVCaptureDeviceInput so tests and
         // cold launches do not trigger a TCC prompt just by constructing input.
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch authorizationStatus() {
         case .authorized:
             permissionGranted = true
             if !configureSessionIfNeeded() {
                 reportUnavailable()
             }
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
+            requestAccess { granted in
                 DispatchQueue.main.async {
                     guard !self.isDisposed else { return }
+                    guard self.cameraAvailable() else {
+                        self.permissionGranted = false
+                        self.reportUnavailable()
+                        return
+                    }
                     self.permissionGranted = granted
                     if granted {
                         if !self.configureSessionIfNeeded() {
@@ -245,6 +278,7 @@ final class CameraScannerCoordinator: NSObject, AVCaptureMetadataOutputObjectsDe
 
     @discardableResult
     private func configureSessionIfNeeded() -> Bool {
+        if let configureSession { return configureSession() }
         guard !didConfigureSession else { return true }
         session.beginConfiguration()
         session.sessionPreset = .high

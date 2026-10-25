@@ -120,7 +120,7 @@ struct PaveStatusPill_Previews: PreviewProvider {
                 PaveStatusPill(status: .connecting(torProgress: 42)) {}
                 PaveStatusPill(status: .connected) {}
                 PaveStatusPill(status: .paused) {}
-                PaveStatusPill(status: .failed) {}
+                PaveStatusPill(status: .failed(.torBlocked)) {}
                 PaveInternetBadge(badge: .reachable)
                 PaveInternetBadge(badge: .rescanRequired)
             }

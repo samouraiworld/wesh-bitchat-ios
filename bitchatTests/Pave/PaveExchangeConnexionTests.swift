@@ -78,6 +78,12 @@ struct PaveCameraCardTests {
         #expect(PaveCameraCard(.restricted) == .settings)
     }
 
+    @Test func missingHardwareNeverOffersPermissionOrSettings() {
+        for authorization in [PaveCameraAuthorization.notDetermined, .authorized, .denied, .restricted] {
+            #expect(PaveCameraCard(authorization, hasCamera: false) == .unavailable)
+        }
+    }
+
     @Test func rationaleCopyIsExact() throws {
         let french = try PaveCatalogStrings.strings("fr")
         #expect(french["pave.exchange.cameraRationale"]
@@ -164,8 +170,9 @@ struct PaveInternetSwitchTests {
         #expect(PaveInternetStatus(.connecting(torProgress: 40)) == .connecting(torProgress: 40))
         #expect(PaveInternetStatus(.on) == .connected)
         #expect(PaveInternetStatus(.paused) == .paused)
-        #expect(PaveInternetStatus(.error(.torBlocked)) == .failed)
-        #expect(PaveInternetStatus(.error(.routeFault)) == .failed)
+        for failure in [WeshInternetState.Failure.torBlocked, .noNetwork, .relaysUnreachable, .routeFault, .torStopped] {
+            #expect(PaveInternetStatus(.error(failure)) == .failed(failure))
+        }
     }
 }
 
@@ -184,7 +191,7 @@ struct PaveInternetStatusCopyTests {
         #expect(label(.connecting(torProgress: 42)) == "Connexion à Tor… 42\u{00A0}%")
         #expect(label(.connected) == "Internet actif")
         #expect(label(.paused) == "Internet en pause")
-        #expect(label(.failed) == "Internet indisponible — Réessayer")
+        #expect(label(.failed(.torBlocked)) == "Internet indisponible — Réessayer")
     }
 
     @Test func englishLabelsMatchTheFrenchOnes() throws {
@@ -195,7 +202,7 @@ struct PaveInternetStatusCopyTests {
         #expect(label(.connecting(torProgress: 7)) == "Connecting to Tor… 7%")
         #expect(label(.connected) == "Internet on")
         #expect(label(.paused) == "Internet paused")
-        #expect(label(.failed) == "Internet unavailable — Try again")
+        #expect(label(.failed(.torBlocked)) == "Internet unavailable — Try again")
     }
 
     @Test func theTorPercentageIsTheRealOneAndStaysInRange() throws {
@@ -209,13 +216,13 @@ struct PaveInternetStatusCopyTests {
     }
 
     @Test func onlyAFailureRetriesAndTheHomePillWaitsForInternetMode() {
-        let all: [PaveInternetStatus] = [.off, .connecting(torProgress: 10), .connected, .paused, .failed]
-        #expect(all.filter(\.offersRetry) == [.failed])
+        let all: [PaveInternetStatus] = [.off, .connecting(torProgress: 10), .connected, .paused, .failed(.torBlocked)]
+        #expect(all.filter(\.offersRetry) == [.failed(.torBlocked)])
         #expect(all.filter { !$0.showsHomePill } == [.off])
     }
 
     @Test @MainActor func aTouchOnTheFailedStatusRetries() {
-        let stub = PaveInternetModeStub(internetStatus: .failed, disclosureAccepted: true)
+        let stub = PaveInternetModeStub(internetStatus: .failed(.torBlocked), disclosureAccepted: true)
         stub.retryInternet()
         #expect(stub.internetStatus == .connecting(torProgress: 0))
     }
@@ -230,7 +237,7 @@ struct PaveContactInternetBadgeTests {
     @Test func enrolledContactsAreReachableAndLegacyOnesNeedARescan() {
         let enrolled = Contact(noiseKeyHex: noise, nickname: "Nora", npub: npub, npubProven: true)
         let legacy = Contact(noiseKeyHex: noise, nickname: "Sam")
-        for status in [PaveInternetStatus.connecting(torProgress: 30), .connected, .paused, .failed] {
+        for status in [PaveInternetStatus.connecting(torProgress: 30), .connected, .paused, .failed(.torBlocked)] {
             #expect(PaveContactInternetBadge(contact: enrolled, internet: status, routable: true) == .reachable)
             #expect(PaveContactInternetBadge(contact: legacy, internet: status, routable: false) == .rescanRequired)
         }

@@ -27,6 +27,8 @@ struct PaveExchangeScreen: View {
     var contactNoiseKey: Data?
     let progress: PaveExchangeProgress
     var camera: Camera = .live
+    /// Injected by synthetic renders; production checks inventory without opening a capture input.
+    var cameraAvailable: () -> Bool = { CameraAvailability.hasVideoDevice }
     let onScan: (String) -> Void
     /// What the last scan came to, when it needs words: invalid, your own code, not saved…
     var notice: PaveExchangeNotice?
@@ -42,7 +44,7 @@ struct PaveExchangeScreen: View {
     @State private var clock = PaveQRRefreshClock(issuedAt: .distantPast)
     @State private var now = Date()
     @State private var cameraUnavailable = false
-    @State private var authorization = PaveCameraAuthorization.current
+    @State private var authorization: PaveCameraAuthorization?
     @State private var latch = PaveCompletionLatch()
     @State private var myFingerprint: String?
     @State private var contactFingerprint: String?
@@ -172,10 +174,14 @@ struct PaveExchangeScreen: View {
             } else if cameraUnavailable {
                 blockedCard(text: PaveCopy.text("pave.exchange.cameraUnavailable"), showsSettings: false)
             } else {
-                switch PaveCameraCard(authorization) {
+                let available = cameraAvailable()
+                // Missing hardware wins before even consulting the permission state.
+                let permission = authorization ?? (available ? .current : .notDetermined)
+                switch PaveCameraCard(permission, hasCamera: available) {
                 case .scanner: viewfinder
                 case .rationale: rationaleCard
                 case .settings: blockedCard(text: PaveCopy.text("pave.exchange.cameraDenied"), showsSettings: true)
+                case .unavailable: blockedCard(text: PaveCopy.text("pave.exchange.cameraUnavailable"), showsSettings: false)
                 }
             }
         }
@@ -193,8 +199,18 @@ struct PaveExchangeScreen: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             Button(PaveCopy.text("pave.exchange.cameraAllow")) {
+                guard cameraAvailable() else {
+                    cameraUnavailable = true
+                    return
+                }
                 AVCaptureDevice.requestAccess(for: .video) { _ in
-                    Task { @MainActor in authorization = .current }
+                    Task { @MainActor in
+                        guard cameraAvailable() else {
+                            cameraUnavailable = true
+                            return
+                        }
+                        authorization = .current
+                    }
                 }
             }
             .buttonStyle(.paveSecondary)
@@ -303,6 +319,10 @@ struct PaveExchangeScreen: View {
     }
 
     private func scannerUnavailable() {
+        guard cameraAvailable() else {
+            cameraUnavailable = true
+            return
+        }
         authorization = .current
         if authorization == .authorized { cameraUnavailable = true }
     }

@@ -255,12 +255,13 @@ enum PaveCameraAuthorization {
 }
 
 /// What the camera area shows: the rationale with « Autoriser la caméra » (the only place the system
-/// prompt is triggered), the scanner, or the way to Réglages.
+/// prompt is triggered), the scanner, Réglages after refusal, or missing hardware.
 enum PaveCameraCard: Equatable {
-    case rationale, scanner, settings
+    case rationale, scanner, settings, unavailable
 
     /// iOS asks once: a refusal is permanent, so only then does Réglages appear.
-    init(_ authorization: PaveCameraAuthorization) {
+    init(_ authorization: PaveCameraAuthorization, hasCamera: Bool = true) {
+        guard hasCamera else { self = .unavailable; return }
         switch authorization {
         case .notDetermined: self = .rationale
         case .authorized: self = .scanner
