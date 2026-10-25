@@ -17,7 +17,7 @@ from validate_store_screenshots import (
 
 SCENES = ("01-welcome", "02-bluetooth", "03-settings", "04-internet-off", "05-about")
 SOURCE_FILES = (
-    "bitchat/bitchatApp.swift",
+    "bitchat/BitchatApp.swift",
     "bitchat/ScreenshotCapture/ScreenshotCaptureRootView.swift",
     "bitchat/Views/Wesh/WeshRootView.swift",
     "bitchat/Views/Wesh/WeshDesignSystem.swift",

@@ -7,7 +7,7 @@ on:
       - '.github/workflows/store-captures.yml'
       - 'bitchat/ScreenshotCapture/**'
       - 'bitchat/Views/Wesh/**'
-      - 'bitchat/bitchatApp.swift'
+      - 'bitchat/BitchatApp.swift'
       - 'bitchat.xcodeproj/**'
       - 'Configs/**'
       - 'scripts/*store*'

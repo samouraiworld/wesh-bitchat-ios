@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,10 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ProductionStoreCaptureTests(unittest.TestCase):
+    def test_hashed_sources_use_exact_tracked_filename_case(self) -> None:
+        tracked = set(subprocess.check_output(["git", "-C", str(ROOT), "ls-files", "-z"]).decode().split("\0"))
+        self.assertEqual(set(MODULE.SOURCE_FILES) - tracked, set())
+
     def create_set(self, root: Path) -> None:
         image = png()
         for path in MODULE.expected_files(root):
