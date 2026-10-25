@@ -1,0 +1,68 @@
+name: Capture production store views
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/store-captures.yml'
+      - 'bitchat/ScreenshotCapture/**'
+      - 'bitchat/Views/Wesh/**'
+      - 'bitchat/BitchatApp.swift'
+      - 'bitchat.xcodeproj/**'
+      - 'Configs/**'
+      - 'scripts/*store*'
+      - 'scripts/tests/test_production_store_captures.py'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout reviewed sources without credentials
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Validate source isolation and tooling
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_production_store_captures.py' -v
+          python3 scripts/check_screenshot_capture_boundary.py .
+      - name: Create disposable 6.9-inch simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          runtime=$(xcrun simctl list runtimes --json | python3 -c '
+          import json, sys
+          runtimes = [r for r in json.load(sys.stdin)["runtimes"]
+                      if r.get("isAvailable") and r.get("platform") == "iOS"
+                      and any(d.get("identifier") == "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max"
+                              for d in r.get("supportedDeviceTypes", []))]
+          if not runtimes:
+              raise SystemExit("No installed iOS runtime supports iPhone 16 Pro Max")
+          print(max(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))))["identifier"])
+          ')
+          device=$(xcrun simctl create 'Wesh Store Capture' \
+            com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro-Max "$runtime")
+          echo "WESH_CAPTURE_DEVICE_ID=$device" >> "$GITHUB_ENV"
+      - name: Render ten real-view captures in English and French
+        env:
+          WESH_SCREENSHOT_DEVICE_NAME: Wesh Store Capture
+          WESH_SCREENSHOT_DERIVED_DATA: ${{ runner.temp }}/capture-derived
+          WESH_SCREENSHOT_SOURCE_PACKAGES: ${{ runner.temp }}/capture-packages
+        run: bash scripts/capture_store_screenshots.sh "$RUNNER_TEMP/production-store-captures"
+      - name: Upload synthetic captures for fidelity review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-production-views-${{ github.sha }}
+          path: ${{ runner.temp }}/production-store-captures
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove disposable simulator
+        if: always()
+        run: |
+          if [ -n "${WESH_CAPTURE_DEVICE_ID:-}" ]; then
+            xcrun simctl shutdown "$WESH_CAPTURE_DEVICE_ID" >/dev/null 2>&1 || true
+            xcrun simctl delete "$WESH_CAPTURE_DEVICE_ID"
+          fi

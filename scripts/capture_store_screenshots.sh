@@ -3,9 +3,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 device_name="${WESH_SCREENSHOT_DEVICE_NAME:-iPhone 16 Pro Max}"
-output="${1:-$root/StoreAssets/iOS/107}"
-derived_data="${WESH_SCREENSHOT_DERIVED_DATA:-$root/.validation/DerivedData-store-screenshots-107}"
-source_packages="${WESH_SCREENSHOT_SOURCE_PACKAGES:-$root/.validation/SourcePackages-store-screenshots-107}"
+output="${1:-$root/.validation/production-store-captures}"
+derived_data="${WESH_SCREENSHOT_DERIVED_DATA:-$root/.validation/DerivedData-store-captures}"
+source_packages="${WESH_SCREENSHOT_SOURCE_PACKAGES:-$root/.validation/SourcePackages-store-captures}"
 bundle_id="org.samouraiworld.wesh.ios.screenshots"
 staging="$(mktemp -d "${TMPDIR:-/tmp}/wesh-ios-store-screenshots.XXXXXX")"
 
@@ -13,6 +13,13 @@ if [[ -e "$output" ]] && [[ -n "$(find "$output" -mindepth 1 -maxdepth 1 -print 
   echo "error: output directory is not empty: $output" >&2
   exit 1
 fi
+
+# Source hashes must identify the exact committed renderer, never a dirty tree.
+if [[ -n "$(git -C "$root" status --porcelain)" ]]; then
+  echo "error: commit the reviewed capture sources before rendering" >&2
+  exit 1
+fi
+render_commit="$(git -C "$root" rev-parse HEAD)"
 
 device_id="$(xcrun simctl list devices available --json | python3 -c '
 import json, sys
@@ -49,14 +56,13 @@ trap cleanup EXIT
 
 mkdir -p "$derived_data" "$source_packages" "$staging/en-US" "$staging/fr-FR"
 
-if [[ "${WESH_SCREENSHOT_SKIP_BUILD:-0}" != "1" ]]; then
-  xcodebuild -resolvePackageDependencies \
+xcodebuild -resolvePackageDependencies \
     -project "$root/bitchat.xcodeproj" \
     -scheme "Wesh Store Screenshots" \
     -derivedDataPath "$derived_data" \
     -clonedSourcePackagesDirPath "$source_packages"
 
-  xcodebuild \
+xcodebuild \
     -project "$root/bitchat.xcodeproj" \
     -scheme "Wesh Store Screenshots" \
     -configuration Screenshot \
@@ -68,7 +74,6 @@ if [[ "${WESH_SCREENSHOT_SKIP_BUILD:-0}" != "1" ]]; then
     -jobs 2 \
     CODE_SIGNING_ALLOWED=NO \
     build
-fi
 
 app="$derived_data/Build/Products/Screenshot-iphonesimulator/WeshScreenshots.app"
 if [[ ! -d "$app" ]]; then
@@ -84,13 +89,11 @@ xcrun simctl install "$device_id" "$app"
 xcrun simctl status_bar "$device_id" override --time 09:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
 
 scenes=(
-  01-home-peers
-  02-public-room
-  03-synthetic-qr
-  04-verified-private
-  05-unverified-requests
-  06-frozen-erase
-  07-internet-disabled
+  01-welcome
+  02-bluetooth
+  03-settings
+  04-internet-off
+  05-about
 )
 
 for locale in en-US fr-FR; do
@@ -100,20 +103,28 @@ for locale in en-US fr-FR; do
     SIMCTL_CHILD_WESH_SCREENSHOT_LOCALE="$language" \
       xcrun simctl launch --terminate-running-process "$device_id" "$bundle_id" \
         -AppleLanguages "($language)" -AppleLocale "$locale" >/dev/null
-    # A terminated/relaunched SwiftUI scene briefly reports a full-screen safe
-    # area on newer simulator runtimes. Wait for the status bar and final safe
-    # area before capturing so every locale has the same device chrome.
+    # Wait for the relaunched SwiftUI window and native navigation presentation.
+    # The simulator may replace its status-bar layer during launch; reapply the
+    # OS override to that layer, then allow its render to settle. No app chrome
+    # is drawn or composited into the PNG.
+    sleep 2
+    xcrun simctl status_bar "$device_id" override --time 09:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
     sleep 2
     xcrun simctl io "$device_id" screenshot --type=png "$staging/$locale/$scene.png" >/dev/null
   done
 done
 
-candidate_commit="$(git -C "$root" rev-parse HEAD)"
-python3 "$root/scripts/validate_store_screenshots.py" "$staging" \
-  --candidate-commit "$candidate_commit" --strip-sensitive-metadata --write-manifest
+if [[ "$(git -C "$root" rev-parse HEAD)" != "$render_commit" ]] || \
+   [[ -n "$(git -C "$root" status --porcelain)" ]]; then
+  echo "error: capture sources changed during the build or render" >&2
+  exit 1
+fi
+python3 "$root/scripts/validate_production_store_captures.py" "$staging" \
+  --render-commit "$render_commit" --source-root "$root" \
+  --strip-sensitive-metadata --write-manifest
 python3 "$root/scripts/check_screenshot_capture_boundary.py" "$root" \
   --screenshot-product "$app"
 mkdir -p "$output"
 cp -R "$staging/." "$output"
 
-echo "OK: captured and validated 14 synthetic screenshots for iOS 1.0.0 (107)"
+echo "OK: captured 10 production-view screenshots; candidate binding and visual review remain required"

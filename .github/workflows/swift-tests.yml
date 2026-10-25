@@ -28,6 +28,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p "test_store_screenshot_tooling.py" -v
           python3 -m unittest discover -s scripts/tests -p "test_screenshot_capture_boundary.py" -v
+          python3 -m unittest discover -s scripts/tests -p "test_production_store_captures.py" -v
           python3 scripts/check_screenshot_capture_boundary.py .
           python3 scripts/validate_store_screenshots.py StoreAssets/iOS/107 \
             --candidate-commit "$(python3 -c 'import json; print(json.load(open("StoreAssets/iOS/107/manifest.json"))["candidateSourceCommit"])')"

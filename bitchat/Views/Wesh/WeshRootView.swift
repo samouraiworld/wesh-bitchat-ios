@@ -308,7 +308,6 @@ struct WeshRootView: View {
     @AppStorage(WeshWelcome.key) private var welcomed = false
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     private var theme: WeshTheme { WeshTheme(appearance: appearance) }
 
@@ -381,22 +380,12 @@ struct WeshRootView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityAddTraits(.updatesFrequently)
                 }
-                TabView(selection: $selectedTab) {
-                    NavigationStack { WeshInbox(runtime: runtime) }
-                        .tabItem { Label(PaveCopy.text("pave.wesh.tab.chats"), systemImage: "bubble.left.and.bubble.right") }
-                        .tag(0).weshHiddenTabBar()
-                    NavigationStack { WeshSettings(runtime: runtime) }
-                        .tabItem { Label(PaveCopy.text("pave.settings.title"), systemImage: "gearshape") }
-                        .tag(1).weshHiddenTabBar()
+                WeshTabsPresentation(selection: $selectedTab, keyboardVisible: keyboardVisible,
+                                     resetID: viewModel.weshPanicGeneration) {
+                    WeshInbox(runtime: runtime)
+                } settings: {
+                    WeshSettings(runtime: runtime)
                 }
-                .id(viewModel.weshPanicGeneration)
-                if !keyboardVisible { VStack(spacing: 0) {
-                    Rectangle().fill(theme.line).frame(height: 0.5)
-                    HStack(spacing: 0) {
-                        tab(PaveCopy.text("pave.wesh.tab.chats"), symbol: "bubble.left.and.bubble.right", index: 0)
-                        tab(PaveCopy.text("pave.settings.title"), symbol: "gearshape", index: 1)
-                    }.padding(.top, 8).padding(.bottom, 4)
-                }.background(theme.canvas.ignoresSafeArea(edges: .bottom)) }
             }
         }
         .overlay { if WeshPrivacyCover.covers(scenePhase) { WeshPrivacyCoverView() } }
@@ -430,22 +419,6 @@ struct WeshRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: WeshPlatform.keyboardWillHide)) { _ in keyboardVisible = false }
     }
 
-    private func tab(_ title: String, symbol: String, index: Int) -> some View {
-        Button { selectedTab = index } label: {
-            VStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.system(size: 24, weight: selectedTab == index ? .semibold : .regular))
-                    .accessibilityHidden(true)
-                if !dynamicTypeSize.isAccessibilitySize {
-                    Text(title).font(.caption.weight(selectedTab == index ? .semibold : .regular))
-                }
-            }.frame(maxWidth: .infinity, minHeight: 48)
-                .contentShape(Rectangle())
-                .foregroundStyle(selectedTab == index ? theme.accent : theme.secondary)
-        }.buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityAddTraits(selectedTab == index ? .isSelected : [])
-    }
 }
 
 private struct WeshInbox: View {
