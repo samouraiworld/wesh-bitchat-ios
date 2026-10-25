@@ -4517,6 +4517,62 @@
         }
       }
     },
+    "pave.wesh.contactNote.alias" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name on this phone" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Nom sur ce téléphone" } }
+      }
+    },
+    "pave.wesh.contactNote.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving could not be confirmed. Your edits stay on this page. Try again." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "L’enregistrement n’a pas pu être confirmé. Vos modifications restent sur cette page. Réessayez." } }
+      }
+    },
+    "pave.wesh.contactNote.invalidAlias" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose another name: this one cannot be displayed as a contact name." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Choisissez un autre nom : celui-ci ne peut pas être affiché comme nom de contact." } }
+      }
+    },
+    "pave.wesh.contactNote.memo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Memo" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Mémo" } }
+      }
+    },
+    "pave.wesh.contactNote.qrName" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name from QR code: %@" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Nom du QR code : %@" } }
+      }
+    },
+    "pave.wesh.contactNote.saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name and memo saved on this phone." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Nom et mémo enregistrés sur ce téléphone." } }
+      }
+    },
+    "pave.wesh.contactNote.scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This name and memo stay on this phone and are never sent. Leave either field empty to clear it. The QR name and key fingerprint still identify the contact." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ce nom et ce mémo restent sur ce téléphone et ne sont jamais envoyés. Videz un champ pour l’effacer. Le nom du QR et l’empreinte de la clé continuent d’identifier le contact." } }
+      }
+    },
+    "pave.wesh.contactNote.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This contact cannot be edited here right now. Close this page and reopen it from your contacts." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Ce contact ne peut pas être modifié ici pour le moment. Fermez cette page et rouvrez-la depuis vos contacts." } }
+      }
+    },
     "pave.wesh.contacts.reset" : {
       "extractionState" : "manual",
       "localizations" : {

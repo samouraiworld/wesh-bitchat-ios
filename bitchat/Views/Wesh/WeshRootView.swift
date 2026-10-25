@@ -566,7 +566,7 @@ private struct WeshInbox: View {
                             HStack(spacing: 16) {
                                 if !dynamicTypeSize.isAccessibilitySize { WeshAvatar(symbol: "person") }
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(PaveDisplayName.safe(row.nickname)).font(.headline)
+                                    Text(PaveDisplayName.safe(row.displayName)).font(.headline)
                                     PaveFingerprintText(fingerprint: PaveFingerprint.short(row.peerID.noiseKey))
                                     if let badge = PaveContactInternetBadge(
                                         contact: row, internet: internetStatus,
@@ -770,6 +770,12 @@ private struct WeshConversation: View {
     }
 
     private var isPrivate: Bool { peerID != nil }
+    /// An alias changes local chrome only. The original QR title remains the
+    /// input to moderation and sharing; sends still target the pinned key.
+    private var displayedTitle: String {
+        guard let peerID, let current = trust.contacts.first(where: { $0.peerID == peerID }) else { return title }
+        return PaveDisplayName.safe(current.displayName)
+    }
     private var draftKey: ComposerDraftStore.Key {
         .from(peerID: peerID, fingerprint: peerID?.noiseKey?.sha256Fingerprint(), channel: .mesh)
     }
@@ -871,8 +877,8 @@ private struct WeshConversation: View {
                 }
             }
         }
-        .weshCanvas(title: title, appCopy: peerID == nil)
-        .navigationTitle(title).weshInlineTitle()
+        .weshCanvas(title: displayedTitle, appCopy: peerID == nil)
+        .navigationTitle(displayedTitle).weshInlineTitle()
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
                 if chrome.noiseIdentityAvailability != .available {
@@ -957,7 +963,7 @@ private struct WeshConversation: View {
         })
         .sheet(isPresented: $showingParticipants) { NavigationStack { WeshNearbyPeople(runtime: runtime) }.weshSheetBackground() }
         .sheet(item: $contactDetails) { contact in
-            NavigationStack { WeshContactDetails(runtime: runtime, contact: contact, inSheet: true) }.weshSheetBackground()
+            NavigationStack { WeshContactDetails(runtime: runtime, contact: contact, inSheet: true).id(contact.id) }.weshSheetBackground()
         }
         .sheet(isPresented: $information) {
             WeshInformationSheet(isPrivate: isPrivate)
@@ -1379,6 +1385,7 @@ private struct WeshSettings: View {
     }
 }
 
+@MainActor
 private struct WeshContactDetails: View {
     let runtime: AppRuntime
     let contact: WeshQRTrust.Contact
@@ -1392,12 +1399,54 @@ private struct WeshContactDetails: View {
     @State private var blocking = false
     @State private var feedback = ""
     @State private var reportOffer: PaveReportTarget?
+    @State private var localAlias: String
+    @State private var localMemo: String
+    @State private var editGeneration: UInt64
+    @State private var noteOwner: Data?
+    @State private var noteFeedback = ""
 
     init(runtime: AppRuntime, contact: WeshQRTrust.Contact, inSheet: Bool = false) {
         self.runtime = runtime
         self.contact = contact
         self.inSheet = inSheet
         _service = ObservedObject(wrappedValue: runtime.chatViewModel.unifiedPeerService)
+        _localAlias = State(initialValue: contact.alias ?? "")
+        _localMemo = State(initialValue: contact.memo ?? "")
+        _editGeneration = State(initialValue: WeshQRTrust.shared.noteGeneration)
+        _noteOwner = State(initialValue: contact.peerID.noiseKey)
+    }
+
+    private var currentContact: WeshQRTrust.Contact? {
+        trust.contacts.first { $0.id == contact.id }
+    }
+
+    private var canEditNotes: Bool {
+        trust.storageState == .available && editGeneration == trust.noteGeneration
+            && noteOwner?.count == 32 && noteOwner == contact.peerID.noiseKey && currentContact != nil
+    }
+
+    private func noteBinding(_ value: Binding<String>, limit: Int, multiline: Bool) -> Binding<String> {
+        let generation = editGeneration
+        return Binding(get: { value.wrappedValue }, set: { edited in
+            guard generation == trust.noteGeneration, canEditNotes else { return }
+            value.wrappedValue = WeshContactNotes.editingText(edited, limit: limit, multiline: multiline)
+            noteFeedback = ""
+        })
+    }
+
+    private func saveNotes() {
+        guard canEditNotes, let key = noteOwner else { return }
+        guard WeshContactNotes.canDisplay(alias: WeshContactNotes.cleanAlias(localAlias)) else {
+            noteFeedback = PaveCopy.text("pave.wesh.contactNote.invalidAlias")
+            return
+        }
+        if trust.setNote(sessionKey: key, alias: localAlias, memo: localMemo, generation: editGeneration) {
+            localAlias = currentContact?.alias ?? ""
+            localMemo = currentContact?.memo ?? ""
+            noteFeedback = PaveCopy.text("pave.wesh.contactNote.saved")
+        } else {
+            noteFeedback = PaveCopy.text("pave.wesh.contactNote.failed")
+        }
     }
 
     private var blocked: Bool {
@@ -1407,7 +1456,7 @@ private struct WeshContactDetails: View {
     /// The stored record, so a rescan while this page is open updates the badge.
     private var internetBadge: PaveContactInternetBadge? {
         // Fail closed: a contact removed while this page is open gets no badge.
-        guard let current = trust.contacts.first(where: { $0.id == contact.id }) else { return nil }
+        guard let current = currentContact else { return nil }
         return PaveContactInternetBadge(contact: current, internet: internetMode.internetStatus,
                                         routable: runtime.chatViewModel.isWeshInternetContact(current.peerID),
                                         blocked: blocked)
@@ -1418,10 +1467,18 @@ private struct WeshContactDetails: View {
             Section {
                 VStack(alignment: .leading, spacing: 16) {
                     WeshAvatar(symbol: "person")
-                    Text(PaveDisplayName.safe(contact.nickname)).font(.title2.weight(.semibold))
-                    PaveFingerprintText(fingerprint: PaveFingerprint.short(contact.peerID.noiseKey))
-                    Label(blocked ? PaveCopy.text("pave.wesh.contact.blocked") : PaveCopy.text("pave.wesh.contact.verifiedHere"), systemImage: blocked ? "hand.raised" : "lock")
-                        .font(.subheadline).foregroundStyle(theme.secondary)
+                    if let current = currentContact {
+                        Text(PaveDisplayName.safe(current.displayName)).font(.title2.weight(.semibold))
+                        Text(PaveCopy.text("pave.wesh.contactNote.qrName", PaveDisplayName.safe(current.nickname)))
+                            .font(.subheadline).foregroundStyle(theme.secondary)
+                        PaveFingerprintText(fingerprint: PaveFingerprint.short(current.peerID.noiseKey))
+                    } else {
+                        Text(PaveCopy.text("pave.wesh.contactNote.unavailable")).font(.subheadline)
+                    }
+                    if currentContact != nil {
+                        Label(blocked ? PaveCopy.text("pave.wesh.contact.blocked") : PaveCopy.text("pave.wesh.contact.verifiedHere"), systemImage: blocked ? "hand.raised" : "lock")
+                            .font(.subheadline).foregroundStyle(theme.secondary)
+                    }
                     if let internetBadge {
                         PaveInternetBadge(badge: internetBadge)
                         if internetBadge == .rescanRequired {
@@ -1433,6 +1490,29 @@ private struct WeshContactDetails: View {
                         .font(.subheadline).foregroundStyle(theme.secondary)
                 }.padding(.vertical, 16)
             }.listRowBackground(theme.canvas)
+            Section {
+                if canEditNotes {
+                    TextField(PaveCopy.text("pave.wesh.contactNote.alias"),
+                              text: noteBinding($localAlias, limit: WeshContactNotes.maximumAliasScalars, multiline: false))
+                        .autocorrectionDisabled()
+                        .privacySensitive()
+                        .accessibilityLabel(PaveCopy.text("pave.wesh.contactNote.alias"))
+                    TextField(PaveCopy.text("pave.wesh.contactNote.memo"),
+                              text: noteBinding($localMemo, limit: WeshContactNotes.maximumMemoScalars, multiline: true), axis: .vertical)
+                        .lineLimit(3...8)
+                        .autocorrectionDisabled()
+                        .privacySensitive()
+                        .accessibilityLabel(PaveCopy.text("pave.wesh.contactNote.memo"))
+                    Button(PaveCopy.text("pave.wesh.action.save"), action: saveNotes).frame(minHeight: 44)
+                } else {
+                    Text(PaveCopy.text("pave.wesh.contactNote.unavailable")).font(.subheadline)
+                }
+                if !noteFeedback.isEmpty {
+                    Text(noteFeedback).font(.subheadline).accessibilityAddTraits(.updatesFrequently)
+                }
+            } footer: {
+                Text(PaveCopy.text("pave.wesh.contactNote.scope"))
+            }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
             Section {
                 if blocked {
                     Button(PaveCopy.text("pave.wesh.action.unblock")) {
@@ -1453,6 +1533,9 @@ private struct WeshContactDetails: View {
                 Text(PaveCopy.text("pave.wesh.contact.removeScope"))
             }.listRowBackground(theme.canvas).listRowSeparatorTint(theme.line)
         }.listStyle(.plain).scrollContentBackground(.hidden)
+            .onChange(of: trust.noteGeneration) { _ in
+                localAlias = ""; localMemo = ""; noteFeedback = ""
+            }
             .navigationTitle(PaveCopy.text("pave.wesh.contact.title")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.wesh.contact.title"))
             .toolbar { if inSheet { ToolbarItem(placement: .confirmationAction) { Button(PaveCopy.text("pave.wesh.action.done")) { dismiss() }.frame(minHeight: 44) } } }
             .alert(PaveCopy.text("pave.wesh.block.contactTitle"), isPresented: $blocking) {
