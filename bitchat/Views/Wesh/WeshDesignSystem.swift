@@ -74,6 +74,67 @@ struct WeshPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// The production navigation stacks and bottom tabs, independent of runtime services.
+/// Store captures mount this same shell with inert presentation roots.
+struct WeshTabsPresentation<Chats: View, Settings: View>: View {
+    @Binding var selection: Int
+    let keyboardVisible: Bool
+    let resetID: UInt64
+    let chats: Chats
+    let settings: Settings
+    @Environment(\.weshTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(selection: Binding<Int>, keyboardVisible: Bool = false, resetID: UInt64 = 0,
+         @ViewBuilder chats: () -> Chats, @ViewBuilder settings: () -> Settings) {
+        _selection = selection
+        self.keyboardVisible = keyboardVisible
+        self.resetID = resetID
+        self.chats = chats()
+        self.settings = settings()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TabView(selection: $selection) {
+                NavigationStack { chats }
+                    .tabItem { Label(PaveCopy.text("pave.wesh.tab.chats"), systemImage: "bubble.left.and.bubble.right") }
+                    .tag(0).weshHiddenTabBar()
+                NavigationStack { settings }
+                    .tabItem { Label(PaveCopy.text("pave.settings.title"), systemImage: "gearshape") }
+                    .tag(1).weshHiddenTabBar()
+            }
+            .id(resetID)
+            if !keyboardVisible {
+                VStack(spacing: 0) {
+                    Rectangle().fill(theme.line).frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        tab(PaveCopy.text("pave.wesh.tab.chats"), symbol: "bubble.left.and.bubble.right", index: 0)
+                        tab(PaveCopy.text("pave.settings.title"), symbol: "gearshape", index: 1)
+                    }.padding(.top, 8).padding(.bottom, 4)
+                }.background(theme.canvas.ignoresSafeArea(edges: .bottom))
+            }
+        }
+    }
+
+    private func tab(_ title: String, symbol: String, index: Int) -> some View {
+        Button { selection = index } label: {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: selection == index ? .semibold : .regular))
+                    .accessibilityHidden(true)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(title).font(.caption.weight(selection == index ? .semibold : .regular))
+                }
+            }.frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+                .foregroundStyle(selection == index ? theme.accent : theme.secondary)
+        }.buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(selection == index ? .isSelected : [])
+    }
+}
+
 private struct WeshCanvas: ViewModifier {
     let title: String
     /// False for a contact's nickname: it keeps the system face and its own letters.
