@@ -72,7 +72,7 @@ struct WeshContactNotesTests {
         let fixture = Fixture()
         let snapshot: [String: Any] = [
             "contacts": [["noiseKeyHex": first.hexEncodedString(), "nickname": "Old contact"]],
-            "fingerprints": [first.sha256Fingerprint()],
+            "fingerprints": [first.sha256Fingerprint()]
         ]
         try fixture.storage().save(JSONSerialization.data(withJSONObject: snapshot))
         let trust = WeshQRTrust(storage: fixture.storage())
