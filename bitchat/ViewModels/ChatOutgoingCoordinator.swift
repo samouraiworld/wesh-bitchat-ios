@@ -46,9 +46,11 @@ extension ChatViewModel: ChatOutgoingContext {}
 @MainActor
 final class ChatOutgoingCoordinator {
     private unowned let context: any ChatOutgoingContext
+    private let publicContentAllowed: (String) -> Bool
 
-    init(context: any ChatOutgoingContext) {
+    init(context: any ChatOutgoingContext, publicContentAllowed: @escaping (String) -> Bool = { _ in true }) {
         self.context = context
+        self.publicContentAllowed = publicContentAllowed
     }
 
     func sendMessage(_ content: String, allowCommands: Bool = true) {
@@ -90,6 +92,7 @@ final class ChatOutgoingCoordinator {
 
 private extension ChatOutgoingCoordinator {
     func sendMeshPublicMessage(originalContent: String, trimmed: String, mentions: [String]) {
+        guard publicContentAllowed(originalContent) else { return }
         let message = BitchatMessage(
             sender: context.nickname,
             content: trimmed,

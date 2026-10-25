@@ -182,15 +182,21 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     let unifiedPeerService: UnifiedPeerService
     let autocompleteService: AutocompleteService
     let deduplicationService: MessageDeduplicationService  // internal for test access
-    private lazy var outgoingCoordinator = ChatOutgoingCoordinator(context: self)
+    private lazy var outgoingCoordinator = ChatOutgoingCoordinator(context: self, publicContentAllowed: { [weak self] in
+        self?.allowsWeshPublicContent($0) ?? false
+    })
     private lazy var lifecycleCoordinator = ChatLifecycleCoordinator(context: self)
-    private lazy var transportEventCoordinator = ChatTransportEventCoordinator(context: self)
+    private lazy var transportEventCoordinator = ChatTransportEventCoordinator(context: self, publicContentAllowed: { [weak self] in
+        self?.allowsWeshPublicContent($0) ?? false
+    })
     private lazy var peerListCoordinator = ChatPeerListCoordinator(context: self)
     private lazy var messageFormatter = ChatMessageFormatter(viewModel: self)
     lazy var peerIdentityCoordinator = ChatPeerIdentityCoordinator(context: self)
     lazy var deliveryCoordinator = ChatDeliveryCoordinator(context: self)
     lazy var composerCoordinator = ChatComposerCoordinator(context: self)
-    lazy var publicConversationCoordinator = ChatPublicConversationCoordinator(context: self)
+    lazy var publicConversationCoordinator = ChatPublicConversationCoordinator(context: self, publicContentAllowed: { [weak self] in
+        self?.allowsWeshPublicContent($0) ?? false
+    })
     lazy var privateConversationCoordinator = ChatPrivateConversationCoordinator(context: self)
     lazy var nostrCoordinator = ChatNostrCoordinator(context: self)
     let weshPrivatePolicyEnabled: Bool
@@ -629,7 +635,10 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
     @MainActor
     @discardableResult
     func appendPublicMessage(_ message: BitchatMessage, to conversationID: ConversationID) -> Bool {
-        conversations.append(message, to: conversationID)
+        // Also covers archived echoes and delayed pipeline commits. Never apply
+        // the public catalogue to text labelled private, even on a bad caller.
+        guard message.isPrivate || allowsWeshPublicContent(message.content) else { return false }
+        return conversations.append(message, to: conversationID)
     }
 
     /// A public (mesh/geohash) channel's full timeline.
@@ -1038,13 +1047,19 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
             sendPrivateMessage(content, to: peerID)
             return true
         } else {
-            guard canSendWeshPublic,
+            guard allowsWeshPublicContent(content), canSendWeshPublic,
                   UserDefaults.standard.bool(forKey: "wesh.publicDisclosureAccepted.v1") else { return false }
             endPrivateChat()
             activeChannel = .mesh
         }
         outgoingCoordinator.sendMessage(content, allowCommands: false)
         return true
+    }
+
+    /// Only public send/store/notification paths call this method. Private text
+    /// bypasses those branches without being passed to the catalogue.
+    func allowsWeshPublicContent(_ publicText: String) -> Bool {
+        !weshPrivatePolicyEnabled || WeshPublicContentPolicy.allows(publicText)
     }
 
     /// Storage recovery never submits a message or clears a composer draft.

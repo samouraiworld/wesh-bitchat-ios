@@ -151,9 +151,11 @@ extension ChatViewModel: ChatTransportEventContext {
 
 final class ChatTransportEventCoordinator {
     private unowned let context: any ChatTransportEventContext
+    private let publicContentAllowed: (String) -> Bool
 
-    init(context: any ChatTransportEventContext) {
+    init(context: any ChatTransportEventContext, publicContentAllowed: @escaping (String) -> Bool = { _ in true }) {
         self.context = context
+        self.publicContentAllowed = publicContentAllowed
     }
 
     func didReceiveMessage(_ message: BitchatMessage) {
@@ -313,6 +315,7 @@ private extension ChatTransportEventCoordinator {
         messageID: String?,
         in context: any ChatTransportEventContext
     ) {
+        guard publicContentAllowed(content) else { return }
         let normalized = content.trimmed
         let mentions = context.parseMentions(from: normalized)
         let message = BitchatMessage(
@@ -340,6 +343,8 @@ private extension ChatTransportEventCoordinator {
         in context: any ChatTransportEventContext
     ) -> Bool {
         guard !context.isMessageBlocked(message) else { return false }
+        // The private admission path never passes its text to the public policy.
+        guard message.isPrivate || publicContentAllowed(message.content) else { return false }
         guard !message.content.trimmed.isEmpty || message.isPrivate else { return false }
 
         if message.isPrivate {
