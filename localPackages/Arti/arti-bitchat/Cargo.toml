@@ -12,6 +12,8 @@ crate-type = ["staticlib"]
 arti-client = { version = "0.38", default-features = false, features = [
     "tokio",
     "rustls",
+    # Expose the storage setter so startup can explicitly disable the keystore.
+    "keymgr",
 ] }
 
 # Async runtime

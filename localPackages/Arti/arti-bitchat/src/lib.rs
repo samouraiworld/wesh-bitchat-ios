@@ -9,7 +9,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arti_client::{IsolationToken, StreamPrefs, TorClient};
+use arti_client::config::{BoolOrAuto, TorClientConfigBuilder};
+use arti_client::{IsolationToken, StreamPrefs, TorClient, TorClientConfig};
 use once_cell::sync::OnceCell;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
@@ -22,6 +23,33 @@ mod lifecycle;
 mod socks;
 
 static ARTI_STATE: OnceCell<Arc<controller::Controller<TorClient<PreferredRuntime>>>> = OnceCell::new();
+
+/// Wesh is a Tor client without provisioned Tor private keys. Transitive features
+/// can enable the upstream keystore default, so never leave this policy implicit.
+fn client_config(
+    state_dir: PathBuf,
+    cache_dir: PathBuf,
+) -> Result<TorClientConfig, Box<dyn std::error::Error + Send + Sync>> {
+    let mut builder = TorClientConfigBuilder::from_directories(state_dir, cache_dir);
+    builder
+        .storage()
+        .keystore()
+        .enabled(BoolOrAuto::Explicit(false));
+    let config = builder.build()?;
+    require_disabled_keystore(&config)?;
+    Ok(config)
+}
+
+/// Refuse implicit defaults and an enabled store before bootstrap, with no fallback.
+fn require_disabled_keystore(
+    config: &TorClientConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let keystore = config.keystore();
+    if keystore.enabled().as_bool() != Some(false) || keystore.is_enabled() {
+        return Err("Tor keystore must be explicitly disabled".into());
+    }
+    Ok(())
+}
 
 /// Initialize lifecycle control. Each start owns a fresh runtime.
 fn init_state() -> Result<(), &'static str> {
@@ -278,10 +306,7 @@ async fn run_arti(
     let cache_dir = data_dir.join("cache");
     let state_dir = data_dir.join("state");
 
-    // Use from_directories which sets up storage correctly
-    use arti_client::config::TorClientConfigBuilder;
-    let config = TorClientConfigBuilder::from_directories(state_dir, cache_dir)
-        .build()?;
+    let config = client_config(state_dir, cache_dir)?;
 
     session.set_summary("Bootstrapping...");
 
@@ -376,4 +401,88 @@ async fn run_arti(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod keystore_policy_tests {
+    use super::{client_config, require_disabled_keystore};
+    use arti_client::{
+        config::{BoolOrAuto, TorClientConfigBuilder},
+        TorClient,
+    };
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct SyntheticDirectory(PathBuf);
+
+    impl SyntheticDirectory {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "wesh-ios-keystore-policy-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for SyntheticDirectory {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn inert_client_does_not_create_a_keystore() {
+        let directory = SyntheticDirectory::new();
+        let state = directory.0.join("state");
+        let cache = directory.0.join("cache");
+        let config = client_config(state.clone(), cache).unwrap();
+        assert_eq!(config.keystore().enabled().as_bool(), Some(false));
+        assert!(!config.keystore().is_enabled());
+        assert!(config.keystore().primary_kind().is_none());
+
+        // This upstream API is inert: no bootstrap and no network connection.
+        let client = TorClient::builder().config(config).create_inert().unwrap();
+        assert!(!state.join("keystore").exists());
+        drop(client);
+        assert!(!state.join("keystore").exists());
+    }
+
+    #[tokio::test]
+    async fn inert_client_ignores_an_unusable_synthetic_keystore_path() {
+        let directory = SyntheticDirectory::new();
+        let state = directory.0.join("state");
+        let cache = directory.0.join("cache");
+        std::fs::create_dir(&state).unwrap();
+        let sentinel = state.join("keystore");
+        let contents = b"synthetic sentinel, not a keystore or private key";
+        std::fs::write(&sentinel, contents).unwrap();
+        let config = client_config(state, cache).unwrap();
+
+        // Opening a native keystore here would fail because this path is a file.
+        let client = TorClient::builder().config(config).create_inert().unwrap();
+        drop(client);
+        assert!(sentinel.is_file());
+        assert_eq!(std::fs::read(sentinel).unwrap(), contents);
+    }
+
+    #[test]
+    fn implicit_default_is_refused_before_bootstrap() {
+        let config = TorClientConfigBuilder::default().build().unwrap();
+        assert!(require_disabled_keystore(&config).is_err());
+    }
+
+    #[test]
+    fn explicitly_enabled_keystore_is_refused_before_bootstrap() {
+        let mut builder = TorClientConfigBuilder::default();
+        builder
+            .storage()
+            .keystore()
+            .enabled(BoolOrAuto::Explicit(true));
+        let config = builder.build().unwrap();
+        assert!(require_disabled_keystore(&config).is_err());
+    }
 }
