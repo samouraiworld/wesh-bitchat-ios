@@ -3057,6 +3057,17 @@ LICENSE-MIT
 https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-MIT
 Text SHA-256: e40081d18f17b6783fcb554ae42f6fa3548988e4d705a3e4541e2ef240293040
 
+tor-hsclient@0.38.0
+License expression: MIT OR Apache-2.0
+Source: https://gitlab.torproject.org/tpo/core/arti.git/
+Locked source archive: https://static.crates.io/crates/tor-hsclient/tor-hsclient-0.38.0.crate
+LICENSE-APACHE
+https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-APACHE
+Text SHA-256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+LICENSE-MIT
+https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-MIT
+Text SHA-256: e40081d18f17b6783fcb554ae42f6fa3548988e4d705a3e4541e2ef240293040
+
 tor-hscrypto@0.38.0
 License expression: MIT OR Apache-2.0
 Source: https://gitlab.torproject.org/tpo/core/arti.git/

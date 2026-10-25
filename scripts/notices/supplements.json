@@ -779,6 +779,31 @@
       }
     ]
   },
+  "tor-hsclient@0.38.0": {
+    "notices": [
+      {
+        "file": "e40081d18f17b6783fcb554ae42f6fa3548988e4d705a3e4541e2ef240293040.txt",
+        "path": "LICENSE-MIT",
+        "sha256": "e40081d18f17b6783fcb554ae42f6fa3548988e4d705a3e4541e2ef240293040",
+        "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-MIT"
+      },
+      {
+        "file": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+        "path": "LICENSE-APACHE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-APACHE"
+      }
+    ],
+    "revision": "ba421ece1acb47e5c554c2bfa043cc9156451bab",
+    "scopeEvidence": [
+      {
+        "file": "9148892e78117ac3af709913b584377a32f51fd85ff03e40cf617427304aec97.txt",
+        "path": "Cargo.toml",
+        "sha256": "9148892e78117ac3af709913b584377a32f51fd85ff03e40cf617427304aec97",
+        "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/Cargo.toml"
+      }
+    ]
+  },
   "tor-hscrypto@0.38.0": {
     "notices": [
       {

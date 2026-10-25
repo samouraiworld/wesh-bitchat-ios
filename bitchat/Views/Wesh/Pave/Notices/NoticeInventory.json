@@ -1,10 +1,10 @@
 {
   "artifacts": {
-    "bitchat/Views/Wesh/Pave/Notices/Arti-NOTICES.txt": "5048d0838c3b00f95b41394596c7c440286a0135e53b2b5d2b0fd61982d71834",
+    "bitchat/Views/Wesh/Pave/Notices/Arti-NOTICES.txt": "97362c2cdf381256ac700cf375cc6acd6e0fc57f2a06bea6636affb359fb1e5a",
     "bitchat/Views/Wesh/Pave/Notices/secp256k1-NOTICES.txt": "4c26e939a13b4d51f5b5e93c2978c54738b246545ea702b90467d50f8ddf84c4"
   },
-  "cargoLockSHA256": "da9154d833011a9c8ccb05e4ba57c396375f0dced155e3369861831359f66aa5",
-  "cargoManifestSHA256": "77099504353b19d9e20f08685a004fda52a20f69d0c2f7068cc5f709d5fb5793",
+  "cargoLockSHA256": "65e09b02e6923026ee4129a7adefadb21e29eb3cf70cf61ee1488e9c0950b40f",
+  "cargoManifestSHA256": "a5a4d67f2c8b678950e7f9be982c8a85aa0f7e90f5aaee079046b392c1cf9d98",
   "components": [
     {
       "crateChecksum": "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa",
@@ -6643,6 +6643,36 @@
       "version": "0.38.0"
     },
     {
+      "crateChecksum": "d3bf8f9d687e391ce00bba437ff61f483f414151242216478c2f5237fe91835a",
+      "license": "MIT OR Apache-2.0",
+      "name": "tor-hsclient",
+      "notices": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-APACHE"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "e40081d18f17b6783fcb554ae42f6fa3548988e4d705a3e4541e2ef240293040",
+          "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/LICENSE-MIT"
+        }
+      ],
+      "releaseCommit": null,
+      "revision": "ba421ece1acb47e5c554c2bfa043cc9156451bab",
+      "sourceArchiveURL": "https://static.crates.io/crates/tor-hsclient/tor-hsclient-0.38.0.crate",
+      "sourceURL": "https://gitlab.torproject.org/tpo/core/arti.git/",
+      "supplementEvidence": [
+        {
+          "file": "9148892e78117ac3af709913b584377a32f51fd85ff03e40cf617427304aec97.txt",
+          "path": "Cargo.toml",
+          "sha256": "9148892e78117ac3af709913b584377a32f51fd85ff03e40cf617427304aec97",
+          "url": "https://gitlab.torproject.org/tpo/core/arti/-/raw/ba421ece1acb47e5c554c2bfa043cc9156451bab/Cargo.toml"
+        }
+      ],
+      "version": "0.38.0"
+    },
+    {
       "crateChecksum": "86ecc6829e56d89c1976ecc0266b1a717c263f27a365df07558d9170e939d445",
       "license": "MIT OR Apache-2.0",
       "name": "tor-hscrypto",
@@ -7631,7 +7661,7 @@
       "version": "1.0.14"
     }
   ],
-  "componentsSHA256": "4ffb261f641adc09dce918f895a6580704cbf1bd5a05d2735517876a9046e15a",
+  "componentsSHA256": "bd38230ee4b3fa0dee124508b4583b3b31e7f3c03aecb1a8ce8fc7e428655eb4",
   "qualifications": [
     "void@1.0.2: Upstream README and Cargo.toml explicitly declare MIT and credit Jonathan Reem. The release supplies no standalone copyright notice; canonical MIT permission/warranty terms are reproduced without substituting a copyright template. Final redistribution qualification remains pending."
   ],
@@ -7900,6 +7930,7 @@
       "tor-error@0.38.0",
       "tor-general-addr@0.38.0",
       "tor-guardmgr@0.38.0",
+      "tor-hsclient@0.38.0",
       "tor-hscrypto@0.38.0",
       "tor-key-forge@0.38.0",
       "tor-keymgr@0.38.0",
@@ -8201,6 +8232,7 @@
       "tor-error@0.38.0",
       "tor-general-addr@0.38.0",
       "tor-guardmgr@0.38.0",
+      "tor-hsclient@0.38.0",
       "tor-hscrypto@0.38.0",
       "tor-key-forge@0.38.0",
       "tor-keymgr@0.38.0",
@@ -8502,6 +8534,7 @@
       "tor-error@0.38.0",
       "tor-general-addr@0.38.0",
       "tor-guardmgr@0.38.0",
+      "tor-hsclient@0.38.0",
       "tor-hscrypto@0.38.0",
       "tor-key-forge@0.38.0",
       "tor-keymgr@0.38.0",
@@ -8830,6 +8863,7 @@
       "tor-error@0.38.0",
       "tor-general-addr@0.38.0",
       "tor-guardmgr@0.38.0",
+      "tor-hsclient@0.38.0",
       "tor-hscrypto@0.38.0",
       "tor-key-forge@0.38.0",
       "tor-keymgr@0.38.0",
@@ -9157,6 +9191,7 @@
       "tor-error@0.38.0",
       "tor-general-addr@0.38.0",
       "tor-guardmgr@0.38.0",
+      "tor-hsclient@0.38.0",
       "tor-hscrypto@0.38.0",
       "tor-key-forge@0.38.0",
       "tor-keymgr@0.38.0",
