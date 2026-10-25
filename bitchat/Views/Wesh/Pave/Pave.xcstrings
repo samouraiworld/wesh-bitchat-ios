@@ -2120,6 +2120,48 @@
         }
       }
     },
+    "pave.internet.help.noNetwork" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check that Wi-Fi or mobile data can access the Internet, then tap Try again." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Vérifiez que le Wi-Fi ou les données mobiles donnent accès à Internet, puis appuyez sur Réessayer." } }
+      }
+    },
+    "pave.internet.help.torBlocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tor could not connect. Check your Internet connection, then tap Try again. If this continues, try another network." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Tor n’a pas réussi à se connecter. Vérifiez votre connexion Internet, puis appuyez sur Réessayer. Si cela continue, essayez un autre réseau." } }
+      }
+    },
+    "pave.internet.help.relaysUnreachable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The message relays did not answer. Wait a moment, then tap Try again." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Les relais de messages n’ont pas répondu. Patientez un instant, puis appuyez sur Réessayer." } }
+      }
+    },
+    "pave.internet.help.routeFault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Internet was stopped because Wesh could not keep using Tor. Tap Try again to attempt a new connection. If this continues, turn Internet mode off." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Internet a été arrêté car Wesh ne pouvait pas continuer par Tor. Appuyez sur Réessayer pour tenter une nouvelle connexion. Si cela continue, désactivez le mode Internet." } }
+      }
+    },
+    "pave.internet.help.torStopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tor stopped unexpectedly, so Internet was stopped too. Tap Try again to attempt a new connection." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Tor s’est arrêté de façon inattendue ; Internet a aussi été arrêté. Appuyez sur Réessayer pour tenter une nouvelle connexion." } }
+      }
+    },
+    "pave.internet.help.preserved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This connection error does not erase your messages or contacts. Pending messages are not confirmed as delivered. You can turn Internet mode off and continue over Bluetooth with nearby contacts." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Cette erreur de connexion n’efface ni vos messages ni vos contacts. Les messages en attente ne sont pas confirmés comme livrés. Vous pouvez désactiver le mode Internet et continuer par Bluetooth avec vos contacts à proximité." } }
+      }
+    },
     "pave.internet.off" : {
       "extractionState" : "manual",
       "localizations" : {

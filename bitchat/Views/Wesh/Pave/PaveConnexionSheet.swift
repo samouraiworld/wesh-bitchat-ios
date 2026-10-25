@@ -13,12 +13,16 @@ enum PaveInternetStatus: Equatable {
     case connecting(torProgress: Int)
     case connected
     case paused
-    case failed
+    /// Keep the failure cause so Connexion can offer the right local recovery action.
+    case failed(WeshInternetState.Failure)
 
     var isEnabled: Bool { self != .off }
 
     /// Failed is the only state a touch on the status retries.
-    var offersRetry: Bool { self == .failed }
+    var offersRetry: Bool {
+        if case .failed = self { return true }
+        return false
+    }
 
     /// The home pill adds nothing while Internet is off: the reach card already says
     /// everything travels over Bluetooth, and Internet stays opt-in.
@@ -36,6 +40,20 @@ enum PaveInternetStatus: Equatable {
         case .failed: return PaveCopy.text("pave.internet.failed", bundle: bundle, locale: locale)
         }
     }
+
+    var recoveryHelp: String? { recoveryHelp() }
+
+    /// Fixed local copy only: never an exception, relay response or identity.
+    func recoveryHelp(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String? {
+        guard case .failed(let failure) = self else { return nil }
+        switch failure {
+        case .noNetwork: return PaveCopy.text("pave.internet.help.noNetwork", bundle: bundle, locale: locale)
+        case .torBlocked: return PaveCopy.text("pave.internet.help.torBlocked", bundle: bundle, locale: locale)
+        case .relaysUnreachable: return PaveCopy.text("pave.internet.help.relaysUnreachable", bundle: bundle, locale: locale)
+        case .routeFault: return PaveCopy.text("pave.internet.help.routeFault", bundle: bundle, locale: locale)
+        case .torStopped: return PaveCopy.text("pave.internet.help.torStopped", bundle: bundle, locale: locale)
+        }
+    }
 }
 
 extension PaveInternetStatus {
@@ -45,7 +63,7 @@ extension PaveInternetStatus {
         case .connecting(let progress): self = .connecting(torProgress: progress)
         case .on: self = .connected
         case .paused: self = .paused
-        case .error: self = .failed
+        case .error(let failure): self = .failed(failure)
         }
     }
 }
@@ -93,7 +111,7 @@ final class PaveInternetModeStub: WeshInternetModeProviding {
     }
 
     func retryInternet() {
-        if internetStatus == .failed { internetStatus = .connecting(torProgress: 0) }
+        if internetStatus.offersRetry { internetStatus = .connecting(torProgress: 0) }
     }
 }
 
@@ -203,6 +221,13 @@ struct PaveConnexionSheet<InternetMode: WeshInternetModeProviding>: View {
             .tint(theme[.internet])
             .frame(minHeight: PaveTouch.minimum)
             if internet.internetStatus.offersRetry {
+                if let help = internet.internetStatus.recoveryHelp {
+                    Text(help).paveText(.body).fixedSize(horizontal: false, vertical: true)
+                    Text(PaveCopy.text("pave.internet.help.preserved"))
+                        .paveText(.caption)
+                        .foregroundStyle(theme[.inkMuted])
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // « Internet indisponible — Réessayer »: the status is the retry button.
                 Button(internet.internetStatus.label) { internet.retryInternet() }
                     .buttonStyle(.paveDanger)
@@ -323,7 +348,7 @@ struct PaveConnexionSheet_Previews: PreviewProvider {
         PavePreview.variants {
             VStack {
                 PaveConnexionSheet(bluetooth: .off, peersInRange: 0,
-                                   internet: PaveInternetModeStub(internetStatus: .failed), onClose: {})
+                                   internet: PaveInternetModeStub(internetStatus: .failed(.torBlocked)), onClose: {})
                 PaveConnexionSheet(bluetooth: .on, peersInRange: 0,
                                    internet: PaveInternetModeStub(internetStatus: .paused), onClose: {})
             }
