@@ -103,9 +103,12 @@ for locale in en-US fr-FR; do
     SIMCTL_CHILD_WESH_SCREENSHOT_LOCALE="$language" \
       xcrun simctl launch --terminate-running-process "$device_id" "$bundle_id" \
         -AppleLanguages "($language)" -AppleLocale "$locale" >/dev/null
-    # A terminated/relaunched SwiftUI scene briefly reports a full-screen safe
-    # area on newer simulator runtimes. Wait for the status bar and final safe
-    # area before capturing so every locale has the same device chrome.
+    # Wait for the relaunched SwiftUI window and native navigation presentation.
+    # The simulator may replace its status-bar layer during launch; reapply the
+    # OS override to that layer, then allow its render to settle. No app chrome
+    # is drawn or composited into the PNG.
+    sleep 2
+    xcrun simctl status_bar "$device_id" override --time 09:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
     sleep 2
     xcrun simctl io "$device_id" screenshot --type=png "$staging/$locale/$scene.png" >/dev/null
   done
