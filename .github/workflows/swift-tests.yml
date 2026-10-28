@@ -182,7 +182,7 @@ jobs:
   ios-build:
     name: Build Release apps (universal)
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
