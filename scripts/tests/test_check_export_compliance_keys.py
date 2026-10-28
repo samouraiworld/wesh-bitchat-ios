@@ -11,13 +11,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class CheckExportComplianceKeysTests(unittest.TestCase):
-    def make_repo(self, plist_keys=None, pbxproj=""):
+    def make_repo(self, plist_keys=None, pbxproj="", xcconfigs=None):
         root = Path(tempfile.mkdtemp())
         (root / "bitchat").mkdir()
         keys = {"CFBundleName": "Wesh", **(plist_keys or {})}
         (root / "bitchat" / "Info.plist").write_bytes(plistlib.dumps(keys))
         (root / "bitchat.xcodeproj").mkdir()
         (root / "bitchat.xcodeproj" / "project.pbxproj").write_text(pbxproj, encoding="utf-8")
+        (root / "Configs").mkdir()
+        for name, text in (xcconfigs or {"Release.xcconfig": "MARKETING_VERSION = 1.0.1\n"}).items():
+            (root / "Configs" / name).write_text(text, encoding="utf-8")
         return root
 
     def test_the_repository_keeps_a_truthful_export_answer(self) -> None:
@@ -44,6 +47,22 @@ class CheckExportComplianceKeysTests(unittest.TestCase):
     def test_the_answer_cannot_hide_in_generated_info_plist_settings(self) -> None:
         root = self.make_repo(pbxproj="\t\t\t\tINFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;\n")
         self.assertEqual(len(checker.find_violations(root)), 1)
+
+    def test_the_answer_cannot_hide_in_an_xcconfig(self) -> None:
+        for name in ("Release.xcconfig", "Local.xcconfig"):
+            with self.subTest(name=name):
+                root = self.make_repo(xcconfigs={name: "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO\n"})
+                self.assertEqual(len(checker.find_violations(root)), 1)
+        root = self.make_repo(xcconfigs={"Release.xcconfig": "// INFOPLIST_KEY_ITSEncryptionExportComplianceCode = x\n"})
+        self.assertEqual(checker.find_violations(root), [])
+
+    def test_a_malformed_info_plist_is_reported_clearly(self) -> None:
+        root = self.make_repo()
+        (root / "bitchat" / "Info.plist").write_text("<plist><dict><key>", encoding="utf-8")
+        violations = checker.find_violations(root)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("bitchat/Info.plist is not a readable property list", violations[0])
+        self.assertEqual(checker.main([str(root)]), 1)
 
     def test_main_exit_codes(self) -> None:
         self.assertEqual(checker.main([str(self.make_repo())]), 0)

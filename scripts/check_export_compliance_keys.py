@@ -14,14 +14,18 @@ So the bundle may either:
 
 Setting it to NO would answer "no documentation needed" on every build and
 skip the French declaration, so it is refused here, as is a code without YES.
+The answer lives in bitchat/Info.plist only: INFOPLIST_KEY_ITS* build settings
+(project or Configs/*.xcconfig, Local.xcconfig included) are refused.
 """
 
 from __future__ import annotations
 
 import argparse
 import plistlib
+import re
 import sys
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
 USES_KEY = "ITSAppUsesNonExemptEncryption"
 CODE_KEY = "ITSEncryptionExportComplianceCode"
@@ -31,8 +35,12 @@ def info_plist_violations(root: Path) -> list[str]:
     path = root / "bitchat" / "Info.plist"
     try:
         info = plistlib.loads(path.read_bytes())
-    except (OSError, plistlib.InvalidFileException) as error:
+    except OSError as error:
         return [f"cannot read {path.relative_to(root)}: {error}"]
+    except (plistlib.InvalidFileException, ExpatError, ValueError) as error:
+        return [f"{path.relative_to(root)} is not a readable property list: {error}"]
+    if not isinstance(info, dict):
+        return [f"{path.relative_to(root)} is not a readable property list: top level is not a dictionary"]
 
     relative = path.relative_to(root)
     uses = info.get(USES_KEY)
@@ -59,8 +67,19 @@ def pbxproj_violations(root: Path) -> list[str]:
     ]
 
 
+def xcconfig_violations(root: Path) -> list[str]:
+    """Build settings can generate the same Info.plist keys; Local.xcconfig included."""
+    found: list[str] = []
+    for path in sorted((root / "Configs").glob("*.xcconfig")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\bINFOPLIST_KEY_ITS", line.split("//", 1)[0]):
+                found.append(f"{path.relative_to(root)}:{number} sets an INFOPLIST_KEY_ITS* setting; "
+                             "keep the answer in bitchat/Info.plist")
+    return found
+
+
 def find_violations(root: Path) -> list[str]:
-    return info_plist_violations(root) + pbxproj_violations(root)
+    return info_plist_violations(root) + pbxproj_violations(root) + xcconfig_violations(root)
 
 
 def main(argv: list[str] | None = None) -> int:
