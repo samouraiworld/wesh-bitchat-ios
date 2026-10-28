@@ -3171,6 +3171,40 @@
         }
       }
     },
+    "pave.settings.keepScreenOnHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "While Wesh is open and Bluetooth is on, the screen does not lock by itself. This uses more battery and leaves your conversations visible."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tant que Wesh est ouvert et le Bluetooth activé, l’écran ne se verrouille pas tout seul. Cela consomme plus de batterie et laisse vos conversations visibles."
+          }
+        }
+      }
+    },
+    "pave.settings.keepScreenOnToggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the screen on"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Garder l’écran allumé"
+          }
+        }
+      }
+    },
     "pave.settings.meetingNone" : {
       "extractionState" : "manual",
       "localizations" : {

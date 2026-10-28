@@ -144,6 +144,10 @@ Copy `Configs/Local.xcconfig.example` to ignored `Configs/Local.xcconfig` and us
 the team's authorized app and App Group identifiers. Keep signing credentials,
 profiles, and team/device identifiers out of Git and public logs. App and share
 extension must use matching version/build numbers and compatible entitlements.
+Only Debug reads `Local.xcconfig`; Release builds and archives use the tracked
+identity, and CI fails if a Release build would read it. For a one-off local
+Release build with your identity, pass it explicitly with
+`xcodebuild -xcconfig Configs/Local.xcconfig`.
 
 A simulator package does not install on an iPhone. A device archive needs valid
 device signing; an App Store export additionally needs accessible Distribution
