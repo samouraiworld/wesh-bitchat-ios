@@ -252,7 +252,7 @@ struct ChatLifecycleCoordinatorContextTests {
         #expect(context.routedPrivateMessages.count == 1)
         #expect(context.routedPrivateMessages.first?.content == "* me took a screenshot *")
         #expect(context.routedPrivateMessages.first?.recipientNickname == "alice")
-        #expect(context.privateChats[peerID]?.map(\.content) == ["you took a screenshot"])
+        #expect(context.privateChats[peerID]?.map(\.content) == [WeshScreenshotNotice.contactNotifiedLine()])
         #expect(context.privateChats[peerID]?.first?.sender == "system")
     }
 
@@ -346,17 +346,23 @@ struct ScreenshotCaptureRoutingTests {
     @Test("App Info is exempt; mesh and DMs forward to the chat layer")
     func nonLocationScreenshotsForwardOrIgnore() {
         #expect(AppRuntime.resolveScreenshotResponse(
-            isAppInfoPresented: true
+            isAppInfoPresented: true,
+            noticeEnabled: true
         ) == .ignore)
 
-        // Chat screenshots reach the coordinator, whose public path stays silent.
+        // Chat screenshots reach the coordinator, whose public path stays silent
+        // and whose private path notifies the contact.
         #expect(AppRuntime.resolveScreenshotResponse(
-            isAppInfoPresented: false
+            isAppInfoPresented: false,
+            noticeEnabled: true
         ) == .forwardToChat)
+    }
 
-        // The same routing permits the coordinator's secure-DM notice path.
+    @Test("Turning the notice off keeps every screenshot local")
+    func aDisabledNoticeIgnoresScreenshots() {
         #expect(AppRuntime.resolveScreenshotResponse(
-            isAppInfoPresented: false
-        ) == .forwardToChat)
+            isAppInfoPresented: false,
+            noticeEnabled: false
+        ) == .ignore)
     }
 }

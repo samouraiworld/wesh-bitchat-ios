@@ -441,7 +441,7 @@ struct ChatViewModelServiceLifecycleTests {
         // No session means no notice went out, so no local echo either —
         // an echo here would imply Alice was told when she wasn't.
         #expect(transport.sentPrivateMessages.isEmpty)
-        #expect(viewModel.privateChats[peerID]?.contains { $0.content == "you took a screenshot" } != true)
+        #expect(viewModel.privateChats[peerID]?.contains { $0.content == WeshScreenshotNotice.contactNotifiedLine() } != true)
     }
 }
 

@@ -829,24 +829,6 @@
         }
       }
     },
-    "system.screenshot.you" : {
-      "comment" : "Local system line after your screenshot notice was sent to the DM peer",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "you took a screenshot"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "tu as fait une capture d'écran"
-          }
-        }
-      }
-    },
     "notification.action.wave" : {
       "comment" : "Title of the notification action button that sends a friendly wave back to a nearby person",
       "extractionState" : "manual",

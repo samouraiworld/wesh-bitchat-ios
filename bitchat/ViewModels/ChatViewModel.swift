@@ -1433,6 +1433,7 @@ final class ChatViewModel: ObservableObject, BitchatDelegate, SynchronousMessage
         let sightingsWipeCompleted = panicPersistentStoreWipes.sightings()
         MeshEchoSettings.reset()
         NotificationPrivacySettings.reset()
+        WeshScreenshotNotice.reset()
         // A hand-added relay names an operator someone chose to route through,
         // which is the kind of trace a wipe should not leave behind.
         NostrRelaySettings.reset()
