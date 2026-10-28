@@ -144,7 +144,8 @@ cp Configs/Local.xcconfig.example Configs/Local.xcconfig
 ```
 
 `Local.xcconfig.example` derives unique app and App Group identifiers from that
-team ID. The entitlement files already reference `$(APP_GROUP_ID)`, so tracked
+team ID. Only Debug builds read it: Release builds and archives always use the
+tracked identity. The entitlement files already reference `$(APP_GROUP_ID)`, so tracked
 project or entitlement files do not need to be edited.
 
 Useful command-line checks from the repository root:

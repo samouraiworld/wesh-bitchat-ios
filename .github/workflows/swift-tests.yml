@@ -203,6 +203,21 @@ jobs:
               -configuration Release -showBuildSettings
           done | python3 scripts/check_release_tor_enforced.py . --build-settings -
 
+      # Configs/Local.xcconfig is an untracked developer override that only
+      # Debug may read. A probe file stands in for it here: the settings
+      # Release resolves to must not carry any of its values.
+      - name: Release builds ignore Local.xcconfig
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s scripts/tests -p "test_check_release_local_override.py" -v
+          test ! -e Configs/Local.xcconfig
+          python3 scripts/check_release_local_override.py . --write-probe Configs/Local.xcconfig
+          for scheme in "bitchat (iOS)" "bitchat (macOS)"; do
+            xcodebuild -project bitchat.xcodeproj -scheme "$scheme" \
+              -configuration Release -showBuildSettings
+          done | python3 scripts/check_release_local_override.py . --build-settings -
+          rm Configs/Local.xcconfig
+
       - name: Build iOS (simulator, no signing)
         # Build both simulator architectures so CI validates every vendored
         # Arti simulator slice and the configuration that ships.

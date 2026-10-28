@@ -18,6 +18,7 @@ APP_GROUP_ID = group.org.samouraiworld.wesh.ios
 // the user turns it on.
 WESH_INTERNET_AVAILABLE = YES
 
-// Optional developer-local override (for example the internal .dev
-// identity), shared by build and archive. It stays untracked.
-#include? "Local.xcconfig"
+// No Local.xcconfig here: a Release build, and every archive sent to App
+// Store Connect, resolves from tracked settings only. Debug.xcconfig reads
+// the developer-local override; scripts/check_release_local_override.py
+// guards this in CI.
