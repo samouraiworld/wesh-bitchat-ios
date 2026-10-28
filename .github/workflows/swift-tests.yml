@@ -24,6 +24,10 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p "test_check_release_localizations.py" -v
           python3 scripts/check_release_localizations.py .
+      - name: Check export-compliance keys
+        run: |
+          python3 -m unittest discover -s scripts/tests -p "test_check_export_compliance_keys.py" -v
+          python3 scripts/check_export_compliance_keys.py .
       - name: Check App Store screenshot contracts
         run: |
           python3 -m unittest discover -s scripts/tests -p "test_store_screenshot_tooling.py" -v
