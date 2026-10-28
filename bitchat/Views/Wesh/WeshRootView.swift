@@ -407,6 +407,8 @@ struct WeshRootView: View {
         .background(theme.canvas.ignoresSafeArea())
         .onAppear { WeshKeepAwake.apply(keepsScreenOn) }
         .onChange(of: keepsScreenOn) { WeshKeepAwake.apply($0) }
+        // Never leave auto-lock off once the root view is gone.
+        .onDisappear { WeshKeepAwake.apply(false) }
         .onChange(of: scenePhase) { phase in
             // Sealed stores stay closed until first unlock; retry once visible.
             guard phase == .active else {
@@ -1722,11 +1724,13 @@ private struct WeshAppearanceSettings: View {
                 }
                 Text(PaveCopy.text("pave.wesh.appearance.qrScope"))
                     .font(.subheadline).foregroundStyle(theme.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(PaveCopy.text("pave.settings.keepScreenOnToggle"), isOn: $keepScreenOn)
-                        .frame(minHeight: 44).tint(theme.accent)
-                    Text(PaveCopy.text("pave.settings.keepScreenOnHelp"))
-                        .font(.subheadline).foregroundStyle(theme.secondary)
+                if WeshKeepAwake.isAvailable {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(PaveCopy.text("pave.settings.keepScreenOnToggle"), isOn: $keepScreenOn)
+                            .frame(minHeight: 44).tint(theme.accent)
+                        Text(PaveCopy.text("pave.settings.keepScreenOnHelp"))
+                            .font(.subheadline).foregroundStyle(theme.secondary)
+                    }
                 }
             }.padding(theme.contentInset)
         }.navigationTitle(PaveCopy.text("pave.settings.appearance")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.settings.appearance"))

@@ -19,6 +19,14 @@ struct WeshKeepAwakeTests {
         #expect(!WeshKeepAwake.isEnabled(in: defaults))
     }
 
+    @Test func theSettingIsOfferedOnlyWhereThereIsAnIdleTimer() {
+        #if os(iOS)
+        #expect(WeshKeepAwake.isAvailable)
+        #else
+        #expect(!WeshKeepAwake.isAvailable)
+        #endif
+    }
+
     @Test func theMeshCountsAsActiveOnlyInTheAppWithBluetoothOn() {
         #expect(WeshKeepAwake.meshActive(screen: .tabs, bluetooth: .poweredOn))
         #expect(!WeshKeepAwake.meshActive(screen: .tabs, bluetooth: .poweredOff))

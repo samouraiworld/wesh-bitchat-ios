@@ -12,6 +12,15 @@ import UIKit
 enum WeshKeepAwake {
     static let enabledKey = "wesh.keepScreenOn.enabled"
 
+    /// Only iOS has an idle timer to hold off; elsewhere the setting is not offered.
+    static var isAvailable: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: enabledKey)
     }
