@@ -82,4 +82,12 @@ struct BLEQueueContractTests {
         let hits = try offenders(matching: "messageQueue.asyncAfter")
         #expect(hits.isEmpty, "Engine delays must use BLEEngineScheduling so tests can drive protocol deadlines with a manual clock: \(hits)")
     }
+
+    /// The app-phase flag is written by lifecycle notifications on main and
+    /// read from bleQueue (CoreBluetooth callbacks, radio policy) and the
+    /// engine (receive path), so it must stay lock-backed, not a plain var.
+    @Test func appActiveFlagIsLockBacked() throws {
+        let hits = try offenders(matching: "var isAppActive: Bool =")
+        #expect(hits.isEmpty, "isAppActive crosses main, bleQueue and the engine; back it with a lock: \(hits)")
+    }
 }
