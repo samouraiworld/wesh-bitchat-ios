@@ -112,6 +112,20 @@ struct PaveCatalogTests {
         }
     }
 
+    /// The app asks for nothing: donations live on the website only.
+    @Test func copyNeverAsksForDonations() throws {
+        let pattern = try NSRegularExpression(pattern: #"\b(?:dons?|donations?|donate)\b"#, options: .caseInsensitive)
+        for (key, locales) in try Self.load("Pave.xcstrings") {
+            for value in locales.values.flatMap({ $0 }) {
+                let range = NSRange(value.startIndex..., in: value)
+                #expect(pattern.firstMatch(in: value, range: range) == nil, "\(key) asks for donations: \(value)")
+            }
+        }
+        for source in try Self.sources() {
+            #expect(!source.text.contains("/dons"), "\(source.name) links to the donation page")
+        }
+    }
+
     /// App Shortcut phrases use `AppShortcuts.strings`: the catalog form needs iOS 17.
     @Test func everySiriPhraseIsTranslated() throws {
         func phrases(_ locale: String) throws -> [String: String] {
