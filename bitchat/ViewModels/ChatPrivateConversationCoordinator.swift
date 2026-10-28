@@ -781,10 +781,15 @@ final class ChatPrivateConversationCoordinator {
 
         guard isActionMessage else { return message }
 
+        let body = String(message.content.dropFirst(2).dropLast(2))
+        // The screenshot notice keeps BitChat's English wire text; show it in this phone's language.
+        let content = WeshScreenshotNotice.nickname(inActionBody: body)
+            .map { WeshScreenshotNotice.peerLine(nickname: $0) } ?? body
+
         return BitchatMessage(
             id: message.id,
             sender: "system",
-            content: String(message.content.dropFirst(2).dropLast(2)),
+            content: content,
             timestamp: message.timestamp,
             isRelay: message.isRelay,
             originalSender: message.originalSender,

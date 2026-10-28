@@ -150,9 +150,9 @@ final class ChatLifecycleCoordinator {
         // notices remain a DM-only courtesy between the two people involved.
         guard let peerID = context.selectedPrivateChatPeer else { return }
 
-        let screenshotMessage = "* \(context.nickname) took a screenshot *"
-        // Only echo "you took a screenshot" when the peer was actually
-        // notified — the unconditional echo used to imply a notice that
+        let screenshotMessage = WeshScreenshotNotice.wireText(nickname: context.nickname)
+        // Only tell the user their contact was notified when the notice
+        // actually left — the unconditional echo used to imply a notice that
         // frequently was never sent (no established session).
         if sendPrivateScreenshotNotificationIfPossible(screenshotMessage, to: peerID) {
             appendPrivateScreenshotNotice(for: peerID)
@@ -281,7 +281,7 @@ private extension ChatLifecycleCoordinator {
     func appendPrivateScreenshotNotice(for peerID: PeerID) {
         let notice = BitchatMessage(
             sender: "system",
-            content: String(localized: "system.screenshot.you", defaultValue: "you took a screenshot", comment: "Local system line after your screenshot notice was sent to the DM peer"),
+            content: WeshScreenshotNotice.contactNotifiedLine(),
             timestamp: Date(),
             isRelay: false,
             originalSender: nil,

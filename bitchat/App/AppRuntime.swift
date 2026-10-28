@@ -428,7 +428,8 @@ private extension AppRuntime {
     func handleScreenshotCaptured() {
 
         switch Self.resolveScreenshotResponse(
-            isAppInfoPresented: appChromeModel.isAppInfoPresented
+            isAppInfoPresented: appChromeModel.isAppInfoPresented,
+            noticeEnabled: WeshScreenshotNotice.isEnabled()
         ) {
         case .ignore:
             break
@@ -452,7 +453,9 @@ extension AppRuntime {
         case forwardToChat
     }
 
-    nonisolated static func resolveScreenshotResponse(isAppInfoPresented: Bool) -> ScreenshotCaptureResponse {
-        isAppInfoPresented ? .ignore : .forwardToChat
+    /// With the notice turned off in Discretion, a screenshot stays on this phone.
+    nonisolated static func resolveScreenshotResponse(isAppInfoPresented: Bool,
+                                                      noticeEnabled: Bool) -> ScreenshotCaptureResponse {
+        isAppInfoPresented || !noticeEnabled ? .ignore : .forwardToChat
     }
 }

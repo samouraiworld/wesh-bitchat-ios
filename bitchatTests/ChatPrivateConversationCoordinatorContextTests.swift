@@ -1418,3 +1418,28 @@ struct ChatPrivateConversationCoordinatorContextTests {
         #expect(context.privateChats[convKey]?.first?.transport == .bluetooth)
     }
 }
+
+/// A received screenshot notice keeps the BitChat wire text and reads in the receiver's language.
+@MainActor
+struct ReceivedScreenshotNoticeTests {
+    @Test
+    func aContactsScreenshotNoticeBecomesALocalisedSystemLine() {
+        let coordinator = ChatPrivateConversationCoordinator(context: MockChatPrivateConversationContext())
+        let peerID = PeerID(str: "1122334455667788")
+        let received = BitchatMessage(
+            sender: "alice",
+            content: WeshScreenshotNotice.wireText(nickname: "alice"),
+            timestamp: Date(),
+            isRelay: false,
+            isPrivate: true,
+            recipientNickname: "me",
+            senderPeerID: peerID
+        )
+
+        let shown = coordinator.processActionMessage(received)
+
+        #expect(shown.sender == "system")
+        #expect(shown.id == received.id)
+        #expect(shown.content == WeshScreenshotNotice.peerLine(nickname: "alice"))
+    }
+}

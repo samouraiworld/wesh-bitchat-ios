@@ -2999,6 +2999,42 @@
         }
       }
     },
+    "pave.screenshot.contactNotified" : {
+      "comment" : "System line after your screenshot notice was sent to the private contact",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your contact was told about your screenshot."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre contact a été prévenu de votre capture d’écran."
+          }
+        }
+      }
+    },
+    "pave.screenshot.peer" : {
+      "comment" : "System line when a private contact took a screenshot; placeholder is the contact nickname",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ took a screenshot"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ a fait une capture d’écran"
+          }
+        }
+      }
+    },
     "pave.settings.about" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3267,6 +3303,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Profil"
+          }
+        }
+      }
+    },
+    "pave.settings.screenshotHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In a private conversation, your contact gets a short message when you take a screenshot."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dans une conversation privée, votre contact reçoit un court message quand vous faites une capture d’écran."
+          }
+        }
+      }
+    },
+    "pave.settings.screenshotToggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tell my contact about screenshots"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prévenir de mes captures d’écran"
           }
         }
       }

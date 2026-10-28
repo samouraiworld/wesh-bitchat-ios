@@ -441,7 +441,7 @@ struct ChatViewModelServiceLifecycleTests {
         // No session means no notice went out, so no local echo either —
         // an echo here would imply Alice was told when she wasn't.
         #expect(transport.sentPrivateMessages.isEmpty)
-        #expect(viewModel.privateChats[peerID]?.contains { $0.content == "you took a screenshot" } != true)
+        #expect(viewModel.privateChats[peerID]?.contains { $0.content == WeshScreenshotNotice.contactNotifiedLine() } != true)
     }
 }
 
@@ -1233,6 +1233,18 @@ struct ChatViewModelPanicTests {
         viewModel.panicClearAllData()
 
         #expect(NostrTransport.sharedAckPacer.eraseEpoch != before)
+    }
+
+    @Test @MainActor
+    func panicClearAllData_turnsTheScreenshotNoticeBackOn() {
+        let (viewModel, _) = makeTestableViewModel()
+        UserDefaults.standard.set(false, forKey: WeshScreenshotNotice.enabledKey)
+        defer { WeshScreenshotNotice.reset() }
+
+        viewModel.panicClearAllData()
+
+        #expect(UserDefaults.standard.object(forKey: WeshScreenshotNotice.enabledKey) == nil)
+        #expect(WeshScreenshotNotice.isEnabled())
     }
 
     @Test @MainActor

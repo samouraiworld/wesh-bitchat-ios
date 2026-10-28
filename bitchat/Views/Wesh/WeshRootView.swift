@@ -1814,6 +1814,7 @@ private struct WeshPrivacySettings: View {
     @State private var forgetContacts = false
     @State private var forgetFeedback = ""
     @AppStorage(NotificationPrivacySettings.hidePreviewsKey) private var hidePreviews = true
+    @AppStorage(WeshScreenshotNotice.enabledKey) private var screenshotNotice = true
     var body: some View {
         Form {
             Section {
@@ -1830,6 +1831,11 @@ private struct WeshPrivacySettings: View {
                 Toggle(PaveCopy.text("pave.settings.previewsToggle"), isOn: $hidePreviews).frame(minHeight: 44)
             } footer: {
                 Text(PaveCopy.text("pave.settings.previewsHelp"))
+            }.listRowBackground(theme.canvas)
+            Section {
+                Toggle(PaveCopy.text("pave.settings.screenshotToggle"), isOn: $screenshotNotice).frame(minHeight: 44)
+            } footer: {
+                Text(PaveCopy.text("pave.settings.screenshotHelp"))
             }.listRowBackground(theme.canvas)
         }.scrollContentBackground(.hidden).navigationTitle(PaveSettingsDestination.discretion.title).weshCanvas(title: PaveSettingsDestination.discretion.title)
             .alert(PaveCopy.text("pave.wesh.privacy.removeTitle"), isPresented: $forgetContacts) {
