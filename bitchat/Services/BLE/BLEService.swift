@@ -140,7 +140,14 @@ final class BLEService: NSObject {
     
     // Application state tracking (thread-safe)
     #if os(iOS)
-    var isAppActive: Bool = true  // Assume active initially
+    /// Written by lifecycle notifications on main, read from bleQueue
+    /// (CoreBluetooth callbacks, radio policy) and the engine (receive path).
+    private let appActiveLock = NSLock()
+    private var _isAppActive = true  // Assume active initially
+    var isAppActive: Bool {
+        get { appActiveLock.withLock { _isAppActive } }
+        set { appActiveLock.withLock { _isAppActive = newValue } }
+    }
     /// Last `UIApplication.shared.backgroundTimeRemaining` sampled on the
     /// main thread, cached so bleQueue status logs can read it without ever
     /// dispatching to main (see `captureBluetoothStatus` for the invariant).

@@ -35,23 +35,6 @@
         }
       }
     },
-    "pave.about.donate" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Donate"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Faire un don"
-          }
-        }
-      }
-    },
     "pave.about.licenseFont" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3075,13 +3058,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Source code, licenses, donations"
+            "value" : "Source code, licenses"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Code source, licences, dons"
+            "value" : "Code source, licences"
           }
         }
       }

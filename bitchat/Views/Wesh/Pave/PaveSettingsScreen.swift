@@ -137,10 +137,9 @@ struct PaveSettingsScreen: View {
     }
 }
 
-/// À propos: what Wesh is, where its code lives, and how to support it.
+/// À propos: what Wesh is, where its code lives, and its terms.
 struct PaveAboutScreen: View {
     static let sourceURL = URL(string: "https://github.com/samouraiworld/wesh-bitchat-ios")
-    static let donationsURL = URL(string: "https://wesh.samourai.app/dons")
 
     let version: String
     @Environment(\.paveTheme) private var theme
@@ -158,10 +157,6 @@ struct PaveAboutScreen: View {
                 VStack(spacing: PaveSpace.s3) {
                     if let sourceURL = Self.sourceURL {
                         Link(destination: sourceURL) { Text(PaveCopy.text("pave.about.source")) }
-                            .buttonStyle(.paveSecondary)
-                    }
-                    if let donationsURL = Self.donationsURL {
-                        Link(destination: donationsURL) { Text(PaveCopy.text("pave.about.donate")) }
                             .buttonStyle(.paveSecondary)
                     }
                     Link(destination: WeshLinks.terms) { Text(PaveCopy.text("pave.onboarding.readTerms")) }
