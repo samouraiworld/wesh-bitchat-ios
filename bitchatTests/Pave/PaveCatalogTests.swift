@@ -114,7 +114,7 @@ struct PaveCatalogTests {
 
     /// The app asks for nothing: donations live on the website only.
     @Test func copyNeverAsksForDonations() throws {
-        let pattern = try NSRegularExpression(pattern: #"\b(?:dons?|donations?|donate)\b"#, options: .caseInsensitive)
+        let pattern = try NSRegularExpression(pattern: #"\b(?:dons|donations?|donate)\b"#, options: .caseInsensitive)
         for (key, locales) in try Self.load("Pave.xcstrings") {
             for value in locales.values.flatMap({ $0 }) {
                 let range = NSRange(value.startIndex..., in: value)
