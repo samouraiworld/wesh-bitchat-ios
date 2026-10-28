@@ -306,10 +306,24 @@ struct WeshRootView: View {
     @State private var panicFeedback = ""
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
     @AppStorage(WeshWelcome.key) private var welcomed = false
+    @AppStorage(WeshKeepAwake.enabledKey) private var keepScreenOn = false
     @State private var selectedTab = 0
     @State private var keyboardVisible = false
     @Environment(\.scenePhase) private var scenePhase
     private var theme: WeshTheme { WeshTheme(appearance: appearance) }
+
+    private var screen: WeshRootScreen {
+        WeshRootScreen(
+            panicRecoveryBlocked: viewModel.panicRecoveryBlocked,
+            panicNetworkFenced: viewModel.panicNetworkFenced,
+            welcomed: welcomed
+        )
+    }
+
+    private var keepsScreenOn: Bool {
+        WeshKeepAwake.keepsScreenOn(enabled: keepScreenOn, phase: scenePhase,
+                                    meshActive: WeshKeepAwake.meshActive(screen: screen, bluetooth: chrome.bluetoothState))
+    }
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -318,11 +332,7 @@ struct WeshRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            switch WeshRootScreen(
-                panicRecoveryBlocked: viewModel.panicRecoveryBlocked,
-                panicNetworkFenced: viewModel.panicNetworkFenced,
-                welcomed: welcomed
-            ) {
+            switch screen {
             case .eraseRecovery:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -395,6 +405,10 @@ struct WeshRootView: View {
         .tint(theme.accent)
         .preferredColorScheme(theme.scheme)
         .background(theme.canvas.ignoresSafeArea())
+        .onAppear { WeshKeepAwake.apply(keepsScreenOn) }
+        .onChange(of: keepsScreenOn) { WeshKeepAwake.apply($0) }
+        // Never leave auto-lock off once the root view is gone.
+        .onDisappear { WeshKeepAwake.apply(false) }
         .onChange(of: scenePhase) { phase in
             // Sealed stores stay closed until first unlock; retry once visible.
             guard phase == .active else {
@@ -1677,6 +1691,7 @@ private struct WeshBlockedContacts: View {
 
 private struct WeshAppearanceSettings: View {
     @AppStorage("wesh.appearance.v1") private var appearance: WeshAppearance = .night
+    @AppStorage(WeshKeepAwake.enabledKey) private var keepScreenOn = false
     @Environment(\.weshTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
@@ -1709,6 +1724,14 @@ private struct WeshAppearanceSettings: View {
                 }
                 Text(PaveCopy.text("pave.wesh.appearance.qrScope"))
                     .font(.subheadline).foregroundStyle(theme.secondary)
+                if WeshKeepAwake.isAvailable {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(PaveCopy.text("pave.settings.keepScreenOnToggle"), isOn: $keepScreenOn)
+                            .frame(minHeight: 44).tint(theme.accent)
+                        Text(PaveCopy.text("pave.settings.keepScreenOnHelp"))
+                            .font(.subheadline).foregroundStyle(theme.secondary)
+                    }
+                }
             }.padding(theme.contentInset)
         }.navigationTitle(PaveCopy.text("pave.settings.appearance")).weshInlineTitle().weshCanvas(title: PaveCopy.text("pave.settings.appearance"))
     }
