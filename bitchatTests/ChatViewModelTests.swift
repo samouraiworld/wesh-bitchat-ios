@@ -1236,6 +1236,18 @@ struct ChatViewModelPanicTests {
     }
 
     @Test @MainActor
+    func panicClearAllData_turnsTheScreenshotNoticeBackOn() {
+        let (viewModel, _) = makeTestableViewModel()
+        UserDefaults.standard.set(false, forKey: WeshScreenshotNotice.enabledKey)
+        defer { WeshScreenshotNotice.reset() }
+
+        viewModel.panicClearAllData()
+
+        #expect(UserDefaults.standard.object(forKey: WeshScreenshotNotice.enabledKey) == nil)
+        #expect(WeshScreenshotNotice.isEnabled())
+    }
+
+    @Test @MainActor
     func panicClearAllData_withDefaultOperationsErasesKeychainAndMessages() {
         let keychain = MockKeychain()
         let (viewModel, _) = makeTestableViewModel(keychain: keychain)
