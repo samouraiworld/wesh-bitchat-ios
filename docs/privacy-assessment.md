@@ -87,10 +87,10 @@ Residual risk: Nostr relay retention and logging are outside project control. Pu
 `bitchat/PrivacyInfo.xcprivacy` declares:
 
 - UserDefaults: `CA92.1` for app-only preferences and `1C8F.1` for the shared app group
-- File timestamps/metadata: `C617.1` for app-container files and `3B52.1` for user-granted files
+- File timestamps/metadata: `C617.1` for app-container files (no user-picked files since file and media sharing were removed)
 - System boot time: `35F9.1` for elapsed-time deadlines and timers
 
-`bitchatShareExtension/PrivacyInfo.xcprivacy` declares app-group UserDefaults reason `1C8F.1`. Both manifests declare no tracking domains and no data collection by the app developer. They must remain bundled in their respective executable bundles.
+It declares no tracking and no tracking domains. Its collected data types match the published App Privacy label: Email Address, Emails or Text Messages, Customer Support and User ID, each linked to the user, not used for tracking, for App Functionality. The share extension and its manifest were retired. The manifest must remain bundled in the app.
 
 ## Locked and Seized Devices
 
@@ -114,7 +114,7 @@ The panic action clears identity/session state, preferences, location state, gro
 ## Release Review Checklist
 
 - Reconcile every new Application Support, UserDefaults, keychain, cache, or relay write with this assessment and `PRIVACY_POLICY.md`.
-- Re-scan required-reason APIs and validate both bundled `PrivacyInfo.xcprivacy` files before archive submission.
+- Re-scan required-reason APIs and validate the bundled `PrivacyInfo.xcprivacy` before archive submission.
 - Verify panic wipe reaches any newly added persistent store.
 - Treat geohash precision, bridge-cell changes, new relay tags, and announce fields as privacy-surface changes.
 - Re-run real-device Bluetooth, background/locked-device recovery, location revocation, and audio-route checks; simulators cannot validate the physical side of those behaviors.
