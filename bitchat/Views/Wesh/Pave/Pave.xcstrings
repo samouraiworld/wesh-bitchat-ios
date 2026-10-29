@@ -3000,19 +3000,19 @@
       }
     },
     "pave.screenshot.contactNotified" : {
-      "comment" : "System line after your screenshot notice was sent to the private contact",
+      "comment" : "Tentative local system line after attempting a private screenshot notice; delivery is not confirmed",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your contact was told about your screenshot."
+            "value" : "Your contact may receive a notice about this screenshot."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Votre contact a été prévenu de votre capture d’écran."
+            "value" : "Votre contact peut recevoir un avis de cette capture d’écran."
           }
         }
       }

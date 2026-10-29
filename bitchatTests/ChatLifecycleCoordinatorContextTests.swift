@@ -233,26 +233,25 @@ struct ChatLifecycleCoordinatorContextTests {
     }
 
     @Test @MainActor
-    func handleScreenshotCaptured_privateChat_echoesOnlyWhenPeerWasNotified() async {
+    func handleScreenshotCaptured_privateChat_echoesOnlyWhenRoutingWasAttempted() async {
         let context = MockChatLifecycleContext()
         let coordinator = ChatLifecycleCoordinator(context: context)
         let peerID = PeerID(str: "1122334455667788")
         context.selectedPrivateChatPeer = peerID
         context.nicknamesByPeerID[peerID] = "alice"
 
-        // No established session: nothing goes out, so nothing is echoed —
-        // a local "you took a screenshot" would imply the peer was told.
+        // No established session: no routing attempt and no local notice.
         coordinator.handleScreenshotCaptured()
         #expect(context.routedPrivateMessages.isEmpty)
         #expect(context.privateChats.isEmpty)
 
-        // Established session: the peer is notified and the echo appears.
+        // Established session: routing is attempted and the tentative local notice appears.
         context.noiseSessionStates[peerID] = .established
         coordinator.handleScreenshotCaptured()
         #expect(context.routedPrivateMessages.count == 1)
         #expect(context.routedPrivateMessages.first?.content == "* me took a screenshot *")
         #expect(context.routedPrivateMessages.first?.recipientNickname == "alice")
-        #expect(context.privateChats[peerID]?.map(\.content) == [WeshScreenshotNotice.contactNotifiedLine()])
+        #expect(context.privateChats[peerID]?.map(\.content) == [WeshScreenshotNotice.outgoingNoticeLine()])
         #expect(context.privateChats[peerID]?.first?.sender == "system")
     }
 

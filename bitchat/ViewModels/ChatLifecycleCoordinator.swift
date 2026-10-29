@@ -151,9 +151,8 @@ final class ChatLifecycleCoordinator {
         guard let peerID = context.selectedPrivateChatPeer else { return }
 
         let screenshotMessage = WeshScreenshotNotice.wireText(nickname: context.nickname)
-        // Only tell the user their contact was notified when the notice
-        // actually left — the unconditional echo used to imply a notice that
-        // frequently was never sent (no established session).
+        // An established session permits a routing attempt, not a delivery receipt.
+        // Keep the local line tentative and omit it when no attempt is possible.
         if sendPrivateScreenshotNotificationIfPossible(screenshotMessage, to: peerID) {
             appendPrivateScreenshotNotice(for: peerID)
         }
@@ -281,7 +280,7 @@ private extension ChatLifecycleCoordinator {
     func appendPrivateScreenshotNotice(for peerID: PeerID) {
         let notice = BitchatMessage(
             sender: "system",
-            content: WeshScreenshotNotice.contactNotifiedLine(),
+            content: WeshScreenshotNotice.outgoingNoticeLine(),
             timestamp: Date(),
             isRelay: false,
             originalSender: nil,
