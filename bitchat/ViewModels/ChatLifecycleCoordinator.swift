@@ -252,8 +252,8 @@ final class ChatLifecycleCoordinator {
 }
 
 private extension ChatLifecycleCoordinator {
-    /// Returns whether the notice actually went out, so the caller can keep
-    /// the local echo honest.
+    /// Returns true when a send attempt was handed to the router;
+    /// this is not a delivery receipt.
     func sendPrivateScreenshotNotificationIfPossible(_ message: String, to peerID: PeerID) -> Bool {
         guard let peerNickname = context.peerNickname(for: peerID) else { return false }
 
