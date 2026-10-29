@@ -35,8 +35,11 @@ struct WeshScreenshotNoticeTests {
         let locale = Locale(identifier: "fr")
         #expect(WeshScreenshotNotice.peerLine(nickname: "Renard 42", bundle: french, locale: locale)
             == "Renard 42 a fait une capture d’écran")
-        #expect(WeshScreenshotNotice.contactNotifiedLine(bundle: french, locale: locale)
-            == "Votre contact a été prévenu de votre capture d’écran.")
-        #expect(WeshScreenshotNotice.contactNotifiedLine().contains("contact"))
+        #expect(WeshScreenshotNotice.outgoingNoticeLine(bundle: french, locale: locale)
+            == "Votre contact peut recevoir un avis de cette capture d’écran.")
+        let englishPath = try #require(PaveCopy.bundle.path(forResource: "en", ofType: "lproj"))
+        let english = try #require(Bundle(path: englishPath))
+        #expect(WeshScreenshotNotice.outgoingNoticeLine(bundle: english, locale: Locale(identifier: "en"))
+            == "Your contact may receive a notice about this screenshot.")
     }
 }

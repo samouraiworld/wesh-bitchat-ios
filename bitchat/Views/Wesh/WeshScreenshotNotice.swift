@@ -1,6 +1,6 @@
 import Foundation
 
-/// The courtesy notice a private contact gets when you take a screenshot of the conversation.
+/// The courtesy notice attempted when you take a screenshot of a private conversation.
 ///
 /// On the wire it stays the BitChat action message `* <nickname> took a screenshot *`, in
 /// English: BitChat and earlier Wesh builds recognise that exact text and show it as a system
@@ -36,8 +36,8 @@ enum WeshScreenshotNotice {
         PaveCopy.text("pave.screenshot.peer", bundle: bundle, locale: locale, nickname)
     }
 
-    /// Shown to you once the notice has left for your contact.
-    static func contactNotifiedLine(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
+    /// Shown locally after attempting the notice; delivery to the contact is not confirmed.
+    static func outgoingNoticeLine(bundle: Bundle = PaveCopy.bundle, locale: Locale = .current) -> String {
         PaveCopy.text("pave.screenshot.contactNotified", bundle: bundle, locale: locale)
     }
 }
