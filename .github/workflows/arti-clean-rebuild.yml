@@ -27,10 +27,12 @@ jobs:
         with:
           persist-credentials: false
       # The runner image's preinstalled rustup drifts with image updates (it
-      # changed between the 2026-10-23 and 2026-11-04 xcode-27-arm64 images),
-      # so the audited bootstrap is installed here from a pinned hash rather
-      # than taken from the image. Only the rustup binary comes from this step:
-      # the rebuild still uses its own empty CARGO_HOME and RUSTUP_HOME.
+      # changed between the 2026-10-23 and 2026-11-04 xcode-27-arm64 images).
+      # Both the verifier and the unchanged build recipe resolve `rustup`
+      # through $HOME/.cargo/bin, so the audited bootstrap replaces the image's
+      # binary and proxies there: no new directory enters PATH, and the build
+      # runs under the same rustup the attestation records. The rebuild itself
+      # still uses its own empty CARGO_HOME and RUSTUP_HOME.
       - name: Install the audited rustup bootstrap
         env:
           RUSTUP_VERSION: 1.29.2
@@ -38,16 +40,22 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-          bootstrap="$RUNNER_TEMP/rustup-bootstrap"
-          mkdir -p "$bootstrap"
-          curl --proto '=https' --tlsv1.2 -fsSL -o "$bootstrap/rustup-init" \
+          download="$(mktemp -d "$RUNNER_TEMP/rustup-init.XXXXXX")"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$download/rustup-init" \
             "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/aarch64-apple-darwin/rustup-init"
-          echo "$RUSTUP_INIT_SHA256  $bootstrap/rustup-init" | shasum -a 256 -c -
-          chmod +x "$bootstrap/rustup-init"
-          CARGO_HOME="$bootstrap/cargo" RUSTUP_HOME="$bootstrap/rustup" \
-            "$bootstrap/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
-          "$bootstrap/cargo/bin/rustup" --version
-          echo "$bootstrap/cargo/bin" >> "$GITHUB_PATH"
+          echo "$RUSTUP_INIT_SHA256  $download/rustup-init" | shasum -a 256 -c -
+          chmod 700 "$download/rustup-init"
+          CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" \
+            "$download/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
+          rm -- "$download/rustup-init"
+          rmdir -- "$download"
+          installed="$(command -v rustup)"
+          test "$installed" = "$HOME/.cargo/bin/rustup"
+          version="$("$installed" --version 2>/dev/null)"
+          echo "$version"
+          case "$version" in "rustup $RUSTUP_VERSION "*) ;; *) exit 1 ;; esac
+          # Every proxy must now be the audited binary, not a leftover.
+          for proxy in cargo rustc; do cmp "$HOME/.cargo/bin/$proxy" "$installed"; done
       - name: Rebuild five architectures without restored build caches
         run: |
           set -euo pipefail
