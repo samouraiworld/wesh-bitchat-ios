@@ -18,6 +18,12 @@ SPEC.loader.exec_module(rebuild)
 
 class CleanRebuildComparisonTests(unittest.TestCase):
     def setUp(self):
+        # The rebuild reads these from the environment; keep the caller's out.
+        environment = mock.patch.dict(rebuild.os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for name in ("AUDITED_RUSTUP", "GITHUB_ACTIONS"):
+            rebuild.os.environ.pop(name, None)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -251,6 +257,74 @@ class CleanRebuildComparisonTests(unittest.TestCase):
                             rebuild.rebuild(checkout, work, report)
                         self.assertFalse(report.exists())
                 self.assertIn(["bash", "build-ios.sh"], invocations)
+
+
+class AuditedRustupTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        self.binary = self.home / ".cargo" / "bin" / "rustup"
+        self.binary.parent.mkdir(parents=True)
+
+    def resolve(self, named):
+        env = {} if named is None else {"AUDITED_RUSTUP": str(named)}
+        with mock.patch.dict(rebuild.os.environ, env, clear=False), \
+                mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            if named is None:
+                rebuild.os.environ.pop("AUDITED_RUSTUP", None)
+            return rebuild.audited_rustup()
+
+    def test_accepts_only_the_install_location_as_a_regular_file(self):
+        self.binary.write_bytes(b"bootstrap")
+        self.assertEqual(self.resolve(self.binary), str(self.binary))
+
+    def test_rejects_any_other_path(self):
+        other = self.home / "rustup"
+        other.write_bytes(b"other")
+        with self.assertRaises(ValueError):
+            self.resolve(other)
+
+    def test_requires_the_variable_under_ci_and_falls_back_locally(self):
+        with mock.patch.dict(rebuild.os.environ, {"GITHUB_ACTIONS": "true"}):
+            with self.assertRaises(ValueError):
+                self.resolve(None)
+        with mock.patch.dict(rebuild.os.environ, {"GITHUB_ACTIONS": "false"}), \
+                mock.patch.object(rebuild.shutil, "which", return_value="/local/rustup"):
+            self.assertEqual(self.resolve(None), "/local/rustup")
+
+    def test_home_bin_may_hold_only_the_audited_binary_and_its_copies(self):
+        self.binary.write_bytes(b"bootstrap")
+        (self.binary.parent / "cargo").write_bytes(b"bootstrap")
+        with mock.patch.dict(rebuild.os.environ, {"AUDITED_RUSTUP": str(self.binary)}), \
+                mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            rebuild.refuse_recipe_shadowing(str(self.binary))
+            (self.binary.parent / "xcrun").write_bytes(b"#!/bin/sh\n")
+            with self.assertRaisesRegex(ValueError, "xcrun"):
+                rebuild.refuse_recipe_shadowing(str(self.binary))
+            (self.binary.parent / "xcrun").unlink()
+            (self.binary.parent / "rustc").symlink_to(self.binary)
+            rebuild.refuse_recipe_shadowing(str(self.binary))
+            elsewhere = self.home / "elsewhere"
+            elsewhere.write_bytes(b"bootstrap")
+            (self.binary.parent / "rustdoc").symlink_to(elsewhere)
+            with self.assertRaisesRegex(ValueError, "rustdoc"):
+                rebuild.refuse_recipe_shadowing(str(self.binary))
+
+    def test_home_bin_is_not_checked_without_ci_naming_the_binary(self):
+        (self.binary.parent / "rustfmt-local").write_bytes(b"developer tool")
+        with mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            rebuild.os.environ.pop("AUDITED_RUSTUP", None)
+            rebuild.refuse_recipe_shadowing(str(self.binary))
+
+    def test_rejects_a_symlink_or_missing_file(self):
+        with self.assertRaises(ValueError):
+            self.resolve(self.binary)
+        target = self.home / "elsewhere"
+        target.write_bytes(b"other")
+        self.binary.symlink_to(target)
+        with self.assertRaises(ValueError):
+            self.resolve(self.binary)
 
 
 if __name__ == "__main__":
