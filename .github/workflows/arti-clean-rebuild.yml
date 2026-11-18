@@ -50,11 +50,11 @@ jobs:
           rm -- "$download/rustup-init"
           rmdir -- "$download"
           # The image may also carry a Homebrew rustup ahead of this one on
-          # PATH; put the audited install first, here and for later steps.
-          export PATH="$HOME/.cargo/bin:$PATH"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          installed="$(command -v rustup)"
-          test "$installed" = "$HOME/.cargo/bin/rustup"
+          # PATH, so the verifier is handed the audited binary by absolute
+          # path rather than resolving `rustup` itself.
+          installed="$HOME/.cargo/bin/rustup"
+          test -x "$installed"
+          echo "AUDITED_RUSTUP=$installed" >> "$GITHUB_ENV"
           version="$("$installed" --version 2>/dev/null)"
           echo "$version"
           case "$version" in "rustup $RUSTUP_VERSION "*) ;; *) exit 1 ;; esac

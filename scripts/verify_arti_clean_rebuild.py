@@ -223,7 +223,9 @@ def rebuild(checkout, work, report, timeout=None):
             for name in ("macosx", "iphoneos", "iphonesimulator")}
     if set(sdks.values()) != {"27.0"}:
         raise ValueError("Exact audited SDK versions are unavailable")
-    rustup = shutil.which("rustup")
+    # CI passes the hash-checked bootstrap by absolute path; PATH may hold
+    # another rustup ahead of it.
+    rustup = os.environ.get("AUDITED_RUSTUP") or shutil.which("rustup")
     rustup_version = output([rustup, "--version"], source, env) if rustup else ""
     if not rustup_version.startswith("rustup 1.29.2 "):
         raise ValueError("Audited rustup bootstrap version is unavailable")
