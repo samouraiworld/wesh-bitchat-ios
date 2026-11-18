@@ -164,6 +164,26 @@ def rebuild_timeout_seconds(explicit=None):
     return value
 
 
+# Tools build-ios.sh runs by name, other than the Rust toolchain: none of them
+# may come from $HOME/.cargo/bin, which the recipe puts first on PATH.
+RECIPE_TOOLS = ("xcodebuild", "xcrun", "python3", "strip", "bash", "cat", "cut", "du",
+                "mkdir", "mv", "rm")
+
+
+def recipe_resolution(tool, cwd, env):
+    """Where TOOL resolves on the recipe's PATH, or "" if it does not."""
+    return output(["bash", "-c", f'export PATH="$HOME/.cargo/bin:$PATH"; command -v {tool} || true'],
+                  cwd, env)
+
+
+def refuse_recipe_shadowing(cwd, env):
+    home_bin = Path.home() / ".cargo" / "bin"
+    for tool in RECIPE_TOOLS:
+        found = recipe_resolution(tool, cwd, env)
+        if found and Path(found).parent == home_bin:
+            raise ValueError(f"Recipe would use {tool} from {home_bin}")
+
+
 def audited_rustup():
     """The rustup to run: the bootstrap CI installed and hash-checked.
 
@@ -269,6 +289,10 @@ def rebuild(checkout, work, report, timeout=None):
     resolved = output(["bash", "-c", 'export PATH="$HOME/.cargo/bin:$PATH"; command -v cbindgen'], source, env)
     if Path(resolved) != cbindgen:
         raise ValueError("Recipe would use cbindgen outside the isolated installation")
+    # The probes above ran on the image PATH; the recipe puts $HOME/.cargo/bin
+    # first. Refuse if that would hand the recipe a different tool than the
+    # one probed, so what was verified is what the build runs.
+    refuse_recipe_shadowing(source, env)
     verify_files(source, inputs)
     run_owned(["bash", "build-ios.sh"], package, env, deadline, work)
     actual_inputs = verify_files(source, inputs)

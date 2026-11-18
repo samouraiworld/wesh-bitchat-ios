@@ -293,6 +293,16 @@ class AuditedRustupTests(unittest.TestCase):
                 mock.patch.object(rebuild.shutil, "which", return_value="/local/rustup"):
             self.assertEqual(self.resolve(None), "/local/rustup")
 
+    def test_recipe_tools_in_the_home_bin_directory_are_refused(self):
+        env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin"}
+        with mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            rebuild.refuse_recipe_shadowing(self.home, env)
+            fake = self.binary.parent / "xcrun"
+            fake.write_text("#!/bin/sh\n")
+            fake.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, "xcrun"):
+                rebuild.refuse_recipe_shadowing(self.home, env)
+
     def test_rejects_a_symlink_or_missing_file(self):
         with self.assertRaises(ValueError):
             self.resolve(self.binary)
