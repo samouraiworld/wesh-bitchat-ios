@@ -236,11 +236,10 @@ def rebuild(checkout, work, report, timeout=None):
         "RUSTC_VERSION": "1.96.0", "CBINDGEN_VERSION": "0.29.4",
         "BUILD_JOBS": "1", "KEEP_BUILD_CACHE": "0", "TMPDIR": str(temporary),
         "DEVELOPER_DIR": "/Applications/Xcode_27.app/Contents/Developer",
-        # The audited bootstrap's directory comes before the image's PATH, as
-        # in the build recipe, so nothing run under rustup reaches another
-        # rustup by name.
-        "PATH": os.pathsep.join(
-            (str(cargo_home / "bin"), str(Path.home() / ".cargo" / "bin"), os.environ["PATH"])),
+        # rustup itself is run by absolute path (audited_rustup), so PATH
+        # gains only the isolated install directory; $HOME/.cargo/bin is not
+        # put ahead of the image's tools for the probes below.
+        "PATH": str(cargo_home / "bin") + os.pathsep + os.environ["PATH"],
     })
     xcode = output(["xcodebuild", "-version"], source, env)
     if xcode != "Xcode 27.0\nBuild version 27A266a":
