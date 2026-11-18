@@ -293,15 +293,25 @@ class AuditedRustupTests(unittest.TestCase):
                 mock.patch.object(rebuild.shutil, "which", return_value="/local/rustup"):
             self.assertEqual(self.resolve(None), "/local/rustup")
 
-    def test_recipe_tools_in_the_home_bin_directory_are_refused(self):
-        env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin"}
-        with mock.patch.object(rebuild.Path, "home", return_value=self.home):
-            rebuild.refuse_recipe_shadowing(self.home, env)
-            fake = self.binary.parent / "xcrun"
-            fake.write_text("#!/bin/sh\n")
-            fake.chmod(0o755)
+    def test_home_bin_may_hold_only_the_audited_binary_and_its_copies(self):
+        self.binary.write_bytes(b"bootstrap")
+        (self.binary.parent / "cargo").write_bytes(b"bootstrap")
+        with mock.patch.dict(rebuild.os.environ, {"AUDITED_RUSTUP": str(self.binary)}), \
+                mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            rebuild.refuse_recipe_shadowing(str(self.binary))
+            (self.binary.parent / "xcrun").write_bytes(b"#!/bin/sh\n")
             with self.assertRaisesRegex(ValueError, "xcrun"):
-                rebuild.refuse_recipe_shadowing(self.home, env)
+                rebuild.refuse_recipe_shadowing(str(self.binary))
+            (self.binary.parent / "xcrun").unlink()
+            (self.binary.parent / "rustc").symlink_to(self.binary)
+            with self.assertRaisesRegex(ValueError, "rustc"):
+                rebuild.refuse_recipe_shadowing(str(self.binary))
+
+    def test_home_bin_is_not_checked_without_ci_naming_the_binary(self):
+        (self.binary.parent / "rustfmt-local").write_bytes(b"developer tool")
+        with mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            rebuild.os.environ.pop("AUDITED_RUSTUP", None)
+            rebuild.refuse_recipe_shadowing(str(self.binary))
 
     def test_rejects_a_symlink_or_missing_file(self):
         with self.assertRaises(ValueError):

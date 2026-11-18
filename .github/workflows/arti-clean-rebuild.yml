@@ -60,6 +60,13 @@ jobs:
           case "$version" in "rustup $RUSTUP_VERSION "*) ;; *) exit 1 ;; esac
           # Every proxy must now be the audited binary, not a leftover.
           for proxy in cargo rustc; do cmp "$HOME/.cargo/bin/$proxy" "$installed"; done
+          # The recipe puts this directory first on PATH, so it may hold
+          # nothing but the audited binary and its proxies: anything the image
+          # left there is removed for this job, and the verifier refuses to
+          # build if anything else appears.
+          for entry in "$HOME/.cargo/bin"/*; do
+            if [ -L "$entry" ] || ! cmp -s "$entry" "$installed"; then rm -f -- "$entry"; fi
+          done
       - name: Rebuild five architectures without restored build caches
         run: |
           set -euo pipefail

@@ -2,6 +2,7 @@
 """Rebuild isolated native inputs and compare, never refresh, the vendored files."""
 
 import argparse
+import filecmp
 import hashlib
 import json
 import os
@@ -164,24 +165,21 @@ def rebuild_timeout_seconds(explicit=None):
     return value
 
 
-# Tools build-ios.sh runs by name, other than the Rust toolchain: none of them
-# may come from $HOME/.cargo/bin, which the recipe puts first on PATH.
-RECIPE_TOOLS = ("xcodebuild", "xcrun", "python3", "strip", "bash", "cat", "cut", "du",
-                "mkdir", "mv", "rm")
+def refuse_recipe_shadowing(rustup):
+    """Refuse unless $HOME/.cargo/bin holds only RUSTUP and copies of it.
 
-
-def recipe_resolution(tool, cwd, env):
-    """Where TOOL resolves on the recipe's PATH, or "" if it does not."""
-    return output(["bash", "-c", f'export PATH="$HOME/.cargo/bin:$PATH"; command -v {tool} || true'],
-                  cwd, env)
-
-
-def refuse_recipe_shadowing(cwd, env):
+    build-ios.sh puts that directory first on PATH. If it holds nothing but
+    the audited rustup and its proxies (each byte-identical to it), no tool the
+    recipe runs by name can come from there, whatever names the recipe uses.
+    Checked only when CI names the audited binary: a developer's own
+    directory holds other tools by design.
+    """
+    if os.environ.get("AUDITED_RUSTUP") is None:
+        return
     home_bin = Path.home() / ".cargo" / "bin"
-    for tool in RECIPE_TOOLS:
-        found = recipe_resolution(tool, cwd, env)
-        if found and Path(found).parent == home_bin:
-            raise ValueError(f"Recipe would use {tool} from {home_bin}")
+    for entry in sorted(home_bin.iterdir()):
+        if entry.is_symlink() or not entry.is_file() or not filecmp.cmp(entry, rustup, shallow=False):
+            raise ValueError(f"{home_bin} holds {entry.name}, which is not the audited rustup")
 
 
 def audited_rustup():
@@ -247,7 +245,8 @@ def rebuild(checkout, work, report, timeout=None):
             "MACOSX_DEPLOYMENT_TARGET", "IPHONEOS_DEPLOYMENT_TARGET",
             "BASH_ENV", "ENV", "AR", "RANLIB", "BINDGEN_EXTRA_CLANG_ARGS",
             "AUDITED_RUSTUP",
-        ):
+        ) or name.startswith("BASH_FUNC_"):
+            # Exported shell functions would shadow the recipe's commands.
             env.pop(name)
     env.update({
         "CARGO_HOME": str(cargo_home), "RUSTUP_HOME": str(rustup_home),
@@ -292,9 +291,10 @@ def rebuild(checkout, work, report, timeout=None):
     # The probes above ran on the image PATH; the recipe puts $HOME/.cargo/bin
     # first. Refuse if that would hand the recipe a different tool than the
     # one probed, so what was verified is what the build runs.
-    refuse_recipe_shadowing(source, env)
+    refuse_recipe_shadowing(rustup)
     verify_files(source, inputs)
     run_owned(["bash", "build-ios.sh"], package, env, deadline, work)
+    refuse_recipe_shadowing(rustup)  # nothing may have appeared there during the build
     actual_inputs = verify_files(source, inputs)
     actual_artifacts = verify_tree(source, FRAMEWORK, artifacts)
     actual_header = digest(checked_path(source, HEADER))
