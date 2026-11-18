@@ -2,6 +2,7 @@
 """Rebuild isolated native inputs and compare, never refresh, the vendored files."""
 
 import argparse
+import filecmp
 import hashlib
 import json
 import os
@@ -164,6 +165,49 @@ def rebuild_timeout_seconds(explicit=None):
     return value
 
 
+def refuse_recipe_shadowing(rustup):
+    """Refuse unless $HOME/.cargo/bin holds only RUSTUP, copies of it, and
+    symlinks that resolve to it (rustup may make its proxies either way).
+
+    build-ios.sh puts that directory first on PATH. If it holds nothing but
+    the audited rustup and its proxies (each byte-identical to it), no tool the
+    recipe runs by name can come from there, whatever names the recipe uses.
+    Checked only when CI names the audited binary: a developer's own
+    directory holds other tools by design.
+    """
+    if os.environ.get("AUDITED_RUSTUP") is None:
+        return
+    home_bin = Path.home() / ".cargo" / "bin"
+    audited = Path(rustup).resolve()
+    for entry in sorted(home_bin.iterdir()):
+        if entry.is_symlink():
+            if entry.resolve() != audited:
+                raise ValueError(f"{home_bin} holds {entry.name}, a symlink away from the audited rustup")
+        elif not entry.is_file() or not filecmp.cmp(entry, rustup, shallow=False):
+            raise ValueError(f"{home_bin} holds {entry.name}, which is not the audited rustup")
+
+
+def audited_rustup():
+    """The rustup to run: the bootstrap CI installed and hash-checked.
+
+    CI names it in AUDITED_RUSTUP because PATH may hold another rustup ahead
+    of it. Only the one install location is accepted, as a regular file; the
+    caller still checks its version. Under GitHub Actions the variable is
+    required: a rustup found on PATH there is not the hash-checked one.
+    """
+    expected = Path.home() / ".cargo" / "bin" / "rustup"
+    named = os.environ.get("AUDITED_RUSTUP")
+    if named is None:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise ValueError("AUDITED_RUSTUP is required in CI")
+        return shutil.which("rustup")
+    if Path(named) != expected:
+        raise ValueError("AUDITED_RUSTUP must name the audited bootstrap location")
+    if expected.is_symlink() or not expected.is_file():
+        raise ValueError("Audited rustup bootstrap is not a regular file")
+    return str(expected)
+
+
 def rebuild(checkout, work, report, timeout=None):
     deadline = time.monotonic() + rebuild_timeout_seconds(timeout)
     commit = output(["git", "rev-parse", "HEAD"], checkout)
@@ -205,7 +249,9 @@ def rebuild(checkout, work, report, timeout=None):
             "CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS", "SDKROOT", "SCCACHE_DIR",
             "MACOSX_DEPLOYMENT_TARGET", "IPHONEOS_DEPLOYMENT_TARGET",
             "BASH_ENV", "ENV", "AR", "RANLIB", "BINDGEN_EXTRA_CLANG_ARGS",
-        ):
+            "AUDITED_RUSTUP",
+        ) or name.startswith("BASH_FUNC_"):
+            # Exported shell functions would shadow the recipe's commands.
             env.pop(name)
     env.update({
         "CARGO_HOME": str(cargo_home), "RUSTUP_HOME": str(rustup_home),
@@ -214,6 +260,9 @@ def rebuild(checkout, work, report, timeout=None):
         "RUSTC_VERSION": "1.96.0", "CBINDGEN_VERSION": "0.29.4",
         "BUILD_JOBS": "1", "KEEP_BUILD_CACHE": "0", "TMPDIR": str(temporary),
         "DEVELOPER_DIR": "/Applications/Xcode_27.app/Contents/Developer",
+        # rustup itself is run by absolute path (audited_rustup), so PATH
+        # gains only the isolated install directory; $HOME/.cargo/bin is not
+        # put ahead of the image's tools for the probes below.
         "PATH": str(cargo_home / "bin") + os.pathsep + os.environ["PATH"],
     })
     xcode = output(["xcodebuild", "-version"], source, env)
@@ -223,7 +272,7 @@ def rebuild(checkout, work, report, timeout=None):
             for name in ("macosx", "iphoneos", "iphonesimulator")}
     if set(sdks.values()) != {"27.0"}:
         raise ValueError("Exact audited SDK versions are unavailable")
-    rustup = shutil.which("rustup")
+    rustup = audited_rustup()
     rustup_version = output([rustup, "--version"], source, env) if rustup else ""
     if not rustup_version.startswith("rustup 1.29.2 "):
         raise ValueError("Audited rustup bootstrap version is unavailable")
@@ -244,8 +293,13 @@ def rebuild(checkout, work, report, timeout=None):
     resolved = output(["bash", "-c", 'export PATH="$HOME/.cargo/bin:$PATH"; command -v cbindgen'], source, env)
     if Path(resolved) != cbindgen:
         raise ValueError("Recipe would use cbindgen outside the isolated installation")
+    # The probes above ran on the image PATH; the recipe puts $HOME/.cargo/bin
+    # first. Refuse if that would hand the recipe a different tool than the
+    # one probed, so what was verified is what the build runs.
+    refuse_recipe_shadowing(rustup)
     verify_files(source, inputs)
     run_owned(["bash", "build-ios.sh"], package, env, deadline, work)
+    refuse_recipe_shadowing(rustup)  # nothing may have appeared there during the build
     actual_inputs = verify_files(source, inputs)
     actual_artifacts = verify_tree(source, FRAMEWORK, artifacts)
     actual_header = digest(checked_path(source, HEADER))
