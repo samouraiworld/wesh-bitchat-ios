@@ -49,6 +49,10 @@ jobs:
             "$download/rustup-init" -y --no-modify-path --profile minimal --default-toolchain none
           rm -- "$download/rustup-init"
           rmdir -- "$download"
+          # The image may also carry a Homebrew rustup ahead of this one on
+          # PATH; put the audited install first, here and for later steps.
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           installed="$(command -v rustup)"
           test "$installed" = "$HOME/.cargo/bin/rustup"
           version="$("$installed" --version 2>/dev/null)"
