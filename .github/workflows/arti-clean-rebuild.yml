@@ -28,10 +28,10 @@ jobs:
           persist-credentials: false
       # The runner image's preinstalled rustup drifts with image updates (it
       # changed between the 2026-10-23 and 2026-11-04 xcode-27-arm64 images).
-      # Both the verifier and the unchanged build recipe resolve `rustup`
-      # through $HOME/.cargo/bin, so the audited bootstrap replaces the image's
-      # binary and proxies there: no new directory enters PATH, and the build
-      # runs under the same rustup the attestation records. The rebuild itself
+      # The unchanged build recipe resolves `rustup` through $HOME/.cargo/bin,
+      # so the audited bootstrap replaces the image's binary and proxies there,
+      # and the verifier is handed the same binary by absolute path: the build
+      # runs under the rustup the attestation records. The rebuild itself
       # still uses its own empty CARGO_HOME and RUSTUP_HOME.
       - name: Install the audited rustup bootstrap
         env:

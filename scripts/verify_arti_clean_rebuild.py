@@ -169,11 +169,14 @@ def audited_rustup():
 
     CI names it in AUDITED_RUSTUP because PATH may hold another rustup ahead
     of it. Only the one install location is accepted, as a regular file; the
-    caller still checks its version.
+    caller still checks its version. Under GitHub Actions the variable is
+    required: a rustup found on PATH there is not the hash-checked one.
     """
     expected = Path.home() / ".cargo" / "bin" / "rustup"
     named = os.environ.get("AUDITED_RUSTUP")
     if named is None:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise ValueError("AUDITED_RUSTUP is required in CI")
         return shutil.which("rustup")
     if Path(named) != expected:
         raise ValueError("AUDITED_RUSTUP must name the audited bootstrap location")
@@ -233,7 +236,11 @@ def rebuild(checkout, work, report, timeout=None):
         "RUSTC_VERSION": "1.96.0", "CBINDGEN_VERSION": "0.29.4",
         "BUILD_JOBS": "1", "KEEP_BUILD_CACHE": "0", "TMPDIR": str(temporary),
         "DEVELOPER_DIR": "/Applications/Xcode_27.app/Contents/Developer",
-        "PATH": str(cargo_home / "bin") + os.pathsep + os.environ["PATH"],
+        # The audited bootstrap's directory comes before the image's PATH, as
+        # in the build recipe, so nothing run under rustup reaches another
+        # rustup by name.
+        "PATH": os.pathsep.join(
+            (str(cargo_home / "bin"), str(Path.home() / ".cargo" / "bin"), os.environ["PATH"])),
     })
     xcode = output(["xcodebuild", "-version"], source, env)
     if xcode != "Xcode 27.0\nBuild version 27A266a":

@@ -18,6 +18,12 @@ SPEC.loader.exec_module(rebuild)
 
 class CleanRebuildComparisonTests(unittest.TestCase):
     def setUp(self):
+        # The rebuild reads these from the environment; keep the caller's out.
+        environment = mock.patch.dict(rebuild.os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for name in ("AUDITED_RUSTUP", "GITHUB_ACTIONS"):
+            rebuild.os.environ.pop(name, None)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -278,6 +284,14 @@ class AuditedRustupTests(unittest.TestCase):
         other.write_bytes(b"other")
         with self.assertRaises(ValueError):
             self.resolve(other)
+
+    def test_requires_the_variable_under_ci_and_falls_back_locally(self):
+        with mock.patch.dict(rebuild.os.environ, {"GITHUB_ACTIONS": "true"}):
+            with self.assertRaises(ValueError):
+                self.resolve(None)
+        with mock.patch.dict(rebuild.os.environ, {"GITHUB_ACTIONS": "false"}), \
+                mock.patch.object(rebuild.shutil, "which", return_value="/local/rustup"):
+            self.assertEqual(self.resolve(None), "/local/rustup")
 
     def test_rejects_a_symlink_or_missing_file(self):
         with self.assertRaises(ValueError):
