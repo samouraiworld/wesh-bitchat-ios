@@ -304,7 +304,11 @@ class AuditedRustupTests(unittest.TestCase):
                 rebuild.refuse_recipe_shadowing(str(self.binary))
             (self.binary.parent / "xcrun").unlink()
             (self.binary.parent / "rustc").symlink_to(self.binary)
-            with self.assertRaisesRegex(ValueError, "rustc"):
+            rebuild.refuse_recipe_shadowing(str(self.binary))
+            elsewhere = self.home / "elsewhere"
+            elsewhere.write_bytes(b"bootstrap")
+            (self.binary.parent / "rustdoc").symlink_to(elsewhere)
+            with self.assertRaisesRegex(ValueError, "rustdoc"):
                 rebuild.refuse_recipe_shadowing(str(self.binary))
 
     def test_home_bin_is_not_checked_without_ci_naming_the_binary(self):

@@ -166,7 +166,8 @@ def rebuild_timeout_seconds(explicit=None):
 
 
 def refuse_recipe_shadowing(rustup):
-    """Refuse unless $HOME/.cargo/bin holds only RUSTUP and copies of it.
+    """Refuse unless $HOME/.cargo/bin holds only RUSTUP, copies of it, and
+    symlinks that resolve to it (rustup may make its proxies either way).
 
     build-ios.sh puts that directory first on PATH. If it holds nothing but
     the audited rustup and its proxies (each byte-identical to it), no tool the
@@ -177,8 +178,12 @@ def refuse_recipe_shadowing(rustup):
     if os.environ.get("AUDITED_RUSTUP") is None:
         return
     home_bin = Path.home() / ".cargo" / "bin"
+    audited = Path(rustup).resolve()
     for entry in sorted(home_bin.iterdir()):
-        if entry.is_symlink() or not entry.is_file() or not filecmp.cmp(entry, rustup, shallow=False):
+        if entry.is_symlink():
+            if entry.resolve() != audited:
+                raise ValueError(f"{home_bin} holds {entry.name}, a symlink away from the audited rustup")
+        elif not entry.is_file() or not filecmp.cmp(entry, rustup, shallow=False):
             raise ValueError(f"{home_bin} holds {entry.name}, which is not the audited rustup")
 
 

@@ -62,11 +62,17 @@ jobs:
           # nothing but the audited binary and its proxies: anything the image
           # left there is removed for this job, and the verifier refuses to
           # build if anything else appears.
+          # rustup may make its proxies as symlinks to itself; those are kept,
+          # any other symlink is not.
+          audited="$(realpath "$installed")"
           for entry in "$HOME/.cargo/bin"/*; do
-            if [ -L "$entry" ] || ! cmp -s "$entry" "$installed"; then rm -f -- "$entry"; fi
+            if [ -L "$entry" ]; then
+              [ "$(realpath "$entry")" = "$audited" ] || rm -f -- "$entry"
+            elif ! cmp -s "$entry" "$installed"; then
+              rm -f -- "$entry"
+            fi
           done
-          # Every proxy must now be the audited binary, not a leftover; a
-          # proxy made as a symlink was removed above, so this fails loudly.
+          # Every proxy must now be the audited binary, not a leftover.
           for proxy in cargo rustc; do cmp "$HOME/.cargo/bin/$proxy" "$installed"; done
       - name: Rebuild five architectures without restored build caches
         run: |
