@@ -164,6 +164,24 @@ def rebuild_timeout_seconds(explicit=None):
     return value
 
 
+def audited_rustup():
+    """The rustup to run: the bootstrap CI installed and hash-checked.
+
+    CI names it in AUDITED_RUSTUP because PATH may hold another rustup ahead
+    of it. Only the one install location is accepted, as a regular file; the
+    caller still checks its version.
+    """
+    expected = Path.home() / ".cargo" / "bin" / "rustup"
+    named = os.environ.get("AUDITED_RUSTUP")
+    if named is None:
+        return shutil.which("rustup")
+    if Path(named) != expected:
+        raise ValueError("AUDITED_RUSTUP must name the audited bootstrap location")
+    if expected.is_symlink() or not expected.is_file():
+        raise ValueError("Audited rustup bootstrap is not a regular file")
+    return str(expected)
+
+
 def rebuild(checkout, work, report, timeout=None):
     deadline = time.monotonic() + rebuild_timeout_seconds(timeout)
     commit = output(["git", "rev-parse", "HEAD"], checkout)
@@ -205,6 +223,7 @@ def rebuild(checkout, work, report, timeout=None):
             "CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS", "SDKROOT", "SCCACHE_DIR",
             "MACOSX_DEPLOYMENT_TARGET", "IPHONEOS_DEPLOYMENT_TARGET",
             "BASH_ENV", "ENV", "AR", "RANLIB", "BINDGEN_EXTRA_CLANG_ARGS",
+            "AUDITED_RUSTUP",
         ):
             env.pop(name)
     env.update({
@@ -223,9 +242,7 @@ def rebuild(checkout, work, report, timeout=None):
             for name in ("macosx", "iphoneos", "iphonesimulator")}
     if set(sdks.values()) != {"27.0"}:
         raise ValueError("Exact audited SDK versions are unavailable")
-    # CI passes the hash-checked bootstrap by absolute path; PATH may hold
-    # another rustup ahead of it.
-    rustup = os.environ.get("AUDITED_RUSTUP") or shutil.which("rustup")
+    rustup = audited_rustup()
     rustup_version = output([rustup, "--version"], source, env) if rustup else ""
     if not rustup_version.startswith("rustup 1.29.2 "):
         raise ValueError("Audited rustup bootstrap version is unavailable")

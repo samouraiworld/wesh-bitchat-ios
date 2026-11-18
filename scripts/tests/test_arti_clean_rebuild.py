@@ -253,5 +253,41 @@ class CleanRebuildComparisonTests(unittest.TestCase):
                 self.assertIn(["bash", "build-ios.sh"], invocations)
 
 
+class AuditedRustupTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        self.binary = self.home / ".cargo" / "bin" / "rustup"
+        self.binary.parent.mkdir(parents=True)
+
+    def resolve(self, named):
+        env = {} if named is None else {"AUDITED_RUSTUP": str(named)}
+        with mock.patch.dict(rebuild.os.environ, env, clear=False), \
+                mock.patch.object(rebuild.Path, "home", return_value=self.home):
+            if named is None:
+                rebuild.os.environ.pop("AUDITED_RUSTUP", None)
+            return rebuild.audited_rustup()
+
+    def test_accepts_only_the_install_location_as_a_regular_file(self):
+        self.binary.write_bytes(b"bootstrap")
+        self.assertEqual(self.resolve(self.binary), str(self.binary))
+
+    def test_rejects_any_other_path(self):
+        other = self.home / "rustup"
+        other.write_bytes(b"other")
+        with self.assertRaises(ValueError):
+            self.resolve(other)
+
+    def test_rejects_a_symlink_or_missing_file(self):
+        with self.assertRaises(ValueError):
+            self.resolve(self.binary)
+        target = self.home / "elsewhere"
+        target.write_bytes(b"other")
+        self.binary.symlink_to(target)
+        with self.assertRaises(ValueError):
+            self.resolve(self.binary)
+
+
 if __name__ == "__main__":
     unittest.main()
